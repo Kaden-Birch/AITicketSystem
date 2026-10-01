@@ -119,7 +119,8 @@ def effective(c,machine_id):
         row=c.execute('SELECT value FROM settings WHERE key=?',(key,)).fetchone()
         return json.loads(row[0]) if row else default
     result={**DEFAULTS,**setting('notification_policy',{}),'enabled':True,'minimum':setting('discord_minimum','medium'),'recovery':setting('discord_recovery',True),'scope':'global'}
-    group=c.execute('SELECT group_id FROM machine_groups WHERE machine_id=?',(machine_id,)).fetchone()
+    group=c.execute('SELECT m.group_id,g.name FROM machine_groups m JOIN notification_groups g ON g.id=m.group_id WHERE m.machine_id=?',(machine_id,)).fetchone()
+    result['group_name']=group['name'] if group else None
     scopes=([('group',group[0])] if group else [])+[('machine',machine_id)]
     for kind,identifier in scopes:
         row=c.execute('SELECT policy FROM notification_overrides WHERE scope_kind=? AND scope_id=?',(kind,identifier)).fetchone()

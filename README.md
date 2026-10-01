@@ -73,3 +73,5 @@ Milestone 13 adds conservative resource/outage relationships and explicit same-m
 Milestone 14 adds notification groups, per-machine/group overrides and visible effective policies, applied at enqueue, reminder/escalation and delivery time.
 
 Milestone 15 adds atomic full inventory configuration transfer, reviewed check activation, immutable incident archive downloads, archive history filters and login/security auditing. Imported credentials and execution authority remain unavailable until locally restored and reviewed.
+
+Milestone 16 adds budgeted AI preparation of recovery proposal text, immutable unverified drafts and reviewed conversion into the existing exact-approval broker. Update and recheck the Hermes companion/adapter before using this mode.

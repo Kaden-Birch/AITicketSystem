@@ -6,7 +6,7 @@ Connections use explicit application cluster namespaces. Create one for each act
 
 Test Connection separates API reachability, authentication outcome, inventory readability and effective permissions where available. A readable resource list may be filtered by privileges; it does not prove access to every guest/storage object. Permission gaps remain visible and are never repaired by broadening credentials. This milestone uses only GET `/version`, `/cluster/resources`, and `/access/permissions`. Installed compatibility remains unverified until explicitly configured against your environment.
 
-Discovery is manual and read-only. It lists nodes, VMs, LXCs and node-specific storage objects without creating machines or enabling checks. Endpoints assigned to the same namespace update the same resource records. Unknown resource types are ignored. Templates remain excluded.
+Discovery is read-only and supports manual or scheduled refresh. It lists nodes, VMs, LXCs and node-specific storage objects without creating machines or enabling checks. Endpoints assigned to the same namespace update the same resource records. Unknown resource types are ignored. Templates remain excluded.
 
 For each non-template resource, explicitly confirm a link to an existing machine or create a new machine. A Proxmox node and guest cannot share a machine identity. Linking an existing Linux-agent machine adds its Proxmox source without changing the agent credential or DHCP-based address observations. Choose expected state; intentional stopped guests default to stopped in the form. Storage checks monitor availability in this milestone, not capacity thresholds.
 

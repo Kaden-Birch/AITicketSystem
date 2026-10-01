@@ -202,6 +202,11 @@ def import_inventory(store,vault,document):
                         if name=='proxmox_connections':
                             for key in ('token_secret','ca'):
                                 row[key]=old[key]
+                        if name=='checks':
+                            before=json.loads(old['config'])
+                            old_definition={k:before[k] for k in CONFIG[row['kind']] if k in before}
+                            if old_definition!=original['config'] and c.execute('SELECT 1 FROM incident_sources s JOIN incidents i ON i.id=s.incident_id WHERE s.check_id=? AND i.closed IS NULL',(row['id'],)).fetchone():
+                                raise ValueError('An active incident source cannot change its check definition; use a new check identity.')
                         if name=='checks' and row['kind']=='proxmox':
                             before=json.loads(old['config']); after=json.loads(row['config'])
                             if before.get('url')!=after.get('url') or before.get('token_id')!=after.get('token_id'):

@@ -187,7 +187,7 @@ def create_app(data_dir=None, testing=False):
             abort(404)
         from .ai import meter
         from .handoff import view
-        return render_template('incident.html', merge_candidates=store.rows("SELECT id,severity,first_seen FROM incidents WHERE machine_id=? AND id<>? AND closed IS NULL AND status<>'Resolved'",(rows[0]['machine_id'],incident_id)), ownership=view(store, incident_id), handoff_request_id=uid(), proposals=[{**p,'data':json.loads(p['payload'])} for p in store.rows('SELECT * FROM action_proposals WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,))], action_agents=[{**a,'action_services':json.loads(a['capabilities']).get('action_services',{})} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))], workspace_request_id=uid(), workspace_messages=store.rows('SELECT m.*,j.state,j.mode FROM ai_messages m JOIN ai_jobs j ON j.id=m.job_id WHERE m.incident_id=? ORDER BY m.created DESC LIMIT 100', (incident_id,)), workspace_sources=store.rows('SELECT s.check_id,c.name FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=?',(incident_id,)), ai_jobs=store.rows('SELECT id,state,mode,created,summary,error FROM ai_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100', (incident_id,)), ai_meter=meter(store, incident_id), incident=rows[0], report=json.loads(rows[0]['report']), timeline=store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at', (incident_id,)), links=store.rows('SELECT * FROM incident_links WHERE left_id=? OR right_id=?',(incident_id,incident_id)), diagnostic_jobs=store.rows('SELECT * FROM diagnostic_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,)), diagnostic_agents=[{**a,'caps':json.loads(a['capabilities'])} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))])
+        return render_template('incident.html', recovery_drafts=[{**d,'data':json.loads(d['payload'])} for d in store.rows('SELECT d.*,a.proposal_id FROM recovery_drafts d LEFT JOIN draft_adoptions a ON a.job_id=d.job_id WHERE d.incident_id=? ORDER BY d.created DESC LIMIT 100',(incident_id,))], merge_candidates=store.rows("SELECT id,severity,first_seen FROM incidents WHERE machine_id=? AND id<>? AND closed IS NULL AND status<>'Resolved'",(rows[0]['machine_id'],incident_id)), ownership=view(store, incident_id), handoff_request_id=uid(), proposals=[{**p,'data':json.loads(p['payload'])} for p in store.rows('SELECT * FROM action_proposals WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,))], action_agents=[{**a,'action_services':json.loads(a['capabilities']).get('action_services',{})} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))], workspace_request_id=uid(), workspace_messages=store.rows('SELECT m.*,j.state,j.mode FROM ai_messages m JOIN ai_jobs j ON j.id=m.job_id WHERE m.incident_id=? ORDER BY m.created DESC LIMIT 100', (incident_id,)), workspace_sources=store.rows('SELECT s.check_id,c.name FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=?',(incident_id,)), ai_jobs=store.rows('SELECT id,state,mode,created,summary,error FROM ai_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100', (incident_id,)), ai_meter=meter(store, incident_id), incident=rows[0], report=json.loads(rows[0]['report']), timeline=store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at', (incident_id,)), links=store.rows('SELECT * FROM incident_links WHERE left_id=? OR right_id=?',(incident_id,incident_id)), diagnostic_jobs=store.rows('SELECT * FROM diagnostic_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,)), diagnostic_agents=[{**a,'caps':json.loads(a['capabilities'])} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))])
 
     @app.post('/incidents/<incident_id>/archive')
     @login_required
@@ -831,6 +831,22 @@ def create_app(data_dir=None, testing=False):
             c.execute('UPDATE agents SET action_credential_digest=? WHERE id=?',(digest(credential),agent_id))
             store.audit(c,'action.credential_rotated',agent_id)
         return render_template('action-credential.html',credential=credential)
+
+    @app.post('/incidents/<incident_id>/recovery-draft')
+    @login_required
+    def request_recovery_draft(incident_id):
+        from .recovery_drafts import request_draft
+        request_draft(store,vault,incident_id,request.form.get('agent_id'),request.form.get('service_id'),request.form.get('diagnostic_id'),request.form.get('request_id'))
+        return redirect(url_for('incident',incident_id=incident_id))
+
+    @app.post('/incidents/<incident_id>/recovery-draft/<job_id>/adopt')
+    @login_required
+    def adopt_recovery_draft(incident_id,job_id):
+        from .recovery_drafts import adopt
+        if request.form.get('reviewed')!='yes':
+            raise ValueError('Review the unverified AI draft before creating an approval-required proposal.')
+        adopt(store,incident_id,job_id)
+        return redirect(url_for('incident',incident_id=incident_id))
 
     @app.post('/incidents/<incident_id>/proposals')
     @login_required

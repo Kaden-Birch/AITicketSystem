@@ -50,14 +50,31 @@ def eligible(c, incident_id, agent_id, service_id, now, require_enabled=True):
     return incident,agent,unit,cfg
 
 
-def propose(store, incident_id, agent_id, service_id, diagnostic_id, rationale, impact, risk, alternatives, parent_id=None, now=None):
+def propose(store, incident_id, agent_id, service_id, diagnostic_id, rationale, impact, risk, alternatives, parent_id=None, now=None, draft_job_id=None):
     now=time.time() if now is None else now
     texts=[rationale,impact,risk,alternatives]
     if any(not isinstance(t,str) or not 1<=len(t.strip())<=1000 for t in texts):
         raise ValueError('Supply rationale, impact, risk and alternatives (1–1000 characters each).')
     with store.connect() as c:
         c.execute('BEGIN IMMEDIATE')
+        draft_data=None
+        if draft_job_id:
+            previous=c.execute('SELECT proposal_id FROM draft_adoptions WHERE job_id=?',(draft_job_id,)).fetchone()
+            if previous:
+                existing=c.execute('SELECT incident_id FROM action_proposals WHERE id=?',(previous[0],)).fetchone()
+                if existing[0]!=incident_id:
+                    raise ValueError('Draft belongs to another incident.')
+                return previous[0]
+            draft=c.execute("SELECT d.* FROM recovery_drafts d JOIN ai_jobs j ON j.id=d.job_id WHERE d.job_id=? AND d.incident_id=? AND j.state='completed'",(draft_job_id,incident_id)).fetchone()
+            if not draft or now-draft['created']>600:
+                raise ValueError('Draft is missing or stale; request a new draft with fresh evidence.')
+            draft_data=json.loads(draft['payload'])
+            target=draft_data['target']
+            if (target['agent_id'],target['service_id'],target['diagnostic_id'])!=(agent_id,service_id,diagnostic_id) or [draft_data['texts'][k] for k in ('rationale','impact','risk','alternatives')]!=texts:
+                raise ValueError('Draft target or text changed; create a separate manual proposal for revisions.')
         incident,agent,unit,cfg=eligible(c,incident_id,agent_id,service_id,now,require_enabled=False)
+        if draft_data and draft_data['target']['unit']!=unit:
+            raise ValueError('Service mapping changed; request a new draft.')
         proof(c,incident_id,agent_id,service_id,unit,diagnostic_id,now)
         version=1
         if parent_id:
@@ -68,10 +85,15 @@ def propose(store, incident_id, agent_id, service_id, diagnostic_id, rationale, 
             c.execute("UPDATE action_proposals SET state='superseded' WHERE id=?",(parent_id,))
         identifier=uid()
         document={'version':version,'incident_id':incident_id,'machine_id':incident['machine_id'],'agent_id':agent_id,'action':'service_restart','parameters':{'service_id':service_id,'unit':unit},'precondition_diagnostic':diagnostic_id,'rationale':redact(rationale.strip()),'impact':redact(impact.strip()),'risk':redact(risk.strip()),'alternatives':redact(alternatives.strip()),'verification':{'check_id':incident['check_id'],'method':'New service-status diagnostic plus fresh healthy incident sources after execution; no AI assertion proves recovery.'},'budget_impact':'No model call; one recovery attempt.','expires':now+600}
+        if draft_data:
+            document['origin']=draft_data['origin']
+            document['budget_impact']='AI drafting is recorded in the incident usage ledger; execution makes no model call.'
         payload=json.dumps(document,sort_keys=True,separators=(',',':'))
         fingerprint=hashlib.sha256(payload.encode()).hexdigest()
         c.execute("INSERT INTO action_proposals(id,incident_id,agent_id,version,parent_id,payload,payload_hash,state,created,expires) VALUES(?,?,?,?,?,?,?,'awaiting',?,?)",(identifier,incident_id,agent_id,version,parent_id,payload,fingerprint,now,now+600))
         store.timeline(c,incident_id,'action_proposed','Service restart proposed for '+unit+' · Proposal '+identifier+' · Hash '+fingerprint,actor='user',now=now)
+        if draft_job_id:
+            c.execute('INSERT INTO draft_adoptions VALUES(?,?)',(draft_job_id,identifier))
         store.audit(c,'action.proposed',identifier,{'payload_hash':fingerprint,'version':version})
         return identifier
 

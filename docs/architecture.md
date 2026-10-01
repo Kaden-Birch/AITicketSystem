@@ -12,7 +12,7 @@ Secrets are Fernet-encrypted using a separately managed key. Cookies require HTT
 
 ## Remaining scope
 
-Not implemented: automatic cluster identity verification, additional mount/swap rules, installed Hermes/provider validation, live AI diagnostic/tool execution, AI-authored recovery proposals, autonomous recovery and higher-risk remediation.
+Not implemented: automatic cluster identity verification, additional mount/swap rules, installed Hermes/provider validation, live AI diagnostic/tool execution, autonomous recovery and higher-risk remediation.
 
 Ordered transactional migrations upgrade schema 1 to schema 2 while preserving existing records. Failed upgrades roll back DDL and the version marker together. Newer schemas are rejected. History supports machine/severity/status/date filters and bounded pagination. GUI budget fields drive transactional per-call admission; AI defaults to disabled until installed bridge/provider controls are verified.
 
@@ -35,3 +35,5 @@ Schema 9 adds job modes, request fingerprints and immutable incident conversatio
 Schema 10 adds persistent incident ownership generations and immutable handoff checkpoints. All model calls validate the execution’s ownership generation. User takeover cancels active jobs atomically; terminal completion releases only its matching generation. AI and manual diagnostic queueing cannot overlap. Checkpoint resume creates a new budgeted read-only execution; it never replays old work.
 
 Schema 11 adds immutable recovery proposals, separate hashed action credentials and a default-protected machine role. The application broker and agent both enforce exact allowlisted service recovery; see action-broker.md.
+
+Schema 16 adds immutable recovery drafts and adoption bindings. AI supplies bounded text for administrator-selected targets, with shared budget admission; reviewed drafts become awaiting-approval proposals only after current preconditions are revalidated.

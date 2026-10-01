@@ -129,3 +129,17 @@ def test_admin_transfer_review_and_archive_ui(signed_in):
     assert client.get('/incidents/'+iid+'/archive-export').json['format']=='aiticket-incident-archive'
     assert client.post('/logout',data={'csrf':csrf}).status_code==302
     assert store.rows("SELECT * FROM audit WHERE action='security.logout'")
+
+
+def test_import_cannot_recover_existing_incident_against_changed_target(environment):
+    _,store,vault=environment
+    seed(store)
+    with store.connect() as c:
+        c.execute("UPDATE checks SET config=? WHERE id='c'",(json.dumps({'url':'https://192.0.2.10','status':200}),))
+    for n in range(3): observe(store,'c',False,{},now=100+n)
+    document=export_inventory(store)
+    document['tables']['checks'][0]['config']['url']='https://192.0.2.11'
+    with pytest.raises(ValueError,match='active incident source'):
+        import_inventory(store,vault,document)
+    assert json.loads(store.rows('SELECT config FROM checks')[0]['config'])['url']=='https://192.0.2.10'
+    assert store.rows('SELECT enabled FROM checks')[0]['enabled']==1

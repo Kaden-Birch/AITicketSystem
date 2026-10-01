@@ -163,7 +163,7 @@ def create_bridge(ledger, secret, compatible=False):
 
     @app.get('/v1/capabilities')
     def capabilities():
-        return signed({'version': 1, 'compatible': compatible, 'tools': [], 'model_gateway': True, 'workspace_modes': ['advice', 'exploration']})
+        return signed({'version': 1, 'compatible': compatible, 'tools': [], 'model_gateway': True, 'workspace_modes': ['advice', 'exploration','recovery_proposal']})
 
     @app.post('/v1/executions')
     def accept():

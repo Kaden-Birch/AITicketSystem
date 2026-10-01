@@ -1,6 +1,6 @@
 # Approval-required service recovery
 
-This milestone implements only `service_restart` for an explicitly allowlisted application service. Recovery is disabled by default on both sides. Live Ubuntu permissions, restart behavior and end-to-end verification remain untested. Hermes has no recovery tools and cannot execute these actions.
+This milestone implements only `service_restart` for an explicitly allowlisted application service. Recovery is disabled by default on both sides. Live Ubuntu permissions, restart behavior and end-to-end verification remain untested. Hermes has no recovery tools and cannot execute these actions. It can prepare unverified proposal text through the budgeted drafting workflow.
 
 Every machine starts protected. An administrator must explicitly classify an application target and list its service aliases in Recovery policy. Proxmox node/storage links remain excluded. Do not classify hosts, storage, DNS, domain controllers, the monitoring application or Hermes as application targets. Agent policy must map the same alias to the same exact `.service` unit. Monitoring and action credentials are separate; issuing a credential grants no operating-system privilege.
 
@@ -13,3 +13,11 @@ The attempt is consumed before delivery. A scoped dispatch token and separate ac
 A successful command result is only acceptance by the service manager. To verify recovery, request a fresh service-status diagnostic after execution and wait for fresh healthy observations from every attached enabled incident source. Without this evidence, successful execution remains unverified and fails verification after ten minutes. Missing execution results become unknown after ninety seconds; the target remains locked until independent recovery evidence arrives. Such evidence records recovery with execution outcome still unknown. No backup, host reboot or general shell action is available.
 
 Activation requires explicit application and local validation flags after deferred live testing. Changing the application target allowlist disables execution and clears validation. Disabling policy prevents new authorization; an action already executing may complete. Keep these controls disabled until Ubuntu permissions, TLS, separate credentials, restart behavior and recovery evidence have been validated by the administrator.
+
+## AI draft preparation
+
+Take manual control and choose the exact agent, allowlisted service and fresh failed-service diagnostic. The application binds the exact unit and action before queueing a `recovery_proposal` AI workspace run. It uses the shared incident/daily/monthly token and cost limits and requires validated AI plus updated bridge capability support. This explicit drafting request temporarily gives AI investigation ownership; ordinary background AI remains blocked during user ownership.
+
+The restricted Hermes adapter has no tools. It requests only four bounded JSON text fields: rationale, impact, risk and alternatives. Extra target/action/command/approval fields or malformed output fail closed while retaining actual model usage. A completed metered response becomes an immutable, clearly unverified draft, not an approved proposal. Cancelled/late completions do not create drafts.
+
+After completion, take manual control, review the displayed target/text and select Create proposal. The application rechecks current role, capability/unit mapping, allowlist, agent freshness and the original diagnostic. Diagnostics must still be within 180 seconds; stale evidence requires a new diagnostic and draft request. Draft adoption also expires after ten minutes. Adoption is transactional and idempotent. The proposal includes AI provenance and begins in `awaiting`; a separate exact-hash Approve once is required before execution. Execution preconditions, one-attempt limits and all broker/agent checks remain unchanged. AI text is never independent evidence of recovery.

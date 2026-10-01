@@ -53,9 +53,9 @@ def evidence_snapshot(value):
     return redact(value) if isinstance(value, str) else value
 
 
-def request_job(store, vault, incident_id, automatic=False, now=None, mode='triage', question='', request_id=None, source_ids=(), diagnostic_ids=(), resume_checkpoint=None, expected_generation=None):
+def request_job(store, vault, incident_id, automatic=False, now=None, mode='triage', question='', request_id=None, source_ids=(), diagnostic_ids=(), resume_checkpoint=None, expected_generation=None, recovery_target=None):
     now = time.time() if now is None else now
-    if mode not in ('triage', 'advice', 'exploration') or (automatic and mode != 'triage'):
+    if mode not in ('triage', 'advice', 'exploration','recovery_proposal') or (automatic and mode != 'triage'):
         raise ValueError('Unsupported AI workspace mode.')
     if mode != 'triage':
         import uuid
@@ -65,7 +65,7 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
             uuid.UUID(request_id)
         except (ValueError, TypeError, AttributeError):
             raise ValueError('Invalid request identity; reload the incident page.')
-    fingerprint = hashlib.sha256(json.dumps({'mode': mode, 'question': question.strip(), 'sources': sorted(source_ids), 'diagnostics': sorted(diagnostic_ids), 'checkpoint': resume_checkpoint, 'generation': expected_generation}, sort_keys=True).encode()).hexdigest()
+    fingerprint = hashlib.sha256(json.dumps({'mode': mode, 'question': question.strip(), 'sources': sorted(source_ids), 'diagnostics': sorted(diagnostic_ids), 'checkpoint': resume_checkpoint, 'generation': expected_generation,'recovery_target':recovery_target}, sort_keys=True).encode()).hexdigest()
     with store.connect() as c:
         c.execute('BEGIN IMMEDIATE')
         if request_id:
@@ -100,10 +100,16 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
             # Refresh selected sources; detached selections are explicitly omitted from the new run.
             source_ids = [identifier for identifier in checkpoint_data['source_ids'] if c.execute('SELECT 1 FROM incident_sources WHERE incident_id=? AND check_id=?',(incident_id,identifier)).fetchone()]
             diagnostic_ids = [identifier for identifier in checkpoint_data['diagnostic_ids'] if c.execute("SELECT 1 FROM diagnostic_jobs WHERE incident_id=? AND id=? AND state='completed'",(incident_id,identifier)).fetchone()]
-        elif ownership['owner']=='user':
+        elif ownership['owner']=='user' and mode!='recovery_proposal':
             if automatic:
                 return None
             raise ValueError('User has control; resume from the saved checkpoint before requesting AI.')
+        bound_target=None
+        if mode=='recovery_proposal':
+            from .recovery_drafts import target
+            bound_target=target(c,incident_id,recovery_target,now)
+        elif recovery_target is not None:
+            raise ValueError('Recovery targets are valid only for proposal drafting.')
         if automatic and (not bridge.get('automatic') or SEVERITIES.index(incident['severity']) < SEVERITIES.index(bridge['minimum'])):
             return None
         if c.execute("SELECT 1 FROM action_proposals WHERE incident_id=? AND state IN ('approved','dispatched','authorized','verifying','unknown')", (incident_id,)).fetchone():
@@ -126,6 +132,12 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
         if mode != 'triage':
             from .workspace import context
             evidence = context(c, incident, mode, question, source_ids, diagnostic_ids, checkpoint_data)
+            if bound_target:
+                document=json.loads(evidence)
+                document['recovery_target']=bound_target
+                evidence=json.dumps(document)
+                if len(evidence)>16000:
+                    raise ValueError('Recovery draft context exceeds limits.')
         c.execute('INSERT INTO ai_jobs(id,incident_id,state,created,expires,model,allowance,max_calls,evidence,credential_digest,credential,endpoint,bridge_secret,next_attempt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                   (job_id, incident_id, 'pending', now, now+3600, cfg['model'], min(cfg['triage_tokens'], cfg['incident_tokens']), min(cfg['max_turns'], 100), evidence, digest(token), vault.encrypt(token), bridge['url'].rstrip('/'), setting(c, 'hermes_secret'), now))
         c.execute('UPDATE ai_jobs SET mode=?,request_id=?,request_fingerprint=?,allowance=? WHERE id=?', (mode, request_id, fingerprint, min(cfg['triage_tokens'], cfg['incident_tokens']) if mode=='triage' else cfg['incident_tokens'], job_id))
@@ -303,6 +315,13 @@ def apply_status(store, job_id, document, now=None):
         state = 'failed' if document['state']=='not_found' else 'running' if document['state'] in ('accepted','running') else ('unknown' if document['state']=='interrupted' else document['state'])
         if state=='completed' and not c.execute('SELECT 1 FROM ai_calls WHERE job_id=?', (job_id,)).fetchone():
             raise ValueError('Completion without a metered model call is invalid.')
+        if state=='completed' and job['mode']=='recovery_proposal':
+            from .recovery_drafts import record
+            try:
+                summary=record(c,store,job,summary,now)
+            except ValueError as exc:
+                state='failed'
+                summary=str(exc)
         c.execute('UPDATE ai_jobs SET state=?,summary=?,completed=?,error=?,next_attempt=?,lease_until=NULL,lease_token=NULL WHERE id=?', (state, redact(summary), now if state in TERMINAL else None, 'Bridge interrupted; execution must not be replayed.' if state=='unknown' else None, now+30, job_id))
         if state in TERMINAL:
             from .handoff import release

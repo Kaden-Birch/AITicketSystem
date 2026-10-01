@@ -1,6 +1,14 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 15
+CURRENT_VERSION = 16
 MIGRATIONS = {
+    16: (
+        'CREATE TABLE recovery_drafts(job_id TEXT PRIMARY KEY REFERENCES ai_jobs(id),incident_id TEXT NOT NULL REFERENCES incidents(id),payload TEXT NOT NULL,created REAL NOT NULL)',
+        'CREATE TABLE draft_adoptions(job_id TEXT PRIMARY KEY REFERENCES recovery_drafts(job_id),proposal_id TEXT NOT NULL UNIQUE REFERENCES action_proposals(id))',
+        "CREATE TRIGGER draft_no_update BEFORE UPDATE ON recovery_drafts BEGIN SELECT RAISE(ABORT,'Draft is immutable'); END",
+        "CREATE TRIGGER draft_no_delete BEFORE DELETE ON recovery_drafts BEGIN SELECT RAISE(ABORT,'Draft is immutable'); END",
+        "CREATE TRIGGER adoption_no_update BEFORE UPDATE ON draft_adoptions BEGIN SELECT RAISE(ABORT,'Adoption is immutable'); END",
+        "CREATE TRIGGER adoption_no_delete BEFORE DELETE ON draft_adoptions BEGIN SELECT RAISE(ABORT,'Adoption is immutable'); END",
+    ),
     15: (
         'ALTER TABLE incidents ADD COLUMN archived_at REAL',
         'CREATE TABLE incident_archives(id TEXT PRIMARY KEY,incident_id TEXT NOT NULL REFERENCES incidents(id),created REAL NOT NULL,document TEXT NOT NULL)',

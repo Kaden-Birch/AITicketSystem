@@ -71,3 +71,12 @@ def test_merge_ui_requires_confirmation(signed_in):
     data['confirm']='yes'
     assert client.post('/incidents/'+ids['guest']+'/merge',data=data).status_code==302
     assert b'continuing incident' in client.get('/incidents/'+ids['http']).data
+
+
+def test_merge_severity_crossing_retains_notification(environment):
+    _,store,_=environment
+    store.save('discord_minimum','high')
+    ids=pair(store)
+    merge(store,ids['guest'],ids['http'],'Same failed application',now=12)
+    events=store.rows("SELECT * FROM deliveries WHERE incident_id=? AND state='pending'",(ids['http'],))
+    assert len(events)==1 and events[0]['event_key'].endswith(':severity-high')

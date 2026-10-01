@@ -50,5 +50,8 @@ def merge(store,source_id,target_id,reason,now=None):
         take_control(c,store,source_id)
         store.timeline(c,target_id,'manual_merge','Incident '+source_id+' merged by user: '+reason.strip(),actor='user',now=now)
         store.timeline(c,source_id,'merged_into','Grouped into '+target_id+'. Original evidence retained; this is not verified recovery.',actor='user',now=now)
+        if SEVERITIES.index(severity)>SEVERITIES.index(target['severity']):
+            from .engine import enqueue
+            enqueue(c,target_id,'severity-'+severity,now,store)
         store.audit(c,'incident.merged',target_id,{'source_id':source_id})
     return target_id

@@ -17,7 +17,7 @@
 | Hermes V2 signing | Implemented on companion requests/responses with durable execution polling; installed spike pending |
 | Durable AI completion and enforceable budgets | Fixture-tested signed execution states and transactional token/configured-price admission; restricted companion/adapter supplied; live Hermes/provider validation pending and default disabled |
 | Advice/exploration/handoff | Advice and selected-evidence exploration implemented with fixtures; checkpoint-based handoff implemented; live AI diagnostic execution pending |
-| Approval broker and recovery actions | Fixture-tested one-time approval for an allowlisted application service restart; disabled by default, live validation deferred. Autonomous recovery and higher-risk actions remain pending |
+| Approval broker and recovery actions | Fixture-tested one-time approval for an allowlisted application service restart; AI text drafting and reviewed conversion implemented; disabled by default, live validation deferred. Autonomous recovery and higher-risk actions remain pending |
 | Configuration/enrollment/workflow audit and immutable timelines | Implemented and tested, including login/security events |
 | Schema upgrades and incident history filters | Implemented and tested |
 | Retention and configuration export/import | Routine unattached samples and heartbeat deduplication cleanup implemented; nonsecret preferences transfer implemented; full inventory configuration transfer and immutable closed-incident archival implemented |
@@ -37,3 +37,5 @@ AI tests cover simultaneous admission, all ceiling types, zero allowances, unkno
 Handoff tests cover durable ownership/checkpoints, pause fencing, stale forms/generations, racing queue/takeover, atomic manual resolution, no overlapping diagnostics, resumed fresh evidence, duplicate resume, immutable snapshots and preservation of unknown budget reservations.
 
 Scheduled refresh is fixture-tested for new-resource review, persistent leases, disable fencing, visibility warnings, failures and migration identity preservation. Automatic cluster identity verification remains pending.
+
+AI recovery tests cover metered drafts, bound targets, malformed/extra-field rejection, cancellation, changed/protected targets, companion gating, immutable provenance, duplicate adoption and separate exact approval.
