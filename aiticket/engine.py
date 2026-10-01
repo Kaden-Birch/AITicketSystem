@@ -11,7 +11,7 @@ def observe(store, check_id, healthy, evidence, now=None, lease_token=None):
     with store.connect() as c:
         c.execute('BEGIN IMMEDIATE')
         check = c.execute('SELECT * FROM checks WHERE id=?', (check_id,)).fetchone()
-        if not check or (lease_token and check['lease_token'] != lease_token):
+        if not check or not check['enabled'] or (lease_token and check['lease_token'] != lease_token):
             return
         c.execute('INSERT INTO observations VALUES(?,?,?,?,?)', (uid(), check_id, now, 'healthy' if healthy else 'down', json.dumps(evidence)))
         failures = 0 if healthy else check['failures'] + 1
@@ -75,7 +75,7 @@ def claim(store, table, now=None, lease=60):
     with store.connect() as c:
         c.execute('BEGIN IMMEDIATE')
         if table == 'checks':
-            row = c.execute('SELECT * FROM checks WHERE next_run<=? AND (lease_until IS NULL OR lease_until<=?) ORDER BY next_run LIMIT 1', (now, now)).fetchone()
+            row = c.execute('SELECT * FROM checks WHERE enabled=1 AND next_run<=? AND (lease_until IS NULL OR lease_until<=?) ORDER BY next_run LIMIT 1', (now, now)).fetchone()
         else:
             c.execute("UPDATE deliveries SET state='expired',lease_until=NULL WHERE expires<=? AND state IN ('pending','leased')", (now,))
             row = c.execute("SELECT * FROM deliveries WHERE ((state='pending' AND next_attempt<=?) OR (state='leased' AND lease_until<=?)) AND expires>? ORDER BY created LIMIT 1", (now, now, now)).fetchone()

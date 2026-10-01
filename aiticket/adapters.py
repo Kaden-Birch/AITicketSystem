@@ -6,6 +6,9 @@ from .security import validate_url
 
 
 def probe(kind, config, vault, store=None):
+    if kind == 'proxmox_linked':
+        from .proxmox import linked_probe
+        return linked_probe(store,vault,config)
     if kind == 'tcp':
         with socket.create_connection((config['host'], int(config['port'])), timeout=5):
             return True, {'reason': 'TCP connection established'}

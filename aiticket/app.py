@@ -370,4 +370,77 @@ def create_app(data_dir=None, testing=False):
             c.execute('UPDATE agents SET last_seen=?,address=?,version=?,telemetry=? WHERE id=?', (now, request.remote_addr, str(payload.get('version', ''))[:32], json.dumps(telemetry), row['id']))
         return {'status': 'accepted', 'jobs': []}
 
+    @app.route('/proxmox', methods=['GET','POST'])
+    @login_required
+    def proxmox_inventory():
+        from .proxmox import Client, discover, link, unlink
+        if request.method == 'POST':
+            f=request.form
+            operation=f.get('operation')
+            if operation=='connection':
+                name=f.get('name','').strip()
+                cluster=f.get('cluster_id','')
+                cluster_name=f.get('cluster_name','').strip()
+                url=validate_url(f.get('url','').rstrip('/'),('https',))
+                token_id=f.get('token_id','').strip()
+                secret=f.get('token_secret','')
+                if not 1<=len(name)<=100 or not token_id or not secret or (not cluster and not 1<=len(cluster_name)<=100):
+                    raise ValueError('Supply a connection name, cluster namespace and read-only credentials.')
+                ca=f.get('ca','').strip() or None
+                if ca and (not Path(ca).is_absolute() or not Path(ca).is_file()):
+                    raise ValueError('CA must be an existing absolute path on the application server.')
+                with store.connect() as c:
+                    c.execute('BEGIN IMMEDIATE')
+                    if c.execute('SELECT 1 FROM proxmox_connections WHERE url=?',(url,)).fetchone():
+                        raise ValueError('Endpoint is already configured.')
+                    if cluster:
+                        if not c.execute('SELECT 1 FROM proxmox_clusters WHERE id=?',(cluster,)).fetchone():
+                            raise ValueError('Unknown cluster namespace.')
+                    else:
+                        cluster=uid()
+                        c.execute('INSERT INTO proxmox_clusters VALUES(?,?)',(cluster,cluster_name))
+                    connection_id=uid()
+                    c.execute('INSERT INTO proxmox_connections VALUES(?,?,?,?,?,?,?,NULL,NULL)',(connection_id,cluster,name,url,token_id,vault.encrypt(secret),ca))
+                    store.audit(c,'proxmox.connection_created',connection_id,{'cluster_id':cluster})
+            elif operation in ('test','discover'):
+                connection_id=f.get('connection_id')
+                rows=store.rows('SELECT * FROM proxmox_connections WHERE id=?',(connection_id,))
+                if not rows:
+                    abort(404)
+                if operation=='test':
+                    results=Client(rows[0],vault).test()
+                    with store.connect() as c:
+                        c.execute('UPDATE proxmox_connections SET last_test=? WHERE id=?',(json.dumps(results),connection_id))
+                        store.audit(c,'proxmox.connection_tested',connection_id)
+                else:
+                    try:
+                        count=discover(store,vault,connection_id)
+                    except Exception as exc:
+                        flash('Discovery failed: '+type(exc).__name__+'. Review reachability, trust and token permissions.')
+                    else:
+                        flash(str(count)+' visible resources refreshed. Linking requires confirmation.')
+            elif operation=='link':
+                if f.get('confirm')!='yes':
+                    raise ValueError('Confirm the exact machine/resource link.')
+                create_name=f.get('create_name','').strip() or None
+                if create_name and len(create_name)>100:
+                    raise ValueError('Machine name exceeds 100 characters.')
+                if create_name and f.get('machine_id'):
+                    raise ValueError('Select an existing machine OR create a new one.')
+                link(store,f.get('object_id'),f.get('machine_id'),f.get('expected'),create_name)
+            elif operation in ('unlink','retire'):
+                if f.get('confirm')!='yes':
+                    raise ValueError('Confirm unlinking or retirement; history will be preserved.')
+                unlink(store,f.get('object_id'),retire=operation=='retire')
+            else:
+                raise ValueError('Unknown inventory operation.')
+            return redirect(url_for('proxmox_inventory'))
+        connections=store.rows('SELECT id,cluster_id,name,url,ca,last_test,last_discovery FROM proxmox_connections ORDER BY name')
+        for connection in connections:
+            connection['test']=json.loads(connection['last_test']) if connection['last_test'] else None
+        return render_template('proxmox.html',connections=connections,
+            clusters=store.rows('SELECT * FROM proxmox_clusters ORDER BY name'),
+            objects=store.rows('SELECT o.*,m.name AS machine FROM proxmox_objects o LEFT JOIN machines m ON m.id=o.machine_id ORDER BY o.cluster_id,o.kind,o.object_key,o.generation'),
+            machines=store.rows('SELECT * FROM machines ORDER BY name'))
+
     return app

@@ -47,3 +47,5 @@ Tests use temporary databases, Flask clients and mocked providers. No live infra
 See [architecture and scope](docs/architecture.md), [acceptance coverage](docs/acceptance.md), [Hermes gate](docs/hermes-contract.md), [recovery guide](docs/recovery.md), and [execution results](docs/test-results.txt).
 
 Milestone 2 adds schema 1 → 2 migration, immutable audit/timeline storage, atomic settings saves, and paginated history filters. Existing evidence is retained; changes predating the audit milestone are not reconstructed.
+
+Milestone 3 adds [Proxmox discovery and linking](docs/proxmox.md): reusable connections, connection/capability results, explicit cluster namespaces, duplicate endpoint handling, migration-aware parents, template exclusion and source retirement/unlinking with preserved history.

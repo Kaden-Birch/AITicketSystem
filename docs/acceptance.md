@@ -5,7 +5,7 @@
 | Local administrator, CSRF, hashed password, safe rendering | Implemented and tested |
 | Secret encryption and no saved-secret redisplay | Implemented and tested |
 | HTTP/TCP checks | Implemented; provider tests |
-| Proxmox API / explicit resource checks | Partial; discovery and dedup pending |
+| Proxmox discovery / linked checks | Implemented with explicit cluster namespaces; duplicate endpoint, migration, stopped guest and retirement tests |
 | Failure/recovery thresholds | Implemented; sustained metrics pending |
 | Parent suppression, temporary maintenance | Implemented; schedules pending |
 | Deterministic incident before AI | Implemented and tested |
@@ -13,7 +13,7 @@
 | Durable outbox, leases, TTL, retry and obsolete delivery handling | Implemented and tested |
 | DHCP identity, duplicate heartbeat, revoke/re-enroll | Implemented and tested |
 | Linux structured diagnostics and durable action jobs | Pending; telemetry only |
-| Multi-source correlation and linking lifecycle | Pending |
+| Explicit Proxmox/agent machine linking and source unlink | Implemented; rich incident correlation remains pending |
 | Hermes V2 signing | Implemented helper; installed spike pending |
 | Durable AI completion and enforceable budgets | Pending; no dispatch |
 | Advice/exploration/handoff | Pending |

@@ -1,6 +1,13 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 2
+CURRENT_VERSION = 3
 MIGRATIONS = {
+    3: (
+        'ALTER TABLE checks ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1',
+        'CREATE TABLE proxmox_clusters(id TEXT PRIMARY KEY,name TEXT NOT NULL)',
+        '''CREATE TABLE proxmox_connections(id TEXT PRIMARY KEY,cluster_id TEXT NOT NULL REFERENCES proxmox_clusters(id),name TEXT NOT NULL,url TEXT NOT NULL UNIQUE,token_id TEXT NOT NULL,token_secret TEXT NOT NULL,ca TEXT,last_test TEXT,last_discovery REAL)''',
+        '''CREATE TABLE proxmox_objects(id TEXT PRIMARY KEY,cluster_id TEXT NOT NULL REFERENCES proxmox_clusters(id),kind TEXT NOT NULL,object_key TEXT NOT NULL,generation INTEGER NOT NULL,name TEXT NOT NULL,node TEXT,status TEXT,template INTEGER NOT NULL,present INTEGER NOT NULL,last_seen REAL NOT NULL,machine_id TEXT REFERENCES machines(id),check_id TEXT REFERENCES checks(id),UNIQUE(cluster_id,kind,object_key,generation))''',
+        "CREATE UNIQUE INDEX present_proxmox_object ON proxmox_objects(cluster_id,kind,object_key) WHERE present=1",
+    ),
     2: (
         '''CREATE TABLE audit(id TEXT PRIMARY KEY, at REAL NOT NULL, actor TEXT NOT NULL,
            action TEXT NOT NULL, target TEXT NOT NULL, details TEXT NOT NULL)''',
