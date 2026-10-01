@@ -8,7 +8,7 @@ Milestone 8 implements a durable application queue, a companion service on the H
 
 The adapter uses the published [`AIAgent` Python constructor and `run_conversation`](https://github.com/NousResearch/hermes-agent/blob/main/run_agent.py). It passes an empty toolset, disables context-file/memory/background-review loading, and points its model client at a credential scoped to one application execution. It checks that no tools were loaded and that the client routes to that execution's budget gateway before starting a conversation. Missing constructor options, unexpected tools/routing or incompatible completion schemas fail closed. No Hermes core file is patched. Current upstream source is a reference, not proof of compatibility with v0.20.0.
 
-Tool-free incident triage, advice chat and selected-evidence exploration are supported. It produces hypotheses and a read-only plan from a bounded deterministic report snapshot. It cannot fetch more diagnostics, execute actions, change incident health, resolve incidents, take over or mirror Telegram sessions. Live tool access, handoff and session mirroring remain later work.
+Tool-free incident triage, advice chat and selected-evidence exploration are supported. It produces hypotheses and a read-only plan from a bounded deterministic report snapshot. It cannot fetch more diagnostics, execute actions, change incident health, resolve incidents or mirror Telegram sessions. Live tool access and session mirroring remain later work. Manual checkpoint-based handoff is implemented in the application.
 
 ## Deployment on the Hermes VM
 
@@ -79,3 +79,15 @@ The last three completed exchanges are included, at most 1,000 characters per qu
 Advice/exploration use the total incident allowance as their run cap and share that cumulative ceiling with triage. Every underlying model call still reserves input/output and configured-price cost against the global ceilings and call count. Unknown usage remains fenced. They have no diagnostic/tool or mutation permissions.
 
 Update the companion bridge and runner together for workspace support, then run the signed compatibility check. Its `workspace_modes` capability must advertise the requested mode; a legacy triage-only bridge is refused. Runtime/provider gates and the deferred live validation requirement remain in force.
+
+## Investigation ownership and handoff (schema 10)
+
+Each incident has a persistent owner: available, user or AI. Queuing AI acquires a new ownership generation in the same transaction as the job; every model request checks that generation. Only the matching job can release AI ownership on completion, failure, cancellation or expiry. Old executions cannot release a newer owner or make another model call.
+
+“Pause AI / take control” atomically cancels active AI jobs, saves an immutable checkpoint and gives the user ownership. The checkpoint records the last question, selected source/diagnostic identities, bounded previous findings and redacted evidence at pause. Model requests already admitted can finish and reconcile usage; pause cannot undo provider work. Late bridge completion does not restore control or reopen a cancelled job. Unknown usage remains reserved and visible globally. Saving notes and acknowledging incidents is permitted during AI work; manual resolution also takes user control and cancels AI in the same transaction.
+
+New manual diagnostic requests are refused while AI owns the investigation. AI is refused while unexpired queued/leased manual diagnostics exist. During user ownership, new explicit and automatic AI work is blocked until resume. This coordinates application investigation work; it cannot lock out commands someone independently runs on a host.
+
+Resume checks the displayed ownership generation and checkpoint identity, revalidates AI configuration and active incident state, and queues a new read-only exploration using fresh incident facts and still-attached/completed selected evidence. Historical checkpoint excerpts are limited to 2,000 characters each and labelled as historical. Removed selections are omitted; the immutable saved checkpoint retains their identities. Bounded workspace context can still reject overly large selections. Resume never re-executes the prior job or its diagnostics. It uses current budgets, preserves unknown usage holds, and has a stable request UUID for duplicate submission protection. Failed resume queue validation leaves user ownership and the checkpoint intact. Later per-call budget rejection stops the new execution; its terminal result releases AI ownership while preserving the checkpoint.
+
+The incident page shows ownership, queue/bridge/execution waiting status and global unknown-usage blocks. Control and checkpoints survive application restart. No additional Hermes tool permissions or new bridge endpoint are introduced. Live pause/provider behavior remains part of the deferred installed-version validation.

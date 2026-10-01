@@ -25,6 +25,9 @@ def request_job(store,agent_id,incident_id,operation,service=None,now=None):
         incident=c.execute('SELECT * FROM incidents WHERE id=?',(incident_id,)).fetchone()
         if not agent or not incident or agent['machine_id']!=incident['machine_id']:
             raise ValueError('Diagnostic target must belong to this incident')
+        from .handoff import control
+        if control(c, incident_id)['owner']=='ai':
+            raise ValueError('AI owns this investigation; take control before requesting diagnostics.')
         capabilities=json.loads(agent['capabilities'])
         if operation not in capabilities.get('operations',[]):
             raise ValueError('Agent does not advertise this operation')

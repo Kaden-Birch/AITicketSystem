@@ -1,6 +1,14 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 9
+CURRENT_VERSION = 10
 MIGRATIONS = {
+    10: (
+        'ALTER TABLE ai_jobs ADD COLUMN control_generation INTEGER NOT NULL DEFAULT 0',
+        """CREATE TABLE incident_control(incident_id TEXT PRIMARY KEY REFERENCES incidents(id),owner TEXT NOT NULL DEFAULT 'available',generation INTEGER NOT NULL DEFAULT 0,checkpoint_id TEXT,updated REAL NOT NULL)""",
+        """CREATE TABLE handoff_checkpoints(id TEXT PRIMARY KEY,incident_id TEXT NOT NULL REFERENCES incidents(id),job_id TEXT REFERENCES ai_jobs(id),created REAL NOT NULL,snapshot TEXT NOT NULL)""",
+        "INSERT INTO incident_control SELECT id,CASE WHEN EXISTS(SELECT 1 FROM ai_jobs WHERE incident_id=incidents.id AND state IN ('pending','dispatching','running','unknown')) THEN 'ai' ELSE 'available' END,0,NULL,last_seen FROM incidents",
+        "CREATE TRIGGER checkpoints_no_update BEFORE UPDATE ON handoff_checkpoints BEGIN SELECT RAISE(ABORT,'Checkpoint is immutable'); END",
+        "CREATE TRIGGER checkpoints_no_delete BEFORE DELETE ON handoff_checkpoints BEGIN SELECT RAISE(ABORT,'Checkpoint is immutable'); END",
+    ),
     9: (
         "ALTER TABLE ai_jobs ADD COLUMN mode TEXT NOT NULL DEFAULT 'triage'",
         'ALTER TABLE ai_jobs ADD COLUMN request_id TEXT',

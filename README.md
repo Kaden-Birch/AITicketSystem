@@ -61,3 +61,5 @@ Milestone 7 adds [administration and recovery](docs/recovery.md): routine-sample
 Milestone 8 adds [Hermes orchestration and budget admission](docs/hermes-contract.md), a companion bridge and restricted tool-free adapter, signed durable status polling, usage/reservation meters and cancellation. The installed Hermes v0.20.0 and live provider remain untested; runtime/provider verification must remain unchecked until those deferred tests pass.
 
 Milestone 9 adds incident-scoped advice chat and selected-evidence exploration, immutable conversations, duplicate submission protection, and shared incident/global budget enforcement. Exploration analyzes already completed read-only diagnostics; it does not execute tools. Update the companion bridge alongside the application. Live testing remains deferred.
+
+Milestone 10 adds persistent manual/AI investigation ownership, pause/take-control, immutable checkpoints and fresh read-only resume. Ownership generations fence old executions; queued manual diagnostics and AI investigations cannot overlap. Unknown provider usage stays reserved. Live testing remains deferred.

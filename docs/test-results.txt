@@ -1,6 +1,6 @@
-136 passed in 15.22s
+148 passed in 15.62s
 
 Local Python 3.14.6; temporary databases, fake Hermes adapters and mocked external providers.
-Milestone 9 covers schema 8→9 AI-job preservation, incident-scoped selected evidence/results, redaction, duplicate submission fingerprints, active execution locks, immutable/durable conversations, workspace prompt restrictions, shared cumulative budgets, zero-triage advice and UI auth/CSRF.
-Earlier monitoring, migration, credential recovery, bridge restart and budget-gateway tests remain passing.
-No live Hermes/model/Discord/infrastructure or backup endpoint contacted. Installed Hermes/provider, Ubuntu and Docker runtime validation remain deferred; AI defaults disabled.
+Milestone 10 covers schema 9→10 active-job preservation, durable ownership/checkpoints, pause fencing, stale control generations, resume with fresh evidence, duplicate resume, concurrent takeover/queue, diagnostic overlap prevention, atomic manual resolution, unknown usage preservation and immutable checkpoints.
+Earlier monitoring, workspace, recovery, bridge and budget-gateway tests remain passing.
+No live Hermes/model/Discord/infrastructure or backup endpoint contacted. Live runtime/deployment validation remains deferred; AI defaults disabled.

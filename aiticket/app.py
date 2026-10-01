@@ -175,7 +175,8 @@ def create_app(data_dir=None, testing=False):
         if not rows:
             abort(404)
         from .ai import meter
-        return render_template('incident.html', workspace_request_id=uid(), workspace_messages=store.rows('SELECT m.*,j.state,j.mode FROM ai_messages m JOIN ai_jobs j ON j.id=m.job_id WHERE m.incident_id=? ORDER BY m.created DESC LIMIT 100', (incident_id,)), workspace_sources=store.rows('SELECT s.check_id,c.name FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=?',(incident_id,)), ai_jobs=store.rows('SELECT id,state,mode,created,summary,error FROM ai_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100', (incident_id,)), ai_meter=meter(store, incident_id), incident=rows[0], report=json.loads(rows[0]['report']), timeline=store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at', (incident_id,)), links=store.rows('SELECT * FROM incident_links WHERE left_id=? OR right_id=?',(incident_id,incident_id)), diagnostic_jobs=store.rows('SELECT * FROM diagnostic_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,)), diagnostic_agents=[{**a,'caps':json.loads(a['capabilities'])} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))])
+        from .handoff import view
+        return render_template('incident.html', ownership=view(store, incident_id), handoff_request_id=uid(), workspace_request_id=uid(), workspace_messages=store.rows('SELECT m.*,j.state,j.mode FROM ai_messages m JOIN ai_jobs j ON j.id=m.job_id WHERE m.incident_id=? ORDER BY m.created DESC LIMIT 100', (incident_id,)), workspace_sources=store.rows('SELECT s.check_id,c.name FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=?',(incident_id,)), ai_jobs=store.rows('SELECT id,state,mode,created,summary,error FROM ai_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100', (incident_id,)), ai_meter=meter(store, incident_id), incident=rows[0], report=json.loads(rows[0]['report']), timeline=store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at', (incident_id,)), links=store.rows('SELECT * FROM incident_links WHERE left_id=? OR right_id=?',(incident_id,incident_id)), diagnostic_jobs=store.rows('SELECT * FROM diagnostic_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,)), diagnostic_agents=[{**a,'caps':json.loads(a['capabilities'])} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))])
 
     @app.post('/incidents/<incident_id>/note')
     @login_required
@@ -192,6 +193,8 @@ def create_app(data_dir=None, testing=False):
             store.timeline(c, incident_id, operation, text, actor='user')
             store.audit(c, 'incident.' + operation, incident_id)
             if operation == 'resolve':
+                from .handoff import take_control
+                take_control(c, store, incident_id)
                 # Keep the condition attached; no endless reopening while it is unhealthy.
                 report = json.loads(row['report'])
                 report['manual_resolution'] = True
@@ -660,6 +663,19 @@ def create_app(data_dir=None, testing=False):
     def investigate(incident_id):
         from .ai import request_job
         request_job(store, vault, incident_id)
+        return redirect(url_for('incident', incident_id=incident_id))
+
+    @app.post('/incidents/<incident_id>/handoff')
+    @login_required
+    def handoff(incident_id):
+        from .handoff import pause, resume
+        generation = int(request.form.get('generation', '-1'))
+        if request.form.get('operation')=='pause':
+            pause(store, incident_id, generation)
+        elif request.form.get('operation')=='resume':
+            resume(store, vault, incident_id, request.form.get('checkpoint_id'), generation, request.form.get('request_id'))
+        else:
+            raise ValueError('Unknown handoff operation.')
         return redirect(url_for('incident', incident_id=incident_id))
 
     @app.post('/incidents/<incident_id>/workspace')

@@ -16,7 +16,7 @@
 | Explicit Proxmox/agent machine linking and source unlink | Implemented; guest-stop/agent correlation implemented; broader metric correlation pending |
 | Hermes V2 signing | Implemented on companion requests/responses with durable execution polling; installed spike pending |
 | Durable AI completion and enforceable budgets | Fixture-tested signed execution states and transactional token/configured-price admission; restricted companion/adapter supplied; live Hermes/provider validation pending and default disabled |
-| Advice/exploration/handoff | Advice and selected-evidence exploration implemented with fixtures; live AI diagnostic execution and handoff pending |
+| Advice/exploration/handoff | Advice and selected-evidence exploration implemented with fixtures; checkpoint-based handoff implemented; live AI diagnostic execution pending |
 | Approval broker and recovery actions | Pending; all mutations unavailable |
 | Configuration/enrollment/workflow audit and immutable timelines | Implemented and tested; login/security-event audit pending |
 | Schema upgrades and incident history filters | Implemented and tested |
@@ -32,4 +32,6 @@ Maintenance/notification tests cover timezone boundaries, inherited scope, prese
 
 Password change/console recovery, session invalidation, agent credential rotation and offline key rotation implemented with fixture tests. Live recovery drills remain deferred.
 
-AI tests cover simultaneous admission, all ceiling types, zero allowances, unknown-usage holds across dates/cancellation, capped provider forwarding, usage/price reconciliation, tools/model restrictions, signed freshness, duplicate results, uncertain-dispatch polling, bridge restart fencing, isolated environment and activation gates. Live AI diagnostic execution, handoff and action approvals remain absent.
+AI tests cover simultaneous admission, all ceiling types, zero allowances, unknown-usage holds across dates/cancellation, capped provider forwarding, usage/price reconciliation, tools/model restrictions, signed freshness, duplicate results, uncertain-dispatch polling, bridge restart fencing, isolated environment and activation gates. Live AI diagnostic execution and action approvals remain absent.
+
+Handoff tests cover durable ownership/checkpoints, pause fencing, stale forms/generations, racing queue/takeover, atomic manual resolution, no overlapping diagnostics, resumed fresh evidence, duplicate resume, immutable snapshots and preservation of unknown budget reservations.

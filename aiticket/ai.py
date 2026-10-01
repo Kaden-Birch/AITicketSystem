@@ -53,7 +53,7 @@ def evidence_snapshot(value):
     return redact(value) if isinstance(value, str) else value
 
 
-def request_job(store, vault, incident_id, automatic=False, now=None, mode='triage', question='', request_id=None, source_ids=(), diagnostic_ids=()):
+def request_job(store, vault, incident_id, automatic=False, now=None, mode='triage', question='', request_id=None, source_ids=(), diagnostic_ids=(), resume_checkpoint=None, expected_generation=None):
     now = time.time() if now is None else now
     if mode not in ('triage', 'advice', 'exploration') or (automatic and mode != 'triage'):
         raise ValueError('Unsupported AI workspace mode.')
@@ -65,7 +65,7 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
             uuid.UUID(request_id)
         except (ValueError, TypeError, AttributeError):
             raise ValueError('Invalid request identity; reload the incident page.')
-    fingerprint = hashlib.sha256(json.dumps({'mode': mode, 'question': question.strip(), 'sources': sorted(source_ids), 'diagnostics': sorted(diagnostic_ids)}, sort_keys=True).encode()).hexdigest()
+    fingerprint = hashlib.sha256(json.dumps({'mode': mode, 'question': question.strip(), 'sources': sorted(source_ids), 'diagnostics': sorted(diagnostic_ids), 'checkpoint': resume_checkpoint, 'generation': expected_generation}, sort_keys=True).encode()).hexdigest()
     with store.connect() as c:
         c.execute('BEGIN IMMEDIATE')
         if request_id:
@@ -85,8 +85,31 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
         incident = c.execute('SELECT * FROM incidents WHERE id=?', (incident_id,)).fetchone()
         if not incident or incident['closed'] is not None or incident['status'] == 'Resolved':
             raise ValueError('Investigation requires an active unresolved incident.')
+        from .handoff import control
+        ownership = control(c, incident_id)
+        checkpoint_data = None
+        if resume_checkpoint:
+            if ownership['owner']!='user' or ownership['generation']!=expected_generation or ownership['checkpoint_id']!=resume_checkpoint:
+                raise ValueError('Checkpoint or control changed; reload before resuming.')
+            checkpoint = c.execute('SELECT snapshot FROM handoff_checkpoints WHERE id=? AND incident_id=?', (resume_checkpoint, incident_id)).fetchone()
+            if not checkpoint:
+                raise ValueError('Unknown incident checkpoint.')
+            checkpoint_data = json.loads(checkpoint['snapshot'])
+            checkpoint_data['id'] = resume_checkpoint
+            question = checkpoint_data['question']
+            # Refresh selected sources; detached selections are explicitly omitted from the new run.
+            source_ids = [identifier for identifier in checkpoint_data['source_ids'] if c.execute('SELECT 1 FROM incident_sources WHERE incident_id=? AND check_id=?',(incident_id,identifier)).fetchone()]
+            diagnostic_ids = [identifier for identifier in checkpoint_data['diagnostic_ids'] if c.execute("SELECT 1 FROM diagnostic_jobs WHERE incident_id=? AND id=? AND state='completed'",(incident_id,identifier)).fetchone()]
+        elif ownership['owner']=='user':
+            if automatic:
+                return None
+            raise ValueError('User has control; resume from the saved checkpoint before requesting AI.')
         if automatic and (not bridge.get('automatic') or SEVERITIES.index(incident['severity']) < SEVERITIES.index(bridge['minimum'])):
             return None
+        if c.execute("SELECT 1 FROM diagnostic_jobs WHERE incident_id=? AND state IN ('pending','leased') AND expires>?", (incident_id, now)).fetchone():
+            if automatic:
+                return None
+            raise ValueError('Wait for this incident’s queued diagnostics to finish or expire before starting AI.')
         existing = c.execute("SELECT id FROM ai_jobs WHERE incident_id=? AND state IN ('pending','dispatching','running','unknown')", (incident_id,)).fetchone()
         if existing:
             if mode != 'triage':
@@ -99,10 +122,16 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
         evidence = json.dumps(evidence_snapshot(json.loads(incident['report'])), ensure_ascii=True)[:16000]
         if mode != 'triage':
             from .workspace import context
-            evidence = context(c, incident, mode, question, source_ids, diagnostic_ids)
+            evidence = context(c, incident, mode, question, source_ids, diagnostic_ids, checkpoint_data)
         c.execute('INSERT INTO ai_jobs(id,incident_id,state,created,expires,model,allowance,max_calls,evidence,credential_digest,credential,endpoint,bridge_secret,next_attempt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                   (job_id, incident_id, 'pending', now, now+3600, cfg['model'], min(cfg['triage_tokens'], cfg['incident_tokens']), min(cfg['max_turns'], 100), evidence, digest(token), vault.encrypt(token), bridge['url'].rstrip('/'), setting(c, 'hermes_secret'), now))
         c.execute('UPDATE ai_jobs SET mode=?,request_id=?,request_fingerprint=?,allowance=? WHERE id=?', (mode, request_id, fingerprint, min(cfg['triage_tokens'], cfg['incident_tokens']) if mode=='triage' else cfg['incident_tokens'], job_id))
+        generation = ownership['generation']+1
+        c.execute("UPDATE incident_control SET owner='ai',generation=?,updated=? WHERE incident_id=?", (generation, now, incident_id))
+        c.execute('UPDATE ai_jobs SET control_generation=? WHERE id=?', (generation, job_id))
+        if resume_checkpoint:
+            store.timeline(c, incident_id, 'handoff_ai', 'New read-only execution resumed from checkpoint '+resume_checkpoint+' · '+job_id, actor='user', now=now)
+            store.audit(c, 'handoff.ai', incident_id, {'checkpoint_id':resume_checkpoint, 'job_id':job_id})
         if mode != 'triage':
             c.execute('INSERT INTO ai_messages VALUES(?,?,?,?,?,?)', (uid(), incident_id, job_id, 'user', redact(question.strip()), now))
             store.timeline(c, incident_id, 'ai_question', mode+': '+redact(question.strip())+' · Execution '+job_id, actor='user', now=now)
@@ -150,6 +179,10 @@ def admit(store, job_id, payload, now=None):
         incident = c.execute('SELECT closed,status FROM incidents WHERE id=?', (job['incident_id'],)).fetchone() if job else None
         if not job or job['state'] not in ('dispatching', 'running') or job['expires'] <= now or not incident or incident['closed'] is not None or incident['status']=='Resolved' or payload.get('model') != job['model'] or cfg['model'] != job['model']:
             raise ValueError('This execution is no longer authorized.')
+        from .handoff import control
+        ownership = control(c, job['incident_id'])
+        if ownership['owner']!='ai' or ownership['generation']!=job['control_generation']:
+            raise ValueError('Incident ownership changed; this AI execution is fenced.')
         # Unknown usage globally fences new calls across UTC resets until resolved.
         if c.execute("SELECT 1 FROM ai_calls WHERE state!='known'").fetchone():
             raise ValueError('An earlier model request has unknown usage; admission is paused.')
@@ -268,6 +301,9 @@ def apply_status(store, job_id, document, now=None):
         if state=='completed' and not c.execute('SELECT 1 FROM ai_calls WHERE job_id=?', (job_id,)).fetchone():
             raise ValueError('Completion without a metered model call is invalid.')
         c.execute('UPDATE ai_jobs SET state=?,summary=?,completed=?,error=?,next_attempt=?,lease_until=NULL,lease_token=NULL WHERE id=?', (state, redact(summary), now if state in TERMINAL else None, 'Bridge interrupted; execution must not be replayed.' if state=='unknown' else None, now+30, job_id))
+        if state in TERMINAL:
+            from .handoff import release
+            release(c, job)
         if state in ('completed', 'failed') and summary and job['mode'] != 'triage':
             c.execute('INSERT OR IGNORE INTO ai_messages VALUES(?,?,?,?,?,?)', (uid(), job['incident_id'], job_id, 'assistant', redact(summary), now))
         if (state in TERMINAL or state=='unknown') and state != job['state']:
@@ -285,6 +321,8 @@ def cancel(store, job_id):
             c.execute("UPDATE ai_jobs SET state='cancelled',completed=?,lease_until=NULL,lease_token=NULL WHERE id=?", (time.time(), job_id))
             store.timeline(c, job['incident_id'], 'ai_cancelled', 'Further model requests denied; in-flight usage remains reserved.', actor='user')
             store.audit(c, 'ai.cancelled', job_id)
+            from .handoff import release
+            release(c, job)
 
 
 def bridge_request(vault, job, method, path, body=b'', ca=True):
@@ -302,8 +340,10 @@ def tick(store, vault, now=None):
     with store.connect() as c:
         c.execute('BEGIN IMMEDIATE')
         # Expiry fences calls, but never releases uncertain provider usage.
-        for job in c.execute("SELECT id,incident_id FROM ai_jobs WHERE expires<=? AND state NOT IN ('completed','failed','cancelled','expired')", (now,)).fetchall():
+        for job in c.execute("SELECT * FROM ai_jobs WHERE expires<=? AND state NOT IN ('completed','failed','cancelled','expired')", (now,)).fetchall():
             c.execute("UPDATE ai_jobs SET state='expired',completed=? WHERE id=?", (now, job['id']))
+            from .handoff import release
+            release(c, job)
             store.timeline(c, job['incident_id'], 'ai_expired', 'AI execution expired; unknown usage remains reserved.', now=now)
         active = c.execute("SELECT 1 FROM ai_jobs WHERE state IN ('dispatching','running','unknown')").fetchone()
         sql = "SELECT * FROM ai_jobs WHERE state IN ('dispatching','running','unknown') AND next_attempt<=? AND (lease_until IS NULL OR lease_until<=?) ORDER BY created LIMIT 1" if active else "SELECT * FROM ai_jobs WHERE state='pending' AND next_attempt<=? AND (lease_until IS NULL OR lease_until<=?) ORDER BY created LIMIT 1"
@@ -315,6 +355,8 @@ def tick(store, vault, now=None):
         incident = c.execute('SELECT status,closed FROM incidents WHERE id=?', (job['incident_id'],)).fetchone()
         if incident['closed'] is not None or incident['status']=='Resolved':
             c.execute("UPDATE ai_jobs SET state='cancelled',completed=? WHERE id=?", (now, job['id']))
+            from .handoff import release
+            release(c, job)
             store.timeline(c, job['incident_id'], 'ai_cancelled', 'Incident resolved; further model calls denied.', now=now)
             return True
         token = uid()
