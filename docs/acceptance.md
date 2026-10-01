@@ -7,7 +7,7 @@
 | HTTP/TCP checks | Implemented; provider tests |
 | Proxmox discovery / linked checks | Implemented with explicit cluster namespaces; duplicate endpoint, migration, stopped guest and retirement tests |
 | Failure/recovery thresholds and sustained resource metrics | Implemented and tested; root filesystem and Linux PSI scope |
-| Parent suppression, temporary maintenance | Implemented; schedules pending |
+| Parent suppression and scheduled maintenance | Implemented; one-time/weekly/global/machine windows and temporary snooze |
 | Deterministic incident before AI | Implemented and tested |
 | Manual notes and resolved-but-unhealthy visibility | Implemented and tested |
 | Durable outbox, leases, TTL, retry and obsolete delivery handling | Implemented and tested |
@@ -27,3 +27,5 @@
 This milestone does not meet the full definition of done. Tests use mocks/disposable fixtures; no live system is stopped, stressed, rebooted or modified.
 
 Correlation tests cover both arrival orders, explicit identity boundaries, API failure separation, stale evidence, independent recovery, severity filter crossing and uncertain links without merges.
+
+Maintenance/notification tests cover timezone boundaries, inherited scope, preserved observations, silence, duplicate reminders, backlog coalescing, escalation severity floors and dispatch filtering. Per-scope notification overrides remain pending.

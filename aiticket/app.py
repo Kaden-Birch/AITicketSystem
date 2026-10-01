@@ -499,4 +499,51 @@ def create_app(data_dir=None, testing=False):
             return redirect(url_for('resource_rules'))
         return render_template('resources.html',metrics=METRICS,agents=store.rows('SELECT a.id,m.name,a.capabilities FROM agents a JOIN machines m ON m.id=a.machine_id WHERE revoked=0'),rules=store.rows("SELECT c.name,c.config,m.name AS machine FROM checks c JOIN machines m ON m.id=c.machine_id WHERE kind='agent_metric'"))
 
+    @app.route('/policies',methods=['GET','POST'])
+    @login_required
+    def maintenance_policies():
+        from .policies import add_window,DEFAULTS,active
+        if request.method=='POST':
+            f=request.form
+            if f.get('operation')=='window':
+                add_window(store,f.get('name','').strip(),f.get('machine_id') or None,f.get('kind'),f.get('timezone','UTC'),f)
+            elif f.get('operation')=='toggle':
+                enabled=int(f.get('enabled',1))
+                if enabled not in (0,1):
+                    raise ValueError('Invalid enabled state.')
+                with store.connect() as c:
+                    result=c.execute('UPDATE maintenance_windows SET enabled=? WHERE id=?',(enabled,f.get('window_id')))
+                    if not result.rowcount:
+                        abort(404)
+                    store.audit(c,'maintenance.enabled' if enabled else 'maintenance.disabled',f.get('window_id'))
+            elif f.get('operation')=='notifications':
+                reminder=int(f.get('reminder_seconds',0))
+                delay=int(f.get('escalate_after_seconds',0))
+                severity=f.get('escalate_to','high')
+                if any(x!=0 and not 60<=x<=2592000 for x in (reminder,delay)) or severity not in SEVERITIES:
+                    raise ValueError('Intervals must be zero (disabled) or 60–2592000 seconds; select a valid severity.')
+                store.save_many({'notification_policy':{'reminder_seconds':reminder,'escalate_after_seconds':delay,'escalate_to':severity}},actor='user')
+            else:
+                raise ValueError('Unknown policy operation.')
+            return redirect(url_for('maintenance_policies'))
+        windows=store.rows('SELECT w.*,m.name AS machine FROM maintenance_windows w LEFT JOIN machines m ON m.id=w.machine_id ORDER BY w.name')
+        for window in windows:
+            window['active_now']=active(window,time.time())
+        return render_template('policies.html',windows=windows,machines=store.rows('SELECT * FROM machines ORDER BY name'),policy=store.setting('notification_policy',DEFAULTS))
+
+    @app.post('/incidents/<incident_id>/silence')
+    @login_required
+    def silence_incident(incident_id):
+        minutes=int(request.form.get('minutes',60))
+        if not 0<=minutes<=10080:
+            raise ValueError('Silence must be 0–10080 minutes; zero resumes delivery.')
+        with store.connect() as c:
+            c.execute('BEGIN IMMEDIATE')
+            result=c.execute('UPDATE incidents SET silence_until=? WHERE id=?',(time.time()+minutes*60,incident_id))
+            if not result.rowcount:
+                abort(404)
+            store.timeline(c,incident_id,'silenced' if minutes else 'notifications_resumed','Notification pause: '+str(minutes)+' minutes.',actor='user')
+            store.audit(c,'incident.silence_changed',incident_id,{'minutes':minutes})
+        return redirect(url_for('incident',incident_id=incident_id))
+
     return app

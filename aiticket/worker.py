@@ -10,6 +10,8 @@ log = logging.getLogger(__name__)
 
 
 def tick(store, vault):
+    from .policies import notifications
+    notifications(store)
     with store.connect() as c:
         c.execute("UPDATE diagnostic_jobs SET state='expired',lease_until=NULL,lease_token=NULL WHERE expires<=? AND state IN ('pending','leased')",(time.time(),))
     job = claim(store, 'checks')
@@ -27,16 +29,33 @@ def tick(store, vault):
 
 
 def deliver(store, vault, job):
+    ownership=store.rows('SELECT state,lease_token FROM deliveries WHERE id=?',(job['id'],))
+    if not ownership or ownership[0]['state']!='leased' or ownership[0]['lease_token']!=job['lease_token']:
+        return
     configured = store.setting('discord_secret')
     if not configured:
         outcome(store, job, 'pending', 'Discord webhook has not been configured.', 60)
         return
     incident = store.rows('SELECT * FROM incidents WHERE id=?', (job['incident_id'],))[0]
-    if incident['closed'] and job['event_key'].endswith(':opened'):
+    if (incident['closed'] or incident['status']=='Resolved') and not job['event_key'].endswith(':recovery'):
         outcome(store, job, 'superseded', None)
         return
+    from .engine import SEVERITIES
+    if SEVERITIES.index(incident['severity'])<SEVERITIES.index(store.setting('discord_minimum','medium')) or (job['event_key'].endswith(':recovery') and not store.setting('discord_recovery',True)):
+        outcome(store,job,'superseded',None)
+        return
+    if ':reminder:' in job['event_key'] and not store.setting('notification_policy',{}).get('reminder_seconds',0):
+        outcome(store,job,'superseded',None)
+        return
+    from .policies import maintained
+    with store.connect() as c:
+        paused=incident['silence_until']>time.time() or maintained(c,incident['machine_id'],time.time()) or bool(c.execute('SELECT 1 FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=? AND c.maintenance_until>?',(incident['id'],time.time())).fetchone())
+    if paused:
+        outcome(store,job,'pending','Delivery paused by maintenance or incident silence.',60)
+        return
     report = json.loads(incident['report'])
-    text = f"{incident['severity'].upper()} · {report['target']} · {report['check']}\n{incident['status']} · Cause: {report['cause']}\nIncident {incident['id']}"
+    event=job['event_key'].split(':',1)[1]
+    text = f"{event} · {incident['severity'].upper()} · {report['target']} · {report['check']}\n{incident['status']} · Cause: {report['cause']}\nIncident {incident['id']}"
     url = vault.decrypt(configured)
     try:
         r = requests.post(url, json={'content': text[:1900], 'allowed_mentions': {'parse': []}}, timeout=(3, 8), allow_redirects=False)

@@ -53,3 +53,5 @@ Milestone 3 adds [Proxmox discovery and linking](docs/proxmox.md): reusable conn
 Milestone 4 adds [conservative source correlation](docs/correlation.md), separate source evidence, uncertain related-incident links, and recovery that requires fresh healthy results from all attached sources.
 
 Milestone 5 adds [agent resource rules and read-only diagnostics](docs/resource-diagnostics.md): sustained CPU/memory/disk/inode thresholds, capability reporting, incident-scoped diagnostic jobs, bounded service/process/log queries, and restart-safe execution/result tracking.
+
+Milestone 6 adds [scheduled maintenance and notification policies](docs/maintenance-notifications.md): timezone-aware one-time/weekly windows, incident silence, coalesced reminders and persistent-severity escalation. Live deployment testing remains deferred.

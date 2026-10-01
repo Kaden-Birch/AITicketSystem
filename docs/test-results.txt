@@ -1,6 +1,6 @@
-........................................................                 [100%]
-56 passed in 9.03s
+.................................................................        [100%]
+65 passed in 9.53s
 
-Local Python 3.14.6; temporary databases, Linux-like fixtures, mocked systemd providers and harmless bounded subprocesses.
-No live infrastructure, models, Discord, Hermes or backup endpoint contacted.
-Ubuntu/systemd permissions and Docker runtime remain unverified.
+Local Python 3.14.6; bundled tzdata 2026.4; temporary fixtures and mocked external providers.
+No production testing, model calls, Discord sends, Hermes requests or backup endpoints.
+Live Ubuntu/Docker/infrastructure validation remains deferred at user request.

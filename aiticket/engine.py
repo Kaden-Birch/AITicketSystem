@@ -43,7 +43,8 @@ def observe(store, check_id, healthy, evidence, now=None, lease_token=None):
                   (failures, successes, health, first_failure_at, now + check['interval'], check_id))
         incident = c.execute('SELECT i.* FROM incidents i JOIN incident_sources s ON s.incident_id=i.id WHERE s.check_id=? AND i.closed IS NULL', (check_id,)).fetchone()
         machine = c.execute('SELECT * FROM machines WHERE id=?', (check['machine_id'],)).fetchone()
-        suppressed = check['maintenance_until'] > now
+        from .policies import maintained
+        suppressed = check['maintenance_until'] > now or maintained(c,machine['id'],now)
         parent, visited = machine['parent_id'], set()
         while parent and parent not in visited:
             visited.add(parent)
@@ -100,7 +101,7 @@ def observe(store, check_id, healthy, evidence, now=None, lease_token=None):
             report['fresh']=row['enabled']==1 and now-report.get('observed_at',0)<=max(180,row['interval']*3)
             sources.append(report)
         recovered=all(r.get('observed')=='healthy' and r['fresh'] for r in sources)
-        severity=max((r.get('severity','medium') for r in sources),key=SEVERITIES.index)
+        severity=max([incident['severity_floor']]+[r.get('severity','medium') for r in sources],key=SEVERITIES.index)
         aggregate=dict(source)
         aggregate.update(target=machine['name'],cause='Unknown',ai_status='disabled',sources=sources,
                          observed='healthy' if recovered else 'down' if any(r.get('observed')=='down' and r['fresh'] for r in sources) else 'unknown',

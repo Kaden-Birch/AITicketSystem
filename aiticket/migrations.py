@@ -1,6 +1,11 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 5
+CURRENT_VERSION = 6
 MIGRATIONS = {
+    6: (
+        "ALTER TABLE incidents ADD COLUMN severity_floor TEXT NOT NULL DEFAULT 'info'",
+        'ALTER TABLE incidents ADD COLUMN silence_until REAL NOT NULL DEFAULT 0',
+        '''CREATE TABLE maintenance_windows(id TEXT PRIMARY KEY,name TEXT NOT NULL,machine_id TEXT REFERENCES machines(id),kind TEXT NOT NULL,timezone TEXT NOT NULL,start REAL,end REAL,weekday INTEGER,start_minute INTEGER,end_minute INTEGER,enabled INTEGER NOT NULL DEFAULT 1)''',
+    ),
     5: (
         "ALTER TABLE agents ADD COLUMN capabilities TEXT NOT NULL DEFAULT '{}'",
         "ALTER TABLE agents ADD COLUMN sampled_at REAL",
