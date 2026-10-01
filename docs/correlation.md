@@ -13,3 +13,9 @@ Recovery requires every attached source to independently reach its recovery thre
 Severity is the highest attached-source severity. Escalation through the configured Discord filter schedules a separate deduplicated severity event. Manual resolution remains distinct from health; unhealthy conditions stay attached until verified recovery.
 
 Correlation, source evidence, timeline updates and notification scheduling share one SQLite transaction. AI calls and recovery actions remain unavailable. This milestone does not claim general root-cause inference.
+
+## Broader relationships and manual grouping
+
+Concurrent failed resource-pressure rules, agent communication, guest-stop and HTTP/TCP checks on the same explicitly linked machine create possible-impact relationships within a five-minute evidence window. HTTP/TCP failures can also relate to each other. These remain separate incidents with cause unknown; resource pressure does not prove an outage cause. Stale or latest-healthy source evidence does not establish a new relationship.
+
+The incident page can merge another active unresolved incident from the same machine into the current one. A reason and confirmation are required. Original records, source reports, timelines and observation memberships remain; an immutable merge ledger points to the continuing incident. The donor is closed as merged, not recovered. Its queued notifications are superseded. All combined sources must independently recover with fresh evidence. AI work, unknown usage and unfinished diagnostics/recovery proposals block merging. An incident with a consumed recovery attempt must remain the target, preserving the one-attempt limit. Completed diagnostic and AI history remain accessible on their original incident.

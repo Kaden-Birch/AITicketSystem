@@ -13,7 +13,7 @@
 | Durable outbox, leases, TTL, retry and obsolete delivery handling | Implemented and tested |
 | DHCP identity, duplicate heartbeat, revoke/re-enroll | Implemented and tested |
 | Linux read-only diagnostics and durable jobs | Implemented and tested; all action/mutation jobs unavailable |
-| Explicit Proxmox/agent machine linking and source unlink | Implemented; guest-stop/agent correlation implemented; broader metric correlation pending |
+| Explicit Proxmox/agent machine linking and source unlink | Implemented; guest-stop/agent correlation implemented; broader metric/outage relationships and manual same-machine merge implemented |
 | Hermes V2 signing | Implemented on companion requests/responses with durable execution polling; installed spike pending |
 | Durable AI completion and enforceable budgets | Fixture-tested signed execution states and transactional token/configured-price admission; restricted companion/adapter supplied; live Hermes/provider validation pending and default disabled |
 | Advice/exploration/handoff | Advice and selected-evidence exploration implemented with fixtures; checkpoint-based handoff implemented; live AI diagnostic execution pending |

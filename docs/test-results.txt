@@ -1,6 +1,6 @@
-175 passed in 18.77s
+179 passed in 19.11s
 
-Milestone 12 adds scheduled discovery lease/restart, disable fencing, failure preservation and visibility/review tests.
+Milestone 13 adds resource/outage relationships, identity/time boundaries, evidence-preserving merges and combined-source recovery tests.
 Local Python 3.14.6; temporary databases, fake Hermes adapters and mocked external providers/subprocesses.
 Milestone 11 covers immutable approval/hash/version binding, cancellation, expiry, protected targets, separate action credentials, fresh execution preconditions, single delivery/authorization, one attempt per incident, ownership fencing, independent recovery verification, unknown outcomes, fixed local argv, timeout handling and durable agent replay prevention.
 Earlier monitoring, workspace, handoff, administration, bridge and budget-gateway tests remain passing.

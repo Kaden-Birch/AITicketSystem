@@ -10,6 +10,8 @@ def source_condition(check, evidence):
     guest = check['kind'] in ('proxmox', 'proxmox_linked') and cfg.get('resource', '').startswith(('qemu/', 'lxc/'))
     if guest and cfg.get('expected', 'running') == 'running' and evidence.get('status') == 'stopped':
         return 'guest-down'
+    if check['kind']=='agent_metric':
+        return 'resource-pressure'
     if check['kind'] == 'agent':
         return 'agent-communication'
     return 'check:' + check['id']
@@ -84,12 +86,16 @@ def observe(store, check_id, healthy, evidence, now=None, lease_token=None):
                 store.timeline(c,iid,'opened','Failure threshold reached. Cause unknown.',now=now)
                 enqueue(c,iid,'opened',now,store)
                 # HTTP/TCP outages may have a relationship, but are not proof of guest failure.
-                others=c.execute('SELECT i.id,i.condition_key,c.kind FROM incidents i JOIN checks c ON c.id=i.check_id WHERE i.machine_id=? AND i.closed IS NULL AND i.id<>? AND i.last_seen>=?',(machine['id'],iid,now-300)).fetchall()
+                others=c.execute('SELECT i.id,i.condition_key,i.report,c.kind FROM incidents i JOIN checks c ON c.id=i.check_id WHERE i.machine_id=? AND i.closed IS NULL AND i.id<>? AND i.last_seen>=?',(machine['id'],iid,now-300)).fetchall()
                 for other in others:
-                    uncertain = (check['kind'] in ('http','tcp') and other['condition_key'] in ('guest-down','agent-communication')) or (condition in ('guest-down','agent-communication') and other['kind'] in ('http','tcp'))
-                    if uncertain:
+                    other_report=json.loads(other['report'])
+                    if not any(r.get('latest_sample')=='down' and r.get('observed_at',0)>=now-300 for r in other_report.get('sources',[other_report])):
+                        continue
+                    from .correlation import relationship
+                    reason=relationship(check['kind'],condition,other['kind'],other['condition_key'])
+                    if reason:
                         left,right=sorted((iid,other['id']))
-                        c.execute('INSERT OR IGNORE INTO incident_links VALUES(?,?,?)',(left,right,'Possible shared impact; separate conditions, cause unconfirmed'))
+                        c.execute('INSERT OR IGNORE INTO incident_links VALUES(?,?,?)',(left,right,reason))
         if not incident:
             return
         iid=incident['id']

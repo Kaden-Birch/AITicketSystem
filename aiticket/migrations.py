@@ -1,6 +1,12 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 12
+CURRENT_VERSION = 13
 MIGRATIONS = {
+    13: (
+        'ALTER TABLE incidents ADD COLUMN merged_into TEXT REFERENCES incidents(id)',
+        "CREATE TABLE incident_merges(source_id TEXT PRIMARY KEY REFERENCES incidents(id),target_id TEXT NOT NULL REFERENCES incidents(id),created REAL NOT NULL,reason TEXT NOT NULL)",
+        "CREATE TRIGGER merge_no_update BEFORE UPDATE ON incident_merges BEGIN SELECT RAISE(ABORT,'Merge ledger is immutable'); END",
+        "CREATE TRIGGER merge_no_delete BEFORE DELETE ON incident_merges BEGIN SELECT RAISE(ABORT,'Merge ledger is immutable'); END",
+    ),
     12: (
         "CREATE TABLE discovery_schedules(connection_id TEXT PRIMARY KEY REFERENCES proxmox_connections(id),interval INTEGER NOT NULL DEFAULT 0,next_run REAL NOT NULL DEFAULT 0,lease_token TEXT,lease_until REAL,last_error TEXT)",
         "ALTER TABLE proxmox_objects ADD COLUMN review_required INTEGER NOT NULL DEFAULT 1",

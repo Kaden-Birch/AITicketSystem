@@ -67,3 +67,5 @@ Milestone 10 adds persistent manual/AI investigation ownership, pause/take-contr
 Milestone 11 adds [approval-required service recovery](docs/action-broker.md): immutable proposals, exact hash/version approval, separate action credentials, fresh failed-service checks, one attempt per incident, target locks, cooldowns and independent recovery verification. No live restart has been tested; activation requires explicit local and application validation.
 
 Milestone 12 adds persistent scheduled Proxmox inventory refresh, new-resource review flags, visibility warnings and lease recovery. Explicit linking and retirement remain administrator decisions.
+
+Milestone 13 adds conservative resource/outage relationships and explicit same-machine incident merging with preserved history and independent multi-source recovery.
