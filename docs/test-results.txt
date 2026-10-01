@@ -1,0 +1,11 @@
+Local execution: Python 3.14.6 on macOS; temporary fixtures and mocked external providers.
+Command: pytest -q
+
+....................                                                     [100%]
+20 passed in 1.70s
+
+CLI initialization and Waitress login/dashboard smoke test: passed on loopback.
+Dashboard screenshot visually checked; no layout overlap observed.
+Docker Compose execution: unverified; local Docker daemon is unavailable.
+Ubuntu/Python 3.12 and installed Hermes v0.20.0: not tested.
+Live infrastructure/model/Discord/backup calls: none.

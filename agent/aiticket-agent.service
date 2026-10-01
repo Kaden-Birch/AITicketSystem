@@ -1,0 +1,24 @@
+[Unit]
+Description=AITicketSystem outbound Linux monitoring agent
+After=network-online.target
+Wants=network-online.target
+[Service]
+User=aiticket-agent
+Group=aiticket-agent
+ExecStart=/usr/bin/python3 /opt/aiticket-agent/agent.py run
+Restart=on-failure
+RestartSec=15
+StateDirectory=aiticket-agent
+StateDirectoryMode=0700
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+MemoryMax=128M
+CPUQuota=10%
+[Install]
+WantedBy=multi-user.target
