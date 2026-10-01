@@ -458,7 +458,7 @@ def create_app(data_dir=None, testing=False):
     @app.route('/proxmox', methods=['GET','POST'])
     @login_required
     def proxmox_inventory():
-        from .proxmox import Client, discover, link, unlink
+        from .proxmox import Client, discover, link, unlink, schedule
         if request.method == 'POST':
             f=request.form
             operation=f.get('operation')
@@ -487,6 +487,8 @@ def create_app(data_dir=None, testing=False):
                     connection_id=uid()
                     c.execute('INSERT INTO proxmox_connections VALUES(?,?,?,?,?,?,?,NULL,NULL)',(connection_id,cluster,name,url,token_id,vault.encrypt(secret),ca))
                     store.audit(c,'proxmox.connection_created',connection_id,{'cluster_id':cluster})
+            elif operation=='schedule':
+                schedule(store,f.get('connection_id'),int(f.get('interval','0')))
             elif operation in ('test','discover'):
                 connection_id=f.get('connection_id')
                 rows=store.rows('SELECT * FROM proxmox_connections WHERE id=?',(connection_id,))
@@ -520,7 +522,7 @@ def create_app(data_dir=None, testing=False):
             else:
                 raise ValueError('Unknown inventory operation.')
             return redirect(url_for('proxmox_inventory'))
-        connections=store.rows('SELECT id,cluster_id,name,url,ca,last_test,last_discovery FROM proxmox_connections ORDER BY name')
+        connections=store.rows('SELECT p.id,p.cluster_id,p.name,p.url,p.ca,p.last_test,p.last_discovery,s.interval,s.next_run,s.last_error FROM proxmox_connections p LEFT JOIN discovery_schedules s ON s.connection_id=p.id ORDER BY p.name')
         for connection in connections:
             connection['test']=json.loads(connection['last_test']) if connection['last_test'] else None
         return render_template('proxmox.html',connections=connections,

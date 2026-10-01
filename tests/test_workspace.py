@@ -181,4 +181,4 @@ def test_schema_eight_upgrade_preserves_prior_ai_jobs(tmp_path):
         c.execute("INSERT INTO ai_jobs(id,incident_id,state,created,expires,model,allowance,max_calls,evidence,credential_digest,credential,endpoint,bridge_secret,next_attempt) VALUES('j','i','completed',1,2,'model',100,1,'{}','digest','encrypted','https://192.0.2.20','encrypted',1)")
     store=Store(path)
     assert store.rows('SELECT mode FROM ai_jobs')==[{'mode':'triage'}]
-    assert store.rows('SELECT version FROM schema_version')==[{'version':11}]
+    assert store.rows('SELECT version FROM schema_version')==[{'version': __import__('aiticket.migrations',fromlist=['CURRENT_VERSION']).CURRENT_VERSION}]

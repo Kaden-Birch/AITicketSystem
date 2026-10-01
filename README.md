@@ -65,3 +65,5 @@ Milestone 9 adds incident-scoped advice chat and selected-evidence exploration, 
 Milestone 10 adds persistent manual/AI investigation ownership, pause/take-control, immutable checkpoints and fresh read-only resume. Ownership generations fence old executions; queued manual diagnostics and AI investigations cannot overlap. Unknown provider usage stays reserved. Live testing remains deferred.
 
 Milestone 11 adds [approval-required service recovery](docs/action-broker.md): immutable proposals, exact hash/version approval, separate action credentials, fresh failed-service checks, one attempt per incident, target locks, cooldowns and independent recovery verification. No live restart has been tested; activation requires explicit local and application validation.
+
+Milestone 12 adds persistent scheduled Proxmox inventory refresh, new-resource review flags, visibility warnings and lease recovery. Explicit linking and retirement remain administrator decisions.

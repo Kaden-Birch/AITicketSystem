@@ -35,3 +35,5 @@ Password change/console recovery, session invalidation, agent credential rotatio
 AI tests cover simultaneous admission, all ceiling types, zero allowances, unknown-usage holds across dates/cancellation, capped provider forwarding, usage/price reconciliation, tools/model restrictions, signed freshness, duplicate results, uncertain-dispatch polling, bridge restart fencing, isolated environment and activation gates. Live AI diagnostic execution and action approvals remain absent.
 
 Handoff tests cover durable ownership/checkpoints, pause fencing, stale forms/generations, racing queue/takeover, atomic manual resolution, no overlapping diagnostics, resumed fresh evidence, duplicate resume, immutable snapshots and preservation of unknown budget reservations.
+
+Scheduled refresh is fixture-tested for new-resource review, persistent leases, disable fencing, visibility warnings, failures and migration identity preservation. Automatic cluster identity verification remains pending.

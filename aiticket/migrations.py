@@ -1,6 +1,12 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 11
+CURRENT_VERSION = 12
 MIGRATIONS = {
+    12: (
+        "CREATE TABLE discovery_schedules(connection_id TEXT PRIMARY KEY REFERENCES proxmox_connections(id),interval INTEGER NOT NULL DEFAULT 0,next_run REAL NOT NULL DEFAULT 0,lease_token TEXT,lease_until REAL,last_error TEXT)",
+        "ALTER TABLE proxmox_objects ADD COLUMN review_required INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE proxmox_objects ADD COLUMN missing_since REAL",
+        "UPDATE proxmox_objects SET review_required=0 WHERE machine_id IS NOT NULL",
+    ),
     11: (
         'ALTER TABLE agents ADD COLUMN action_credential_digest TEXT',
         "ALTER TABLE machines ADD COLUMN recovery_role TEXT NOT NULL DEFAULT 'protected'",

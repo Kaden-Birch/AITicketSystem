@@ -75,7 +75,7 @@ def normalize(resources):
     return result
 
 
-def discover(store, vault, connection_id):
+def discover(store, vault, connection_id, lease_token=None):
     rows = store.rows('SELECT * FROM proxmox_connections WHERE id=?',(connection_id,))
     if not rows:
         raise ValueError('Unknown connection')
@@ -84,16 +84,20 @@ def discover(store, vault, connection_id):
     now = time.time()
     with store.connect() as c:
         c.execute('BEGIN IMMEDIATE')
+        if lease_token and not c.execute('SELECT 1 FROM discovery_schedules WHERE connection_id=? AND lease_token=? AND interval>0',(connection_id,lease_token)).fetchone():
+            return 0
+        # A missing object is a visibility warning, never automatic retirement.
+        c.execute('UPDATE proxmox_objects SET missing_since=coalesce(missing_since,?) WHERE cluster_id=? AND present=1',(now,connection['cluster_id']))
         for item in objects:
             existing = c.execute('SELECT * FROM proxmox_objects WHERE cluster_id=? AND kind=? AND object_key=? AND present=1',
                                  (connection['cluster_id'],item['kind'],item['key'])).fetchone()
             if existing:
-                c.execute('UPDATE proxmox_objects SET name=?,node=?,status=?,template=?,last_seen=? WHERE id=?',
+                c.execute('UPDATE proxmox_objects SET name=?,node=?,status=?,template=?,last_seen=?,missing_since=NULL WHERE id=?',
                           (item['name'],item['node'],item['status'],item['template'],now,existing['id']))
             else:
                 generation = c.execute('SELECT coalesce(max(generation),0)+1 FROM proxmox_objects WHERE cluster_id=? AND kind=? AND object_key=?',
                                        (connection['cluster_id'],item['kind'],item['key'])).fetchone()[0]
-                c.execute('INSERT INTO proxmox_objects VALUES(?,?,?,?,?,?,?,?,?,1,?,NULL,NULL)',
+                c.execute('INSERT INTO proxmox_objects(id,cluster_id,kind,object_key,generation,name,node,status,template,present,last_seen,machine_id,check_id) VALUES(?,?,?,?,?,?,?,?,?,1,?,NULL,NULL)',
                           (uid(),connection['cluster_id'],item['kind'],item['key'],generation,item['name'],item['node'],item['status'],item['template'],now))
         # Absence in a permission-filtered response is not proof of deletion. An
         # administrator explicitly retires old objects before reusing their IDs.
@@ -149,7 +153,7 @@ def link(store, object_id, machine_id, expected, create_name=None):
         check_id = uid()
         cfg = json.dumps({'object_id':object_id,'cluster_id':obj['cluster_id'],'resource':obj['object_key'],'expected':expected})
         c.execute('INSERT INTO checks(id,machine_id,name,kind,config,interval) VALUES(?,?,?,?,?,60)',(check_id,machine_id,'Proxmox '+obj['object_key'],'proxmox_linked',cfg))
-        c.execute('UPDATE proxmox_objects SET machine_id=?,check_id=? WHERE id=?',(machine_id,check_id,object_id))
+        c.execute('UPDATE proxmox_objects SET machine_id=?,check_id=?,review_required=0 WHERE id=?',(machine_id,check_id,object_id))
         refresh_parents(c,store,obj['cluster_id'])
         store.audit(c,'proxmox.linked',object_id,{'machine_id':machine_id,'expected':expected})
 
@@ -186,3 +190,36 @@ def linked_probe(store,vault,config):
         except Exception:
             continue
     return False,{'reason':'Resource unavailable or not visible through configured endpoints; deletion is unconfirmed'}
+
+
+def schedule(store, connection_id, interval, now=None):
+    if type(interval) is not int or (interval!=0 and not 60<=interval<=86400):
+        raise ValueError('Refresh interval must be zero (disabled) or 60–86400 seconds.')
+    now=time.time() if now is None else now
+    with store.connect() as c:
+        if not c.execute('SELECT 1 FROM proxmox_connections WHERE id=?',(connection_id,)).fetchone():
+            raise ValueError('Unknown connection.')
+        c.execute('INSERT INTO discovery_schedules(connection_id,interval,next_run) VALUES(?,?,?) ON CONFLICT(connection_id) DO UPDATE SET interval=excluded.interval,next_run=excluded.next_run,lease_token=NULL,lease_until=NULL',(connection_id,interval,now))
+        store.audit(c,'proxmox.schedule_changed',connection_id,{'interval':interval})
+
+
+def scheduled_refresh(store,vault,now=None):
+    now=time.time() if now is None else now
+    token=uid()
+    with store.connect() as c:
+        c.execute('BEGIN IMMEDIATE')
+        row=c.execute('SELECT * FROM discovery_schedules WHERE interval>0 AND next_run<=? AND (lease_until IS NULL OR lease_until<=?) ORDER BY next_run LIMIT 1',(now,now)).fetchone()
+        if not row:
+            return False
+        connection_id=row['connection_id']
+        c.execute('UPDATE discovery_schedules SET lease_token=?,lease_until=? WHERE connection_id=?',(token,now+60,connection_id))
+    error=None
+    try:
+        discover(store,vault,connection_id,lease_token=token)
+    except Exception as exc:
+        error=type(exc).__name__ # Never retain upstream bodies, URLs or tokens.
+    with store.connect() as c:
+        changed=c.execute('UPDATE discovery_schedules SET next_run=?,lease_token=NULL,lease_until=NULL,last_error=? WHERE connection_id=? AND lease_token=?',(now+row['interval'],error,connection_id,token))
+        if changed.rowcount and error:
+            store.audit(c,'proxmox.discovery_failed',connection_id,{'error_type':error},actor='monitor')
+    return True

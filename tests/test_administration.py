@@ -117,7 +117,7 @@ def test_schema_six_migrates_without_losing_data(tmp_path):
         c.execute('INSERT INTO schema_version VALUES(6)')
         c.execute("INSERT INTO machines(id,name,parent_id,created) VALUES('existing','Preserved',NULL,1)")
     store = Store(path)
-    assert store.rows('SELECT version FROM schema_version') == [{'version': 11}]
+    assert store.rows('SELECT version FROM schema_version') == [{'version': __import__('aiticket.migrations',fromlist=['CURRENT_VERSION']).CURRENT_VERSION}]
     assert store.rows('SELECT name FROM machines') == [{'name': 'Preserved'}]
     assert store.rows("SELECT name FROM sqlite_master WHERE name='incident_observation_lookup'")
 

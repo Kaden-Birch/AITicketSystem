@@ -333,7 +333,7 @@ def test_schema_seven_upgrade_preserves_settings(tmp_path):
         c.execute('INSERT INTO settings VALUES(?,?)',('existing',json.dumps('preserved')))
     store=Store(path)
     assert store.setting('existing')=='preserved'
-    assert store.rows('SELECT version FROM schema_version')==[{'version':11}]
+    assert store.rows('SELECT version FROM schema_version')==[{'version': __import__('aiticket.migrations',fromlist=['CURRENT_VERSION']).CURRENT_VERSION}]
     assert store.rows('SELECT * FROM ai_calls')==[]
 
 

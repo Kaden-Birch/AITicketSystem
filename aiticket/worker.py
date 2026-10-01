@@ -16,6 +16,8 @@ def tick(store, vault):
     from .actions import tick as action_tick
     action_tick(store)
     notifications(store)
+    from .proxmox import scheduled_refresh
+    refreshed=scheduled_refresh(store,vault)
     with store.connect() as c:
         c.execute("UPDATE diagnostic_jobs SET state='expired',lease_until=NULL,lease_token=NULL WHERE expires<=? AND state IN ('pending','leased')",(time.time(),))
     job = claim(store, 'checks')
@@ -29,7 +31,7 @@ def tick(store, vault):
     delivery = claim(store, 'deliveries')
     if delivery:
         deliver(store, vault, delivery)
-    return bool(job or delivery)
+    return bool(job or delivery or refreshed)
 
 
 def deliver(store, vault, job):

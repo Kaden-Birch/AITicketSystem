@@ -17,3 +17,9 @@ A missing resource is not automatically retired, since permissions and visibilit
 Unlink disables the source check, invalidates its lease, and retains observations, incidents, machine and agent history. Retire also removes the old resource from active inventory. Relinking creates a new check while preserving old evidence. Detached incidents remain visible with the disabled source; unlinking does not assert recovery.
 
 No backup endpoints, mutations, SSH or action credentials are used.
+
+## Scheduled refresh
+
+Each endpoint has an optional persistent 60–86400 second interval, configured in the GUI; zero disables it. The worker leases one due refresh at a time and recovers expired leases after restart. Disabling or changing a schedule fences an in-flight scheduled response. Failed requests preserve inventory, report only the error class, and retry at the configured interval.
+
+New resources are marked for review and never automatically create checks. Successful refreshes mark missing resources as not visible; permission changes or partial endpoint visibility can produce this warning. Only explicit administrator retirement disables a source and creates a new identity generation on reuse. Migration refreshes retain guest identities and update linked node dependencies. Manual refresh remains available.
