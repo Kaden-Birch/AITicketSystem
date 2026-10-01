@@ -27,7 +27,7 @@ def create_app(data_dir=None, testing=False):
     app = Flask(__name__)
     app.config.update(SECRET_KEY=vault.decrypt(store.setting('session_secret')), TESTING=testing,
                       MAX_CONTENT_LENGTH=2100000, MAX_FORM_MEMORY_SIZE=2100000, SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Strict',
-                      SESSION_COOKIE_SECURE=not testing and os.environ.get('AITICKET_LOCAL_HTTP') != '1',
+                      SESSION_COOKIE_SECURE=not testing and os.environ.get('AITICKET_LOCAL_HTTP') != '1' and os.environ.get('AITICKET_ALLOW_INSECURE_HTTP') != '1',
                       PERMANENT_SESSION_LIFETIME=3600)
     app.extensions.update(store=store, vault=vault)
 

@@ -22,6 +22,8 @@ def isolated_environment(source, home, gateway, ca=None):
            'PYTHONPATH': str(Path(__file__).resolve().parent.parent)+os.pathsep+str(source),
            'AITICKET_HERMES_SOURCE': str(source), 'AITICKET_GATEWAY': gateway,
            'PYTHONUNBUFFERED': '1', 'HERMES_SINGLE_QUERY_SESSION': '1'}
+    if os.environ.get('AITICKET_ALLOW_INSECURE_HTTP')=='1':
+        env['AITICKET_ALLOW_INSECURE_HTTP']='1'
     if ca:
         env.update(SSL_CERT_FILE=ca, REQUESTS_CA_BUNDLE=ca)
     return env
@@ -199,7 +201,7 @@ def main():
     parser.add_argument('--secret-file', required=True)
     parser.add_argument('--hermes-source', required=True)
     parser.add_argument('--hermes-python', required=True)
-    parser.add_argument('--gateway', required=True, help='Verified HTTPS application IP URL')
+    parser.add_argument('--gateway', required=True, help='Application IP URL; HTTP requires AITICKET_ALLOW_INSECURE_HTTP=1')
     parser.add_argument('--ca')
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8090)

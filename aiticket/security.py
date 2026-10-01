@@ -29,6 +29,8 @@ class Vault:
 
 def validate_url(url, schemes=('https', 'http')):
     p = urlsplit(url)
+    if schemes==('https',) and os.environ.get('AITICKET_ALLOW_INSECURE_HTTP')=='1':
+        schemes=('https','http')
     if p.scheme not in schemes or not p.hostname or p.username or p.password or p.fragment:
         raise ValueError('Use a valid URL without embedded credentials or fragments.')
     if len(url) > 2048:

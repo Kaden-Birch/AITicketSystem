@@ -37,3 +37,5 @@ Schema 10 adds persistent incident ownership generations and immutable handoff c
 Schema 11 adds immutable recovery proposals, separate hashed action credentials and a default-protected machine role. The application broker and agent both enforce exact allowlisted service recovery; see action-broker.md.
 
 Schema 16 adds immutable recovery drafts and adoption bindings. AI supplies bounded text for administrator-selected targets, with shared budget admission; reviewed drafts become awaiting-approval proposals only after current preconditions are revalidated.
+
+Explicit `AITICKET_ALLOW_INSECURE_HTTP=1` permits direct HTTP browser login and HTTP integration URLs. Agent `--allow-http` opt-in persists in its local identity; HTTPS still validates certificates. Compose defaults to loopback/secure cookies but supports a configured bind address for direct HTTP or an external proxy.

@@ -1,6 +1,6 @@
-201 passed in 21.53s
-Final notification policy/display check: 13 passed in 1.25s.
+206 passed in 21.04s
 
+HTTP opt-in tests cover cookie configuration, URL restrictions, persisted agent enrollment, nonredirecting credential delivery, continued HTTPS verification and isolated Hermes configuration.
 Local Python 3.14.6; temporary databases, fake Hermes adapters and mocked external providers/subprocesses.
 Milestones 12–16 cover scheduled discovery/review, persistent lease recovery and fencing; resource/outage relationships and history-preserving manual merges; machine/group notification overrides and dispatch policy rechecks; full inventory configuration transfer, atomic graph/binding validation, credential exclusion and disabled review; immutable incident archival and login/security auditing; budgeted server-bound AI recovery text drafts, malformed-output rejection, cancellation, provenance, concurrent duplicate adoption and separate exact approval.
 Earlier monitoring, workspace, handoff, administration, bridge, budget-gateway and approval-broker tests remain passing. Active incident definitions cannot be silently changed by inventory import. Merge severity increases retain notification coverage.

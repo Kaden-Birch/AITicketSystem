@@ -1,5 +1,7 @@
 # Install the application VM and a monitored Linux host
 
+For direct HTTP without local TLS/Nginx, use the [HTTP installation guide](installation-http.md). This page covers the default HTTPS deployment; TLS can also terminate on your existing reverse proxy.
+
 This guide installs the main application on Ubuntu Server 24.04 using the supplied Docker Compose configuration, and the outbound Python agent on an Ubuntu/Debian Linux host. Run each section on the machine named in its heading. The agent monitors the OS in which it runs: install inside a guest to monitor that guest. Installing on a Proxmox node monitors that node's Linux OS, not all its guests.
 
 The commands have been checked against the repository. Live Ubuntu deployment remains unvalidated. Leave AI and recovery disabled during initial installation. Hermes is optional for monitoring and has a separate [installation contract](hermes-contract.md).

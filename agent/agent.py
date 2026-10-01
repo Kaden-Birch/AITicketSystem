@@ -12,13 +12,13 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-VERSION = '0.3.0'
+VERSION = '0.3.1'
 
 
-def endpoint(value):
+def endpoint(value,allow_http=False):
     p = urlsplit(value)
-    if p.scheme != 'https' or not p.hostname or p.username or p.password or p.query or p.fragment:
-        raise ValueError('An authenticated, certificate-verified HTTPS endpoint is required.')
+    if p.scheme not in (('https','http') if allow_http else ('https',)) or not p.hostname or p.username or p.password or p.query or p.fragment:
+        raise ValueError('Use HTTPS, or explicitly enable HTTP with --allow-http; embedded credentials, query strings and fragments are prohibited.')
     return value.rstrip('/')
 
 
@@ -27,9 +27,12 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def post(base, route, payload, ca=None, credential=None):
-    context = ssl.create_default_context(cafile=ca)
-    opener = urllib.request.build_opener(NoRedirect, urllib.request.HTTPSHandler(context=context))
+def post(base, route, payload, ca=None, credential=None, allow_http=False):
+    base=endpoint(base,allow_http=allow_http)
+    handlers=[NoRedirect]
+    if urlsplit(base).scheme=='https':
+        handlers.append(urllib.request.HTTPSHandler(context=ssl.create_default_context(cafile=ca)))
+    opener = urllib.request.build_opener(*handlers)
     headers = {'Content-Type': 'application/json'}
     if credential:
         headers['Authorization'] = 'Bearer ' + credential
@@ -132,16 +135,19 @@ def main():
     parser.add_argument('command', choices=['enroll', 'run', 'recovery-credential'])
     parser.add_argument('--state', default='/var/lib/aiticket-agent/identity.json')
     parser.add_argument('--server')
+    parser.add_argument('--allow-http',action='store_true',help='Explicitly allow unencrypted HTTP; enrollment saves this choice.')
     parser.add_argument('--ca')
     parser.add_argument('--policy',default='/etc/aiticket-agent/policy.json')
     args = parser.parse_args()
     path = Path(args.state)
+    from functools import partial
+    send=partial(post,allow_http=args.allow_http)
     if args.command == 'enroll':
         if path.exists():
             raise SystemExit('Identity already exists. Revoke and remove it deliberately before re-enrollment.')
-        base = endpoint(args.server or input('Application HTTPS endpoint: '))
-        reply = post(base, '/api/agent/enroll', {'token': getpass.getpass('Single-use enrollment token: ')}, args.ca)
-        write_state(path, {'server': base, 'ca': args.ca, **reply})
+        base = endpoint(args.server or input('Application endpoint: '),allow_http=args.allow_http)
+        reply = send(base, '/api/agent/enroll', {'token': getpass.getpass('Single-use enrollment token: ')}, args.ca)
+        write_state(path, {'server': base, 'ca': args.ca, 'allow_http':args.allow_http, **reply})
         print('Enrolled. Credentials saved with mode 0600; no agent IP configured.')
         return
     state = json.loads(path.read_text())
@@ -153,7 +159,9 @@ def main():
         write_state(path,state)
         print('Separate action credential saved. Restart the agent to advertise validated local recovery capability.')
         return
-    base = endpoint(state['server'])
+    allow_http=args.allow_http or state.get('allow_http') is True
+    send=partial(post,allow_http=allow_http)
+    base = endpoint(state['server'],allow_http=allow_http)
     from diagnostics import load_policy,capabilities
     policy=load_policy(args.policy)
     running = True
@@ -167,12 +175,12 @@ def main():
         try:
             policy=load_policy(args.policy)
             if state.get('action_result'):
-                post(base,'/api/agent/action-result',state['action_result'],state.get('ca'),state.get('action_credential',''))
+                send(base,'/api/agent/action-result',state['action_result'],state.get('ca'),state.get('action_credential',''))
                 state.pop('action_result',None)
                 write_state(path,state)
             if state.get('diagnostic_result'):
                 try:
-                    post(base,'/api/agent/result',state['diagnostic_result'],state.get('ca'),state['credential'])
+                    send(base,'/api/agent/result',state['diagnostic_result'],state.get('ca'),state['credential'])
                 except urllib.error.HTTPError as exc:
                     if exc.code not in (400,409):
                         raise
@@ -188,11 +196,11 @@ def main():
                 pending = {'event_id': str(uuid.uuid4()), 'version': VERSION, 'telemetry': telemetry(state), 'sampled_at':time.time(), 'capabilities':advertised}
                 state['pending'] = pending
                 write_state(path, state)
-            response=post(base, '/api/agent/heartbeat', pending, state.get('ca'), state['credential'])
+            response=send(base, '/api/agent/heartbeat', pending, state.get('ca'), state['credential'])
             state.pop('pending', None)
             write_state(path, state)
             process_jobs(state,path,response.get('jobs',[]),policy)
-            process_actions(state,path,response.get('actions',[]),policy,lambda payload:post(base,'/api/agent/action-authorize',payload,state.get('ca'),state.get('action_credential','')),policy_loader=lambda:load_policy(args.policy))
+            process_actions(state,path,response.get('actions',[]),policy,lambda payload:send(base,'/api/agent/action-authorize',payload,state.get('ca'),state.get('action_credential','')),policy_loader=lambda:load_policy(args.policy))
             delay = 30
         except Exception as exc:
             print('Heartbeat unavailable: ' + type(exc).__name__, flush=True)
