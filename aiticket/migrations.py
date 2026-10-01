@@ -1,6 +1,15 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 3
+CURRENT_VERSION = 4
 MIGRATIONS = {
+    4: (
+        "ALTER TABLE checks ADD COLUMN first_failure_at REAL",
+        "ALTER TABLE incidents ADD COLUMN condition_key TEXT NOT NULL DEFAULT ''",
+        "UPDATE incidents SET condition_key='check:' || check_id",
+        'CREATE TABLE incident_sources(incident_id TEXT NOT NULL REFERENCES incidents(id),check_id TEXT NOT NULL REFERENCES checks(id),report TEXT NOT NULL,PRIMARY KEY(incident_id,check_id))',
+        'INSERT INTO incident_sources SELECT id,check_id,report FROM incidents',
+        'CREATE TABLE incident_observations(incident_id TEXT NOT NULL REFERENCES incidents(id),observation_id TEXT NOT NULL REFERENCES observations(id),PRIMARY KEY(incident_id,observation_id))',
+        'CREATE TABLE incident_links(left_id TEXT NOT NULL REFERENCES incidents(id),right_id TEXT NOT NULL REFERENCES incidents(id),reason TEXT NOT NULL,PRIMARY KEY(left_id,right_id))',
+    ),
     3: (
         'ALTER TABLE checks ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1',
         'CREATE TABLE proxmox_clusters(id TEXT PRIMARY KEY,name TEXT NOT NULL)',

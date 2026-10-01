@@ -6,7 +6,7 @@ def populate(store):
     seed(store)
     with store.connect() as c:
         for n in range(55):
-            c.execute('INSERT INTO incidents VALUES(?,?,?,?,?,?,?,?,?)',
+            c.execute('INSERT INTO incidents(id,machine_id,check_id,severity,status,first_seen,last_seen,report,closed) VALUES(?,?,?,?,?,?,?,?,?)',
                       (f'i{n}','m','c','high' if n%2 else 'low','Resolved',1704067200+n*86400,1704067201+n*86400,'{}',1704067202+n*86400))
 
 

@@ -1,6 +1,6 @@
-..................................                                       [100%]
-34 passed in 2.77s
+............................................                             [100%]
+44 passed in 3.44s
 
-Executed locally on Python 3.14.6 with temporary fixtures and mocked Proxmox requests.
-No live infrastructure, Hermes, Discord, models or backup endpoints contacted.
-Docker/Ubuntu and installed Proxmox compatibility remain unverified.
+Local Python 3.14.6; temporary fixtures and mocked external providers.
+No live infrastructure, models, Discord, Hermes or backup endpoints contacted.
+Docker/Ubuntu and installed integration compatibility remain unverified.

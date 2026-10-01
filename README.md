@@ -49,3 +49,5 @@ See [architecture and scope](docs/architecture.md), [acceptance coverage](docs/a
 Milestone 2 adds schema 1 → 2 migration, immutable audit/timeline storage, atomic settings saves, and paginated history filters. Existing evidence is retained; changes predating the audit milestone are not reconstructed.
 
 Milestone 3 adds [Proxmox discovery and linking](docs/proxmox.md): reusable connections, connection/capability results, explicit cluster namespaces, duplicate endpoint handling, migration-aware parents, template exclusion and source retirement/unlinking with preserved history.
+
+Milestone 4 adds [conservative source correlation](docs/correlation.md), separate source evidence, uncertain related-incident links, and recovery that requires fresh healthy results from all attached sources.

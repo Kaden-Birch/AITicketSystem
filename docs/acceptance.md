@@ -13,7 +13,7 @@
 | Durable outbox, leases, TTL, retry and obsolete delivery handling | Implemented and tested |
 | DHCP identity, duplicate heartbeat, revoke/re-enroll | Implemented and tested |
 | Linux structured diagnostics and durable action jobs | Pending; telemetry only |
-| Explicit Proxmox/agent machine linking and source unlink | Implemented; rich incident correlation remains pending |
+| Explicit Proxmox/agent machine linking and source unlink | Implemented; guest-stop/agent correlation implemented; broader metric correlation pending |
 | Hermes V2 signing | Implemented helper; installed spike pending |
 | Durable AI completion and enforceable budgets | Pending; no dispatch |
 | Advice/exploration/handoff | Pending |
@@ -25,3 +25,5 @@
 | No backup operations | No backup code or endpoints |
 
 This milestone does not meet the full definition of done. Tests use mocks/disposable fixtures; no live system is stopped, stressed, rebooted or modified.
+
+Correlation tests cover both arrival orders, explicit identity boundaries, API failure separation, stale evidence, independent recovery, severity filter crossing and uncertain links without merges.

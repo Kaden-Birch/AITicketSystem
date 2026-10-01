@@ -172,7 +172,7 @@ def create_app(data_dir=None, testing=False):
         rows = store.rows('SELECT * FROM incidents WHERE id=?', (incident_id,))
         if not rows:
             abort(404)
-        return render_template('incident.html', incident=rows[0], report=json.loads(rows[0]['report']), timeline=store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at', (incident_id,)))
+        return render_template('incident.html', incident=rows[0], report=json.loads(rows[0]['report']), timeline=store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at', (incident_id,)), links=store.rows('SELECT * FROM incident_links WHERE left_id=? OR right_id=?',(incident_id,incident_id)))
 
     @app.post('/incidents/<incident_id>/note')
     @login_required

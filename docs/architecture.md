@@ -12,10 +12,12 @@ Secrets are Fernet-encrypted using a separately managed key. Cookies require HTT
 
 ## Remaining scope
 
-Not implemented: automatic scheduled discovery and automatic cluster identity verification, sustained metric thresholds/hysteresis, multi-source correlation, scheduled maintenance, reminders, retention, configuration export/import, detailed Linux diagnostics/jobs, credential rotation UI, login/security-event auditing, live Hermes orchestration, budget reservations, chat/exploration/handoff, approvals/action broker and remediation.
+Not implemented: automatic scheduled discovery and automatic cluster identity verification, sustained metric thresholds/hysteresis, broader resource-pressure correlation and manual merge controls, scheduled maintenance, reminders, retention, configuration export/import, detailed Linux diagnostics/jobs, credential rotation UI, login/security-event auditing, live Hermes orchestration, budget reservations, chat/exploration/handoff, approvals/action broker and remediation.
 
 Ordered transactional migrations upgrade schema 1 to schema 2 while preserving existing records. Failed upgrades roll back DDL and the version marker together. Newer schemas are rejected. History supports machine/severity/status/date filters and bounded pagination. GUI budget fields are preferences only; AI stays disabled until enforceable bridge controls are verified.
 
 Local validation uses Python 3.14. Target Python 3.12/Ubuntu and Docker execution require separate deployment validation. No production endpoint is a test fixture.
 
 Milestone 3: schema 3 adds reusable Proxmox connections, explicit cluster namespaces, manually refreshed inventory, confirmed machine/source links, retirement generations, unlink-preserved history and disabled checks. See proxmox.md for identity limitations and deployment details.
+
+Schema 4 introduces incident-source snapshots, incident observation associations and uncertain incident links. Guest-stop/agent-communication correlation is implemented; other checks remain separate. See correlation.md.
