@@ -1,6 +1,6 @@
-............................................                             [100%]
-44 passed in 3.44s
+........................................................                 [100%]
+56 passed in 9.03s
 
-Local Python 3.14.6; temporary fixtures and mocked external providers.
-No live infrastructure, models, Discord, Hermes or backup endpoints contacted.
-Docker/Ubuntu and installed integration compatibility remain unverified.
+Local Python 3.14.6; temporary databases, Linux-like fixtures, mocked systemd providers and harmless bounded subprocesses.
+No live infrastructure, models, Discord, Hermes or backup endpoint contacted.
+Ubuntu/systemd permissions and Docker runtime remain unverified.

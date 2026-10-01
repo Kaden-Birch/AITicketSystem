@@ -1,6 +1,6 @@
 # Linux agent installation
 
-Requires Linux `/proc`, Python 3.11+, and verified HTTPS. The unprivileged agent has no listener or shell execution. Detailed diagnostics/jobs are not implemented. It never self-reboots or updates automatically.
+Requires Linux `/proc`, Python 3.11+, and verified HTTPS. The unprivileged agent has no listener or shell execution. Read-only process/service diagnostics use a local allowlist and durable execution ledger. It never self-reboots or updates automatically.
 
 Deliver reviewed files through an authenticated trusted channel and verify the artifact digest. Do not pipe unauthenticated LAN downloads into a shell.
 
@@ -10,6 +10,7 @@ On the intended guest after securely copying files:
 sudo useradd --system --home /var/lib/aiticket-agent --shell /usr/sbin/nologin aiticket-agent
 sudo install -d -m 0755 /opt/aiticket-agent
 sudo install -m 0644 agent/agent.py /opt/aiticket-agent/agent.py
+sudo install -m 0644 agent/diagnostics.py /opt/aiticket-agent/diagnostics.py
 sudo install -d -o aiticket-agent -g aiticket-agent -m 0700 /var/lib/aiticket-agent
 sudo install -m 0644 agent/aiticket-agent.service /etc/systemd/system/aiticket-agent.service
 ```
@@ -41,3 +42,5 @@ sudo userdel aiticket-agent
 ```
 
 Incident history remains intact.
+
+Optional local policy: create root-managed `/etc/aiticket-agent/policy.json` with `{"services":{"web":"nginx.service"},"logs":false}`. Only those service aliases are accepted. Logs require an explicit local opt-in and existing unprivileged journal access; do not grant broad root or journal permissions automatically. Policy changes require a service restart.

@@ -1,6 +1,12 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 4
+CURRENT_VERSION = 5
 MIGRATIONS = {
+    5: (
+        "ALTER TABLE agents ADD COLUMN capabilities TEXT NOT NULL DEFAULT '{}'",
+        "ALTER TABLE agents ADD COLUMN sampled_at REAL",
+        '''CREATE TABLE diagnostic_jobs(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL REFERENCES agents(id),incident_id TEXT NOT NULL REFERENCES incidents(id),operation TEXT NOT NULL,parameters TEXT NOT NULL,state TEXT NOT NULL,created REAL NOT NULL,expires REAL NOT NULL,lease_until REAL,lease_token TEXT,result TEXT,completed REAL)''',
+        'CREATE INDEX diagnostic_agent_queue ON diagnostic_jobs(agent_id,state,created)',
+    ),
     4: (
         "ALTER TABLE checks ADD COLUMN first_failure_at REAL",
         "ALTER TABLE incidents ADD COLUMN condition_key TEXT NOT NULL DEFAULT ''",

@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-VERSION = '0.1.0'
+VERSION = '0.2.0'
 
 
 def endpoint(value):
@@ -52,17 +52,54 @@ def write_state(path, value):
     os.replace(temporary, path)
 
 
-def telemetry():
+def telemetry(state=None):
     memory = {}
     for line in Path('/proc/meminfo').read_text().splitlines():
         key, value = line.split(':', 1)
         if key in ('MemTotal', 'MemAvailable'):
             memory[key] = int(value.strip().split()[0]) * 1024
     disk = os.statvfs('/')
-    return {'uptime_seconds': float(Path('/proc/uptime').read_text().split()[0]),
+    result = {'inode_free':disk.f_favail,'inode_total':disk.f_files,'uptime_seconds': float(Path('/proc/uptime').read_text().split()[0]),
             'load_1': os.getloadavg()[0], 'memory_total_bytes': memory['MemTotal'],
             'memory_available_bytes': memory['MemAvailable'],
             'disk_free_bytes': disk.f_bavail * disk.f_frsize, 'disk_total_bytes': disk.f_blocks * disk.f_frsize}
+    if state is not None:
+        counters=[int(v) for v in Path('/proc/stat').read_text().splitlines()[0].split()[1:9]]
+        total,idle=sum(counters),counters[3]+counters[4]
+        previous=state.get('cpu_counters')
+        if previous and total>previous[0] and idle>=previous[1]:
+            result['cpu_percent']=max(0,min(100,100*(1-(idle-previous[1])/(total-previous[0]))))
+        state['cpu_counters']=[total,idle]
+    pressure=Path('/proc/pressure/memory')
+    if pressure.exists():
+        for line in pressure.read_text().splitlines():
+            if line.startswith('full '):
+                result['memory_pressure_percent']=float(dict(field.split('=') for field in line.split()[1:])['avg10'])
+    return result
+
+
+def process_jobs(state,path,jobs,policy):
+    from diagnostics import execute
+    ledger=state.setdefault('diagnostic_ledger',{})
+    for job in jobs[:1]:
+        job_id=job['id']
+        record=ledger.get(job_id)
+        if not record:
+            ledger[job_id]={'status':'running','output':''}
+            write_state(path,state)
+            try:
+                record=execute(job,policy)
+            except Exception as exc:
+                record={'status':'failed','output':'Diagnostic failed: '+type(exc).__name__}
+        elif record['status']=='running':
+            record={'status':'failed','output':'Agent restarted during diagnostic; not blindly replayed.'}
+        ledger[job_id]=record
+        state['diagnostic_result']={'job_id':job_id,'lease_token':job['lease_token'],**record}
+        # Retain bounded completed identity ledger; old jobs expire in ten minutes.
+        while len(ledger)>100:
+            ledger.pop(next(iter(ledger)))
+        write_state(path,state)
+
 
 
 def main():
@@ -71,6 +108,7 @@ def main():
     parser.add_argument('--state', default='/var/lib/aiticket-agent/identity.json')
     parser.add_argument('--server')
     parser.add_argument('--ca')
+    parser.add_argument('--policy',default='/etc/aiticket-agent/policy.json')
     args = parser.parse_args()
     path = Path(args.state)
     if args.command == 'enroll':
@@ -83,6 +121,8 @@ def main():
         return
     state = json.loads(path.read_text())
     base = endpoint(state['server'])
+    from diagnostics import load_policy,capabilities
+    policy=load_policy(args.policy)
     running = True
     def stop(*_):
         nonlocal running
@@ -92,15 +132,24 @@ def main():
     delay = 30
     while running:
         try:
+            if state.get('diagnostic_result'):
+                try:
+                    post(base,'/api/agent/result',state['diagnostic_result'],state.get('ca'),state['credential'])
+                except urllib.error.HTTPError as exc:
+                    if exc.code not in (400,409):
+                        raise
+                state.pop('diagnostic_result',None)
+                write_state(path,state)
             # Retain stable event identity after ambiguous delivery or process restart.
             pending = state.get('pending')
             if not pending:
-                pending = {'event_id': str(uuid.uuid4()), 'version': VERSION, 'telemetry': telemetry()}
+                pending = {'event_id': str(uuid.uuid4()), 'version': VERSION, 'telemetry': telemetry(state), 'sampled_at':time.time(), 'capabilities':capabilities(policy)}
                 state['pending'] = pending
                 write_state(path, state)
-            post(base, '/api/agent/heartbeat', pending, state.get('ca'), state['credential'])
+            response=post(base, '/api/agent/heartbeat', pending, state.get('ca'), state['credential'])
             state.pop('pending', None)
             write_state(path, state)
+            process_jobs(state,path,response.get('jobs',[]),policy)
             delay = 30
         except Exception as exc:
             print('Heartbeat unavailable: ' + type(exc).__name__, flush=True)

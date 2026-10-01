@@ -51,3 +51,5 @@ Milestone 2 adds schema 1 → 2 migration, immutable audit/timeline storage, ato
 Milestone 3 adds [Proxmox discovery and linking](docs/proxmox.md): reusable connections, connection/capability results, explicit cluster namespaces, duplicate endpoint handling, migration-aware parents, template exclusion and source retirement/unlinking with preserved history.
 
 Milestone 4 adds [conservative source correlation](docs/correlation.md), separate source evidence, uncertain related-incident links, and recovery that requires fresh healthy results from all attached sources.
+
+Milestone 5 adds [agent resource rules and read-only diagnostics](docs/resource-diagnostics.md): sustained CPU/memory/disk/inode thresholds, capability reporting, incident-scoped diagnostic jobs, bounded service/process/log queries, and restart-safe execution/result tracking.

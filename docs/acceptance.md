@@ -6,13 +6,13 @@
 | Secret encryption and no saved-secret redisplay | Implemented and tested |
 | HTTP/TCP checks | Implemented; provider tests |
 | Proxmox discovery / linked checks | Implemented with explicit cluster namespaces; duplicate endpoint, migration, stopped guest and retirement tests |
-| Failure/recovery thresholds | Implemented; sustained metrics pending |
+| Failure/recovery thresholds and sustained resource metrics | Implemented and tested; root filesystem and Linux PSI scope |
 | Parent suppression, temporary maintenance | Implemented; schedules pending |
 | Deterministic incident before AI | Implemented and tested |
 | Manual notes and resolved-but-unhealthy visibility | Implemented and tested |
 | Durable outbox, leases, TTL, retry and obsolete delivery handling | Implemented and tested |
 | DHCP identity, duplicate heartbeat, revoke/re-enroll | Implemented and tested |
-| Linux structured diagnostics and durable action jobs | Pending; telemetry only |
+| Linux read-only diagnostics and durable jobs | Implemented and tested; all action/mutation jobs unavailable |
 | Explicit Proxmox/agent machine linking and source unlink | Implemented; guest-stop/agent correlation implemented; broader metric correlation pending |
 | Hermes V2 signing | Implemented helper; installed spike pending |
 | Durable AI completion and enforceable budgets | Pending; no dispatch |

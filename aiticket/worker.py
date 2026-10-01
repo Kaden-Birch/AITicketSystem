@@ -10,13 +10,15 @@ log = logging.getLogger(__name__)
 
 
 def tick(store, vault):
+    with store.connect() as c:
+        c.execute("UPDATE diagnostic_jobs SET state='expired',lease_until=NULL,lease_token=NULL WHERE expires<=? AND state IN ('pending','leased')",(time.time(),))
     job = claim(store, 'checks')
     if job:
         try:
-            healthy, evidence = probe(job['kind'], json.loads(job['config']), vault, store)
+            healthy, evidence = probe(job['kind'], {**json.loads(job['config']), '_check_id':job['id']}, vault, store)
         except Exception as exc:
             # Do not put URLs, tokens or raw upstream error bodies in evidence.
-            healthy, evidence = False, {'reason': 'Check could not complete', 'error_type': type(exc).__name__}
+            healthy, evidence = (None if job['kind']=='agent_metric' else False), {'reason': 'Check could not complete', 'error_type': type(exc).__name__}
         observe(store, job['id'], healthy, evidence, lease_token=job['lease_token'])
     delivery = claim(store, 'deliveries')
     if delivery:

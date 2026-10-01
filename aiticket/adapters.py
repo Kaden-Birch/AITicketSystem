@@ -6,6 +6,9 @@ from .security import validate_url
 
 
 def probe(kind, config, vault, store=None):
+    if kind == 'agent_metric':
+        from .diagnostics import metric_probe
+        return metric_probe(store,config)
     if kind == 'proxmox_linked':
         from .proxmox import linked_probe
         return linked_probe(store,vault,config)

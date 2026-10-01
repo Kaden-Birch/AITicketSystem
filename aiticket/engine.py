@@ -23,16 +23,22 @@ def observe(store, check_id, healthy, evidence, now=None, lease_token=None):
         check = c.execute('SELECT * FROM checks WHERE id=?', (check_id,)).fetchone()
         if not check or not check['enabled'] or (lease_token and check['lease_token'] != lease_token):
             return
+        if check['kind']=='agent_metric' and healthy is not None:
+            previous=c.execute('SELECT evidence FROM observations WHERE check_id=? ORDER BY at DESC LIMIT 1',(check_id,)).fetchone()
+            if previous and json.loads(previous[0]).get('sampled_at')==evidence.get('sampled_at'):
+                c.execute('UPDATE checks SET lease_until=NULL,lease_token=NULL,next_run=? WHERE id=?',(now+check['interval'],check_id))
+                return
         observation_id = uid()
-        c.execute('INSERT INTO observations VALUES(?,?,?,?,?)', (observation_id, check_id, now, 'healthy' if healthy else 'down', json.dumps(evidence)))
-        failures = 0 if healthy else check['failures'] + 1
+        c.execute('INSERT INTO observations VALUES(?,?,?,?,?)', (observation_id, check_id, now, 'unknown' if healthy is None else 'healthy' if healthy else 'down', json.dumps(evidence)))
+        failures = 0 if healthy is not False else check['failures'] + 1
         successes = check['successes'] + 1 if healthy else 0
-        health = check['health']
-        if failures >= check['fail_after']:
+        health = 'unknown' if healthy is None else check['health']
+        first_failure_at = None if healthy is not False else (check['first_failure_at'] if check['failures'] and check['first_failure_at'] is not None else now)
+        sustain = json.loads(check['config']).get('sustain_seconds',0)
+        if failures >= check['fail_after'] and first_failure_at is not None and now-first_failure_at>=sustain:
             health = 'down'
         if successes >= check['recover_after']:
             health = 'healthy'
-        first_failure_at = None if healthy else (check['first_failure_at'] if check['failures'] and check['first_failure_at'] is not None else now)
         c.execute('UPDATE checks SET failures=?,successes=?,health=?,first_failure_at=?,lease_until=NULL,lease_token=NULL,next_run=? WHERE id=?',
                   (failures, successes, health, first_failure_at, now + check['interval'], check_id))
         incident = c.execute('SELECT i.* FROM incidents i JOIN incident_sources s ON s.incident_id=i.id WHERE s.check_id=? AND i.closed IS NULL', (check_id,)).fetchone()
@@ -48,7 +54,7 @@ def observe(store, check_id, healthy, evidence, now=None, lease_token=None):
         first_failure = first_failure_at if first_failure_at is not None else now
         source = {'check_id':check_id, 'kind':check['kind'], 'first_failure':first_failure if failures else None,
                   'last_observation':now, 'check':check['name'], 'expected':'healthy', 'observed':health,
-                  'latest_sample':'healthy' if healthy else 'down', 'severity':check['severity'],
+                  'latest_sample':'unknown' if healthy is None else 'healthy' if healthy else 'down', 'severity':check['severity'],
                   'justification':f"{failures} consecutive failures; threshold {check['fail_after']}",
                   'evidence':evidence, 'observed_at':now, 'suppressed':suppressed}
         condition = source_condition(check, evidence)

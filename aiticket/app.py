@@ -2,6 +2,7 @@ import functools
 import hmac
 import json
 import math
+import re
 from datetime import datetime, timezone
 import os
 import secrets
@@ -172,7 +173,7 @@ def create_app(data_dir=None, testing=False):
         rows = store.rows('SELECT * FROM incidents WHERE id=?', (incident_id,))
         if not rows:
             abort(404)
-        return render_template('incident.html', incident=rows[0], report=json.loads(rows[0]['report']), timeline=store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at', (incident_id,)), links=store.rows('SELECT * FROM incident_links WHERE left_id=? OR right_id=?',(incident_id,incident_id)))
+        return render_template('incident.html', incident=rows[0], report=json.loads(rows[0]['report']), timeline=store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at', (incident_id,)), links=store.rows('SELECT * FROM incident_links WHERE left_id=? OR right_id=?',(incident_id,incident_id)), diagnostic_jobs=store.rows('SELECT * FROM diagnostic_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,)), diagnostic_agents=[{**a,'caps':json.loads(a['capabilities'])} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))])
 
     @app.post('/incidents/<incident_id>/note')
     @login_required
@@ -354,8 +355,21 @@ def create_app(data_dir=None, testing=False):
             abort(400)
         # Only numeric, bounded telemetry is accepted; no logs or arbitrary text.
         telemetry = payload.get('telemetry', {})
-        allowed = {'uptime_seconds', 'load_1', 'memory_available_bytes', 'memory_total_bytes', 'disk_free_bytes', 'disk_total_bytes'}
+        allowed = {'uptime_seconds', 'load_1', 'memory_available_bytes', 'memory_total_bytes', 'disk_free_bytes', 'disk_total_bytes', 'inode_free', 'inode_total', 'cpu_percent', 'memory_pressure_percent'}
         if not isinstance(telemetry, dict) or set(telemetry) - allowed or any(type(v) not in (float, int) or (not math.isfinite(v) or not 0 <= v <= 1e18) for v in telemetry.values()):
+            abort(400)
+        if any(telemetry.get(key,0)>100 for key in ('cpu_percent','memory_pressure_percent')):
+            abort(400)
+        for free,total in (('memory_available_bytes','memory_total_bytes'),('disk_free_bytes','disk_total_bytes'),('inode_free','inode_total')):
+            if free in telemetry and total in telemetry and telemetry[free]>telemetry[total]:
+                abort(400)
+        capabilities=payload.get('capabilities',{})
+        if not isinstance(capabilities,dict) or set(capabilities)-{'operations','services'} or any(not isinstance(capabilities.get(k,[]),list) for k in ('operations','services')):
+            abort(400)
+        if len(capabilities.get('operations',[]))>3 or any(x not in ('process_summary','service_status','service_logs') for x in capabilities.get('operations',[])) or len(capabilities.get('services',[]))>20 or any(not isinstance(x,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',x) for x in capabilities.get('services',[])):
+            abort(400)
+        sampled_at=payload.get('sampled_at')
+        if sampled_at is not None and (type(sampled_at) not in (float,int) or not math.isfinite(sampled_at) or sampled_at<0):
             abort(400)
         with store.connect() as c:
             c.execute('BEGIN IMMEDIATE')
@@ -363,12 +377,15 @@ def create_app(data_dir=None, testing=False):
             if not row:
                 abort(401)
             if c.execute('SELECT 1 FROM agent_events WHERE agent_id=? AND event_id=?', (row['id'], event)).fetchone():
-                return {'status': 'duplicate', 'jobs': []}
+                from .diagnostics import poll
+                return {'status': 'duplicate', 'jobs': poll(c,row['id'],time.time())}
             now = time.time()
             c.execute('INSERT INTO agent_events VALUES(?,?,?)', (row['id'], event, now))
             c.execute('DELETE FROM agent_events WHERE at<?', (now - 604800,))
-            c.execute('UPDATE agents SET last_seen=?,address=?,version=?,telemetry=? WHERE id=?', (now, request.remote_addr, str(payload.get('version', ''))[:32], json.dumps(telemetry), row['id']))
-        return {'status': 'accepted', 'jobs': []}
+            c.execute('UPDATE agents SET last_seen=?,address=?,version=?,telemetry=?,capabilities=?,sampled_at=? WHERE id=?', (now, request.remote_addr, str(payload.get('version', ''))[:32], json.dumps(telemetry), json.dumps(capabilities),sampled_at,row['id']))
+            from .diagnostics import poll
+            jobs=poll(c,row['id'],now)
+        return {'status': 'accepted', 'jobs': jobs}
 
     @app.route('/proxmox', methods=['GET','POST'])
     @login_required
@@ -442,5 +459,44 @@ def create_app(data_dir=None, testing=False):
             clusters=store.rows('SELECT * FROM proxmox_clusters ORDER BY name'),
             objects=store.rows('SELECT o.*,m.name AS machine FROM proxmox_objects o LEFT JOIN machines m ON m.id=o.machine_id ORDER BY o.cluster_id,o.kind,o.object_key,o.generation'),
             machines=store.rows('SELECT * FROM machines ORDER BY name'))
+
+    @app.post('/api/agent/result')
+    def diagnostic_result():
+        from .diagnostics import complete
+        bearer=request.headers.get('Authorization','')
+        if not bearer.startswith('Bearer '):
+            abort(401)
+        agents=store.rows('SELECT id FROM agents WHERE credential_digest=? AND revoked=0',(digest(bearer[7:]),))
+        if not agents:
+            abort(401)
+        return {'status':complete(store,agents[0]['id'],request.get_json())}
+
+    @app.post('/incidents/<incident_id>/diagnostics')
+    @login_required
+    def request_diagnostic(incident_id):
+        from .diagnostics import request_job
+        request_job(store,request.form.get('agent_id'),incident_id,request.form.get('operation'),request.form.get('service_id'))
+        return redirect(url_for('incident',incident_id=incident_id))
+
+    @app.route('/resources',methods=['GET','POST'])
+    @login_required
+    def resource_rules():
+        from .diagnostics import METRICS
+        if request.method=='POST':
+            f=request.form
+            agents=store.rows('SELECT * FROM agents WHERE id=? AND revoked=0',(f.get('agent_id'),))
+            if not agents or f.get('metric') not in METRICS:
+                raise ValueError('Choose an enrolled agent and supported resource metric.')
+            fail,recover=float(f.get('fail_above',90)),float(f.get('recover_below',80))
+            duration=int(f.get('sustain_seconds',120))
+            if not 0<=recover<fail<=100 or not 30<=duration<=86400:
+                raise ValueError('Thresholds must satisfy 0 ≤ recovery < failure ≤ 100; duration 30–86400 seconds.')
+            config={'agent_id':agents[0]['id'],'metric':f['metric'],'fail_above':fail,'recover_below':recover,'sustain_seconds':duration}
+            with store.connect() as c:
+                check_id=uid()
+                c.execute('INSERT INTO checks(id,machine_id,name,kind,config,interval,fail_after,recover_after) VALUES(?,?,?,?,?,30,1,2)',(check_id,agents[0]['machine_id'],f['metric'],'agent_metric',json.dumps(config)))
+                store.audit(c,'resource_rule.created',check_id,{'metric':f['metric']})
+            return redirect(url_for('resource_rules'))
+        return render_template('resources.html',metrics=METRICS,agents=store.rows('SELECT a.id,m.name,a.capabilities FROM agents a JOIN machines m ON m.id=a.machine_id WHERE revoked=0'),rules=store.rows("SELECT c.name,c.config,m.name AS machine FROM checks c JOIN machines m ON m.id=c.machine_id WHERE kind='agent_metric'"))
 
     return app
