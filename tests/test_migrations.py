@@ -20,7 +20,7 @@ def test_schema_one_upgrade_preserves_history(tmp_path):
     path=tmp_path/'legacy.db'
     legacy(path)
     store=Store(path)
-    assert store.rows('SELECT version FROM schema_version')==[{'version':6}]
+    assert store.rows('SELECT version FROM schema_version')==[{'version':7}]
     assert store.rows('SELECT * FROM timeline')[0]['text']=='Existing evidence'
     assert store.rows('SELECT * FROM machines')[0]['name']=='Existing machine'
     Store(path)

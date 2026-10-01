@@ -44,3 +44,7 @@ sudo userdel aiticket-agent
 Incident history remains intact.
 
 Optional local policy: create root-managed `/etc/aiticket-agent/policy.json` with `{"services":{"web":"nginx.service"},"logs":false}`. Only those service aliases are accepted. Logs require an explicit local opt-in and existing unprivileged journal access; do not grant broad root or journal permissions automatically. Policy changes require a service restart.
+
+## Credential rotation
+
+Select “Rotate via new enrollment” on Hosts & checks. This immediately revokes the current credential, expires queued diagnostics and invalidates other unused enrollment tokens for the machine. The replacement token expires in ten minutes. Stop the agent service, deliberately remove `/var/lib/aiticket-agent/identity.json`, then run the enrollment command above with that token and restart the service. Do this promptly to avoid a missing-heartbeat incident. The server preserves the agent UUID, machine links and historical records; no agent IP is needed. If the token expires, generate another enrollment token for the same machine.

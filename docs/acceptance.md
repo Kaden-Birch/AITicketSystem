@@ -20,7 +20,7 @@
 | Approval broker and recovery actions | Pending; all mutations unavailable |
 | Configuration/enrollment/workflow audit and immutable timelines | Implemented and tested; login/security-event audit pending |
 | Schema upgrades and incident history filters | Implemented and tested |
-| Retention and configuration export/import | Pending |
+| Retention and configuration export/import | Routine unattached samples and heartbeat deduplication cleanup implemented; nonsecret preferences transfer implemented; full inventory transfer and incident archival pending |
 | Docker/Ubuntu deployment | Files supplied; execution validation pending |
 | No backup operations | No backup code or endpoints |
 
@@ -29,3 +29,5 @@ This milestone does not meet the full definition of done. Tests use mocks/dispos
 Correlation tests cover both arrival orders, explicit identity boundaries, API failure separation, stale evidence, independent recovery, severity filter crossing and uncertain links without merges.
 
 Maintenance/notification tests cover timezone boundaries, inherited scope, preserved observations, silence, duplicate reminders, backlog coalescing, escalation severity floors and dispatch filtering. Per-scope notification overrides remain pending.
+
+Password change/console recovery, session invalidation, agent credential rotation and offline key rotation implemented with fixture tests. Live recovery drills remain deferred.

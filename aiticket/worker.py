@@ -11,6 +11,8 @@ log = logging.getLogger(__name__)
 
 def tick(store, vault):
     from .policies import notifications
+    from .administration import prune
+    prune(store)
     notifications(store)
     with store.connect() as c:
         c.execute("UPDATE diagnostic_jobs SET state='expired',lease_until=NULL,lease_token=NULL WHERE expires<=? AND state IN ('pending','leased')",(time.time(),))

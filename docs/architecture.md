@@ -25,3 +25,5 @@ Schema 4 introduces incident-source snapshots, incident observation associations
 Schema 5 implements durable read-only agent diagnostics and resource-health rules. The agent ledger distinguishes completed, failed and interrupted executions; arbitrary shell and all mutation capabilities remain absent. See resource-diagnostics.md.
 
 Schema 6 provides one-time/weekly maintenance and global reminder/escalation policies with durable deduplication and incident silence. Bundled timezone data is versioned. See maintenance-notifications.md.
+
+Schema 7 indexes observation references and heartbeat timestamps for bounded retention. Authentication generations invalidate cookies after password recovery. Key rotation requires stopped processes and an explicit switch to a separately created key; details in recovery.md.

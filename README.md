@@ -55,3 +55,5 @@ Milestone 4 adds [conservative source correlation](docs/correlation.md), separat
 Milestone 5 adds [agent resource rules and read-only diagnostics](docs/resource-diagnostics.md): sustained CPU/memory/disk/inode thresholds, capability reporting, incident-scoped diagnostic jobs, bounded service/process/log queries, and restart-safe execution/result tracking.
 
 Milestone 6 adds [scheduled maintenance and notification policies](docs/maintenance-notifications.md): timezone-aware one-time/weekly windows, incident silence, coalesced reminders and persistent-severity escalation. Live deployment testing remains deferred.
+
+Milestone 7 adds [administration and recovery](docs/recovery.md): routine-sample retention, nonsecret preference export/import, password change/console reset, agent rotation through re-enrollment, and offline encryption-key rotation. Schema 7 adds cleanup indexes. Live deployment testing remains deferred.

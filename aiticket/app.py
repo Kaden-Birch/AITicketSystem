@@ -33,7 +33,7 @@ def create_app(data_dir=None, testing=False):
     def login_required(fn):
         @functools.wraps(fn)
         def wrapped(*args, **kwargs):
-            if not session.get('admin'):
+            if not session.get('admin') or session.get('auth_generation') != store.setting('auth_generation'):
                 return redirect(url_for('login'))
             return fn(*args, **kwargs)
         return wrapped
@@ -81,7 +81,7 @@ def create_app(data_dir=None, testing=False):
                 if check_password_hash(store.setting('admin_hash'), request.form.get('password', '')):
                     c.execute('DELETE FROM login_attempts WHERE address=?', (address,))
                     session.clear()
-                    session.update(admin=True, csrf=secrets.token_urlsafe(32))
+                    session.update(admin=True, csrf=secrets.token_urlsafe(32), auth_generation=store.setting('auth_generation'))
                     session.permanent = True
                     return redirect(url_for('dashboard'))
                 failures = (row['failures'] if row else 0) + 1
@@ -226,6 +226,62 @@ def create_app(data_dir=None, testing=False):
             return redirect(url_for('settings'))
         return render_template('settings.html', ai=store.setting('ai_config', AI_DEFAULTS), discord_configured=bool(store.setting('discord_secret')), minimum=store.setting('discord_minimum', 'medium'), recovery=store.setting('discord_recovery', True))
 
+
+    @app.route('/administration', methods=['GET', 'POST'])
+    @login_required
+    def administration():
+        from .administration import change_password, import_preferences, validate
+        if request.method == 'POST':
+            operation = request.form.get('operation')
+            if operation == 'password':
+                if not check_password_hash(store.setting('admin_hash'), request.form.get('current', '')):
+                    raise ValueError('Current password is incorrect.')
+                password = request.form.get('password', '')
+                if password != request.form.get('confirm', ''):
+                    raise ValueError('Password confirmation does not match.')
+                change_password(store, password)
+                session.clear()
+                return redirect(url_for('login'))
+            elif operation == 'retention':
+                values = validate({'retention_days': int(request.form.get('days', '90'))})
+                store.save_many(values, actor='user')
+            elif operation == 'import':
+                try:
+                    document = json.loads(request.form.get('document', ''))
+                except (ValueError, RecursionError):
+                    raise ValueError('Provide a valid preferences JSON file.')
+                import_preferences(store, document)
+            else:
+                raise ValueError('Unknown administration operation.')
+            flash('Administration preferences saved.')
+            return redirect(url_for('administration'))
+        return render_template('administration.html', days=store.setting('retention_days', 90))
+
+    @app.get('/administration/export')
+    @login_required
+    def export_preferences():
+        from .administration import export_preferences as export
+        with store.connect() as c:
+            store.audit(c, 'preferences.exported', 'settings')
+        response = app.response_class(json.dumps(export(store), indent=2), mimetype='application/json')
+        response.headers['Content-Disposition'] = 'attachment; filename="aiticket-preferences.json"'
+        return response
+
+    @app.post('/agents/<agent_id>/rotate')
+    @login_required
+    def rotate_agent(agent_id):
+        token = secrets.token_urlsafe(32)
+        with store.connect() as c:
+            c.execute('BEGIN IMMEDIATE')
+            agent = c.execute('SELECT * FROM agents WHERE id=?', (agent_id,)).fetchone()
+            if not agent:
+                abort(404)
+            c.execute('UPDATE agents SET revoked=1 WHERE id=?', (agent_id,))
+            c.execute('UPDATE enrollments SET used=? WHERE machine_id=? AND used IS NULL', (time.time(), agent['machine_id']))
+            c.execute("UPDATE diagnostic_jobs SET state='expired',lease_until=NULL,lease_token=NULL WHERE agent_id=? AND state IN ('pending','leased')", (agent_id,))
+            c.execute('INSERT INTO enrollments VALUES(?,?,?,NULL)', (digest(token), agent['machine_id'], time.time()+600))
+            store.audit(c, 'agent.rotation_requested', agent_id)
+        return render_template('enrollment.html', token=token)
 
     @app.get('/history')
     @login_required

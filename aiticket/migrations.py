@@ -1,6 +1,10 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 6
+CURRENT_VERSION = 7
 MIGRATIONS = {
+    7: (
+        'CREATE INDEX incident_observation_lookup ON incident_observations(observation_id)',
+        'CREATE INDEX agent_event_retention ON agent_events(at)',
+    ),
     6: (
         "ALTER TABLE incidents ADD COLUMN severity_floor TEXT NOT NULL DEFAULT 'info'",
         'ALTER TABLE incidents ADD COLUMN silence_until REAL NOT NULL DEFAULT 0',

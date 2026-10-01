@@ -1,6 +1,6 @@
-.................................................................        [100%]
-65 passed in 9.53s
+74 passed in 11.08s
 
 Local Python 3.14.6; bundled tzdata 2026.4; temporary fixtures and mocked external providers.
+Includes schema 6→7 migration, retention preservation, preference validation/atomicity, password session invalidation/console recovery, agent rotation and encryption rotation/rollback.
 No production testing, model calls, Discord sends, Hermes requests or backup endpoints.
 Live Ubuntu/Docker/infrastructure validation remains deferred at user request.
