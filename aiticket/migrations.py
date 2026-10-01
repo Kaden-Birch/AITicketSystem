@@ -1,6 +1,17 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 8
+CURRENT_VERSION = 9
 MIGRATIONS = {
+    9: (
+        "ALTER TABLE ai_jobs ADD COLUMN mode TEXT NOT NULL DEFAULT 'triage'",
+        'ALTER TABLE ai_jobs ADD COLUMN request_id TEXT',
+        'ALTER TABLE ai_jobs ADD COLUMN request_fingerprint TEXT',
+        'CREATE UNIQUE INDEX ai_request_identity ON ai_jobs(request_id) WHERE request_id IS NOT NULL',
+        """CREATE TABLE ai_messages(id TEXT PRIMARY KEY,incident_id TEXT NOT NULL REFERENCES incidents(id),job_id TEXT NOT NULL REFERENCES ai_jobs(id),role TEXT NOT NULL,text TEXT NOT NULL,created REAL NOT NULL,UNIQUE(job_id,role))""",
+        'CREATE INDEX ai_messages_incident ON ai_messages(incident_id,created)',
+        "CREATE TRIGGER ai_messages_no_update BEFORE UPDATE ON ai_messages BEGIN SELECT RAISE(ABORT,'Conversation is immutable'); END",
+        "CREATE TRIGGER ai_messages_no_delete BEFORE DELETE ON ai_messages BEGIN SELECT RAISE(ABORT,'Conversation is immutable'); END",
+        'CREATE INDEX ai_calls_job ON ai_calls(job_id,created)',
+    ),
     8: (
         """CREATE TABLE ai_jobs(id TEXT PRIMARY KEY,incident_id TEXT NOT NULL REFERENCES incidents(id),state TEXT NOT NULL,created REAL NOT NULL,expires REAL NOT NULL,model TEXT NOT NULL,allowance INTEGER NOT NULL,max_calls INTEGER NOT NULL,evidence TEXT NOT NULL,credential_digest TEXT NOT NULL,credential TEXT NOT NULL,endpoint TEXT NOT NULL,bridge_secret TEXT NOT NULL,next_attempt REAL NOT NULL,lease_until REAL,lease_token TEXT,attempts INTEGER NOT NULL DEFAULT 0,summary TEXT,error TEXT,completed REAL)""",
         'CREATE INDEX ai_job_queue ON ai_jobs(state,next_attempt)',

@@ -59,3 +59,5 @@ Milestone 6 adds [scheduled maintenance and notification policies](docs/maintena
 Milestone 7 adds [administration and recovery](docs/recovery.md): routine-sample retention, nonsecret preference export/import, password change/console reset, agent rotation through re-enrollment, and offline encryption-key rotation. Schema 7 adds cleanup indexes. Live deployment testing remains deferred.
 
 Milestone 8 adds [Hermes orchestration and budget admission](docs/hermes-contract.md), a companion bridge and restricted tool-free adapter, signed durable status polling, usage/reservation meters and cancellation. The installed Hermes v0.20.0 and live provider remain untested; runtime/provider verification must remain unchecked until those deferred tests pass.
+
+Milestone 9 adds incident-scoped advice chat and selected-evidence exploration, immutable conversations, duplicate submission protection, and shared incident/global budget enforcement. Exploration analyzes already completed read-only diagnostics; it does not execute tools. Update the companion bridge alongside the application. Live testing remains deferred.

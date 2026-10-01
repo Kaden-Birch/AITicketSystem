@@ -175,7 +175,7 @@ def create_app(data_dir=None, testing=False):
         if not rows:
             abort(404)
         from .ai import meter
-        return render_template('incident.html', ai_jobs=store.rows('SELECT id,state,created,summary,error FROM ai_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100', (incident_id,)), ai_meter=meter(store, incident_id), incident=rows[0], report=json.loads(rows[0]['report']), timeline=store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at', (incident_id,)), links=store.rows('SELECT * FROM incident_links WHERE left_id=? OR right_id=?',(incident_id,incident_id)), diagnostic_jobs=store.rows('SELECT * FROM diagnostic_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,)), diagnostic_agents=[{**a,'caps':json.loads(a['capabilities'])} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))])
+        return render_template('incident.html', workspace_request_id=uid(), workspace_messages=store.rows('SELECT m.*,j.state,j.mode FROM ai_messages m JOIN ai_jobs j ON j.id=m.job_id WHERE m.incident_id=? ORDER BY m.created DESC LIMIT 100', (incident_id,)), workspace_sources=store.rows('SELECT s.check_id,c.name FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=?',(incident_id,)), ai_jobs=store.rows('SELECT id,state,mode,created,summary,error FROM ai_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100', (incident_id,)), ai_meter=meter(store, incident_id), incident=rows[0], report=json.loads(rows[0]['report']), timeline=store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at', (incident_id,)), links=store.rows('SELECT * FROM incident_links WHERE left_id=? OR right_id=?',(incident_id,incident_id)), diagnostic_jobs=store.rows('SELECT * FROM diagnostic_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,)), diagnostic_agents=[{**a,'caps':json.loads(a['capabilities'])} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))])
 
     @app.post('/incidents/<incident_id>/note')
     @login_required
@@ -639,14 +639,14 @@ def create_app(data_dir=None, testing=False):
                     raise ValueError('Bridge check failed. Review reachability, TLS, authentication and installed compatibility.')
                 if result.get('version') != 1 or result.get('tools') != [] or result.get('model_gateway') is not True or result.get('compatible') is not True:
                     raise ValueError('Bridge reports an incompatible or unrestricted Hermes adapter.')
-                store.save_many({'hermes_validation': {'at': time.time(), 'url': bridge['url']}}, actor='user')
+                store.save_many({'hermes_validation': {'at': time.time(), 'url': bridge['url'], 'workspace_modes': [m for m in ('advice', 'exploration') if m in result.get('workspace_modes', [])]}}, actor='user')
                 flash('Signed bridge compatibility check passed. No model request was made.')
             elif f.get('operation') == 'enable':
                 validation = store.setting('hermes_validation') or {}
                 if validation.get('url') != bridge['url'] or time.time()-validation.get('at', 0)>86400:
                     raise ValueError('Run a recent bridge compatibility check before enabling.')
                 bridge = {**bridge, 'enabled': True}
-                valid_configuration(store.setting('ai_config', {}), bridge, provider)
+                valid_configuration(store.setting('ai_config', {}), bridge, provider, mode='advice')
                 if not store.setting('ai_provider_secret'):
                     raise ValueError('Save model-provider credentials first.')
                 store.save_many({'hermes_config': bridge}, actor='user')
@@ -660,6 +660,13 @@ def create_app(data_dir=None, testing=False):
     def investigate(incident_id):
         from .ai import request_job
         request_job(store, vault, incident_id)
+        return redirect(url_for('incident', incident_id=incident_id))
+
+    @app.post('/incidents/<incident_id>/workspace')
+    @login_required
+    def incident_workspace(incident_id):
+        from .ai import request_job
+        request_job(store, vault, incident_id, mode=request.form.get('mode'), question=request.form.get('question', ''), request_id=request.form.get('request_id'), source_ids=request.form.getlist('source_id'), diagnostic_ids=request.form.getlist('diagnostic_id'))
         return redirect(url_for('incident', incident_id=incident_id))
 
     @app.post('/ai/<job_id>/cancel')

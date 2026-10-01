@@ -31,12 +31,12 @@ def cost(input_tokens, output_tokens, cfg):
     return int((Decimal(input_tokens) * Decimal(str(cfg['input_price'])) + Decimal(output_tokens) * Decimal(str(cfg['output_price']))).to_integral_value(rounding=ROUND_CEILING))
 
 
-def valid_configuration(cfg, bridge, provider):
+def valid_configuration(cfg, bridge, provider, mode='triage'):
     if not bridge.get('enabled') or not bridge.get('runtime_verified') or not provider.get('verified'):
         raise ValueError('AI is disabled or the provider token-bound contract has not been verified.')
     if provider.get('verified_model') != cfg.get('model'):
         raise ValueError('Revalidate provider bounds after changing the model.')
-    if not cfg.get('model') or any(cfg.get(k, 0) <= 0 for k in ('triage_tokens', 'incident_tokens', 'daily_tokens', 'monthly_tokens', 'max_turns', 'daily_cost', 'monthly_cost')):
+    if not cfg.get('model') or any(cfg.get(k, 0) <= 0 for k in (('triage_tokens',) if mode=='triage' else ()) + ('incident_tokens', 'daily_tokens', 'monthly_tokens', 'max_turns', 'daily_cost', 'monthly_cost')):
         raise ValueError('Configure a model and positive AI allowances; zero prohibits dispatch.')
     if cfg.get('input_price', 0) <= 0 or cfg.get('output_price', 0) <= 0:
         raise ValueError('Configure positive conservative input and output prices before dispatch.')
@@ -53,14 +53,33 @@ def evidence_snapshot(value):
     return redact(value) if isinstance(value, str) else value
 
 
-def request_job(store, vault, incident_id, automatic=False, now=None):
+def request_job(store, vault, incident_id, automatic=False, now=None, mode='triage', question='', request_id=None, source_ids=(), diagnostic_ids=()):
     now = time.time() if now is None else now
+    if mode not in ('triage', 'advice', 'exploration') or (automatic and mode != 'triage'):
+        raise ValueError('Unsupported AI workspace mode.')
+    if mode != 'triage':
+        import uuid
+        if not isinstance(question, str) or not 1 <= len(question.strip()) <= 2000:
+            raise ValueError('Supply a question of 1–2000 characters.')
+        try:
+            uuid.UUID(request_id)
+        except (ValueError, TypeError, AttributeError):
+            raise ValueError('Invalid request identity; reload the incident page.')
+    fingerprint = hashlib.sha256(json.dumps({'mode': mode, 'question': question.strip(), 'sources': sorted(source_ids), 'diagnostics': sorted(diagnostic_ids)}, sort_keys=True).encode()).hexdigest()
     with store.connect() as c:
         c.execute('BEGIN IMMEDIATE')
+        if request_id:
+            previous = c.execute('SELECT id,incident_id,request_fingerprint FROM ai_jobs WHERE request_id=?', (request_id,)).fetchone()
+            if previous:
+                if previous['incident_id'] != incident_id or previous['request_fingerprint'] != fingerprint:
+                    raise ValueError('Request identity was reused with different parameters.')
+                return previous['id']
         bridge = setting(c, 'hermes_config', BRIDGE_DEFAULTS)
         provider = setting(c, 'ai_provider', PROVIDER_DEFAULTS)
         cfg = setting(c, 'ai_config', {})
-        valid_configuration(cfg, bridge, provider)
+        valid_configuration(cfg, bridge, provider, mode)
+        if mode != 'triage' and mode not in (setting(c, 'hermes_validation', {}) or {}).get('workspace_modes', []):
+            raise ValueError('Update the companion bridge and run its compatibility check for workspace support.')
         if not setting(c, 'hermes_secret') or not setting(c, 'ai_provider_secret'):
             raise ValueError('Save both bridge and model-provider credentials.')
         incident = c.execute('SELECT * FROM incidents WHERE id=?', (incident_id,)).fetchone()
@@ -70,15 +89,24 @@ def request_job(store, vault, incident_id, automatic=False, now=None):
             return None
         existing = c.execute("SELECT id FROM ai_jobs WHERE incident_id=? AND state IN ('pending','dispatching','running','unknown')", (incident_id,)).fetchone()
         if existing:
+            if mode != 'triage':
+                raise ValueError('An AI execution is already active for this incident; wait or cancel it first.')
             return existing['id']
         if c.execute("SELECT count(*) FROM ai_jobs WHERE state IN ('pending','dispatching','running','unknown')").fetchone()[0] >= 10:
             raise ValueError('AI queue is full; review existing jobs.')
         job_id, token = uid(), secrets.token_urlsafe(48)
         # Snapshot only the deterministic report; notes, credentials and raw configs are excluded.
         evidence = json.dumps(evidence_snapshot(json.loads(incident['report'])), ensure_ascii=True)[:16000]
+        if mode != 'triage':
+            from .workspace import context
+            evidence = context(c, incident, mode, question, source_ids, diagnostic_ids)
         c.execute('INSERT INTO ai_jobs(id,incident_id,state,created,expires,model,allowance,max_calls,evidence,credential_digest,credential,endpoint,bridge_secret,next_attempt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                   (job_id, incident_id, 'pending', now, now+3600, cfg['model'], min(cfg['triage_tokens'], cfg['incident_tokens']), min(cfg['max_turns'], 100), evidence, digest(token), vault.encrypt(token), bridge['url'].rstrip('/'), setting(c, 'hermes_secret'), now))
-        store.timeline(c, incident_id, 'ai_queued', 'Read-only AI triage queued: '+job_id, actor='user' if not automatic else 'monitor', now=now)
+        c.execute('UPDATE ai_jobs SET mode=?,request_id=?,request_fingerprint=?,allowance=? WHERE id=?', (mode, request_id, fingerprint, min(cfg['triage_tokens'], cfg['incident_tokens']) if mode=='triage' else cfg['incident_tokens'], job_id))
+        if mode != 'triage':
+            c.execute('INSERT INTO ai_messages VALUES(?,?,?,?,?,?)', (uid(), incident_id, job_id, 'user', redact(question.strip()), now))
+            store.timeline(c, incident_id, 'ai_question', mode+': '+redact(question.strip())+' · Execution '+job_id, actor='user', now=now)
+        store.timeline(c, incident_id, 'ai_queued', 'Read-only AI '+mode+' queued: '+job_id, actor='user' if not automatic else 'monitor', now=now)
         store.audit(c, 'ai.queued', job_id, {'incident_id': incident_id, 'automatic': automatic})
         return job_id
 
@@ -118,7 +146,7 @@ def admit(store, job_id, payload, now=None):
         c.execute('BEGIN IMMEDIATE')
         job = c.execute('SELECT * FROM ai_jobs WHERE id=?', (job_id,)).fetchone()
         cfg, bridge, provider = setting(c, 'ai_config', {}), setting(c, 'hermes_config', BRIDGE_DEFAULTS), setting(c, 'ai_provider', PROVIDER_DEFAULTS)
-        valid_configuration(cfg, bridge, provider)
+        valid_configuration(cfg, bridge, provider, job['mode'] if job else 'triage')
         incident = c.execute('SELECT closed,status FROM incidents WHERE id=?', (job['incident_id'],)).fetchone() if job else None
         if not job or job['state'] not in ('dispatching', 'running') or job['expires'] <= now or not incident or incident['closed'] is not None or incident['status']=='Resolved' or payload.get('model') != job['model'] or cfg['model'] != job['model']:
             raise ValueError('This execution is no longer authorized.')
@@ -138,7 +166,7 @@ def admit(store, job_id, payload, now=None):
         total = input_bound+output_bound
         amount = cost(input_bound, output_bound, cfg)
         day, month = periods(now)
-        checks = ((usage(c, 'WHERE job_id=?', (job_id,))['tokens'], min(job['allowance'], cfg['triage_tokens']), total),
+        checks = ((usage(c, 'WHERE job_id=?', (job_id,))['tokens'], min(job['allowance'], cfg['triage_tokens'] if job['mode']=='triage' else cfg['incident_tokens']), total),
                   (usage(c, 'WHERE job_id IN (SELECT id FROM ai_jobs WHERE incident_id=?)', (job['incident_id'],))['tokens'], cfg['incident_tokens'], total),
                   (usage(c, 'WHERE created>=?', (day,))['tokens'], cfg['daily_tokens'], total),
                   (usage(c, 'WHERE created>=?', (month,))['tokens'], cfg['monthly_tokens'], total),
@@ -240,6 +268,8 @@ def apply_status(store, job_id, document, now=None):
         if state=='completed' and not c.execute('SELECT 1 FROM ai_calls WHERE job_id=?', (job_id,)).fetchone():
             raise ValueError('Completion without a metered model call is invalid.')
         c.execute('UPDATE ai_jobs SET state=?,summary=?,completed=?,error=?,next_attempt=?,lease_until=NULL,lease_token=NULL WHERE id=?', (state, redact(summary), now if state in TERMINAL else None, 'Bridge interrupted; execution must not be replayed.' if state=='unknown' else None, now+30, job_id))
+        if state in ('completed', 'failed') and summary and job['mode'] != 'triage':
+            c.execute('INSERT OR IGNORE INTO ai_messages VALUES(?,?,?,?,?,?)', (uid(), job['incident_id'], job_id, 'assistant', redact(summary), now))
         if (state in TERMINAL or state=='unknown') and state != job['state']:
             store.timeline(c, job['incident_id'], 'ai_'+state, 'AI inference (unverified): '+redact(summary or document['state'])+' · Execution '+job_id, actor='hermes', now=now)
             store.audit(c, 'ai.'+state, job_id, actor='hermes')
