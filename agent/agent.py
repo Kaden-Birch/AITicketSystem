@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unprivileged outbound-only Linux telemetry agent; no shell or action execution."""
+"""Unprivileged outbound-only Linux telemetry agent; no shell; recovery is locally disabled by default."""
 import argparse
 import getpass
 import json
@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-VERSION = '0.2.0'
+VERSION = '0.3.0'
 
 
 def endpoint(value):
@@ -102,9 +102,34 @@ def process_jobs(state,path,jobs,policy):
 
 
 
+def process_actions(state,path,jobs,policy,authorize,policy_loader=None):
+    from actions import execute
+    ledger=state.setdefault('action_ledger',{})
+    for job in jobs[:1]:
+        identifier=job['id']
+        record=ledger.get(identifier)
+        if not record:
+            # Persist before authorization/execution. Any crash in this window is unknown, never replayed.
+            ledger[identifier]={'status':'running','output':''}
+            write_state(path,state)
+            try:
+                authorization=authorize({'id':identifier,'dispatch_token':job['dispatch_token'],'proposal_hash':job['proposal_hash']})
+                if authorization.get('status')!='authorized' or authorization.get('proposal_hash')!=job['proposal_hash'] or authorization.get('operation')!=job['operation'] or authorization.get('parameters')!=job['parameters']:
+                    raise ValueError('Action authorization failed')
+                record=execute(job,policy_loader() if policy_loader else policy)
+            except Exception:
+                record={'status':'unknown','output':'Authorization/execution outcome unknown; no automatic replay.'}
+        elif record['status']=='running':
+            record={'status':'unknown','output':'Agent restarted during action; no automatic replay.'}
+        ledger[identifier]=record
+        state['action_result']={'id':identifier,'dispatch_token':job['dispatch_token'],**record}
+        # Action identities are never evicted; reenrollment requires a new broker delivery.
+        write_state(path,state)
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['enroll', 'run'])
+    parser.add_argument('command', choices=['enroll', 'run', 'recovery-credential'])
     parser.add_argument('--state', default='/var/lib/aiticket-agent/identity.json')
     parser.add_argument('--server')
     parser.add_argument('--ca')
@@ -120,6 +145,14 @@ def main():
         print('Enrolled. Credentials saved with mode 0600; no agent IP configured.')
         return
     state = json.loads(path.read_text())
+    if args.command=='recovery-credential':
+        credential=getpass.getpass('Separate action credential from the application UI: ').strip()
+        if not 16<=len(credential)<=2048:
+            raise SystemExit('Invalid action credential.')
+        state['action_credential']=credential
+        write_state(path,state)
+        print('Separate action credential saved. Restart the agent to advertise validated local recovery capability.')
+        return
     base = endpoint(state['server'])
     from diagnostics import load_policy,capabilities
     policy=load_policy(args.policy)
@@ -132,6 +165,11 @@ def main():
     delay = 30
     while running:
         try:
+            policy=load_policy(args.policy)
+            if state.get('action_result'):
+                post(base,'/api/agent/action-result',state['action_result'],state.get('ca'),state.get('action_credential',''))
+                state.pop('action_result',None)
+                write_state(path,state)
             if state.get('diagnostic_result'):
                 try:
                     post(base,'/api/agent/result',state['diagnostic_result'],state.get('ca'),state['credential'])
@@ -143,13 +181,18 @@ def main():
             # Retain stable event identity after ambiguous delivery or process restart.
             pending = state.get('pending')
             if not pending:
-                pending = {'event_id': str(uuid.uuid4()), 'version': VERSION, 'telemetry': telemetry(state), 'sampled_at':time.time(), 'capabilities':capabilities(policy)}
+                advertised=capabilities(policy)
+                if not state.get('action_credential'):
+                    advertised.pop('actions',None)
+                    advertised.pop('action_services',None)
+                pending = {'event_id': str(uuid.uuid4()), 'version': VERSION, 'telemetry': telemetry(state), 'sampled_at':time.time(), 'capabilities':advertised}
                 state['pending'] = pending
                 write_state(path, state)
             response=post(base, '/api/agent/heartbeat', pending, state.get('ca'), state['credential'])
             state.pop('pending', None)
             write_state(path, state)
             process_jobs(state,path,response.get('jobs',[]),policy)
+            process_actions(state,path,response.get('actions',[]),policy,lambda payload:post(base,'/api/agent/action-authorize',payload,state.get('ca'),state.get('action_credential','')),policy_loader=lambda:load_policy(args.policy))
             delay = 30
         except Exception as exc:
             print('Heartbeat unavailable: ' + type(exc).__name__, flush=True)

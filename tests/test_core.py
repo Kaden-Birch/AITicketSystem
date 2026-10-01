@@ -11,7 +11,7 @@ from aiticket.worker import deliver
 
 def seed(store, parent=None, severity='medium'):
     with store.connect() as c:
-        c.execute('INSERT INTO machines VALUES(?,?,?,?)', ('m', 'Machine', parent, 1))
+        c.execute('INSERT INTO machines(id,name,parent_id,created) VALUES(?,?,?,?)', ('m', 'Machine', parent, 1))
         c.execute('INSERT INTO checks(id,machine_id,name,kind,config,interval,severity) VALUES(?,?,?,?,?,?,?)', ('c', 'm', 'App', 'http', '{}', 60, severity))
 
 
@@ -52,7 +52,7 @@ def test_atomic_leases_and_abandoned_recovery(environment):
 def test_parent_failure_preserves_child_observations(environment):
     _, store, _ = environment
     with store.connect() as c:
-        c.execute('INSERT INTO machines VALUES(?,?,NULL,?)', ('p', 'Parent', 1))
+        c.execute('INSERT INTO machines(id,name,parent_id,created) VALUES(?,?,NULL,?)', ('p', 'Parent', 1))
         c.execute("INSERT INTO checks(id,machine_id,name,kind,config,interval,health) VALUES('pc','p','Parent','tcp','{}',60,'down')")
     seed(store, parent='p')
     for i in range(3):

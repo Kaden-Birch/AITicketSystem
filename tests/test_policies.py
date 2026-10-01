@@ -112,7 +112,7 @@ def test_resolved_incident_supersedes_reminder_and_dispatch_rechecks_filters(env
 def test_parent_maintenance_suppresses_child(environment):
     _,store,_=environment
     with store.connect() as c:
-        c.execute("INSERT INTO machines VALUES('parent','Parent',NULL,1)")
+        c.execute("INSERT INTO machines(id,name,parent_id,created) VALUES('parent','Parent',NULL,1)")
     seed(store,parent='parent')
     start=instant('2026-10-01T12:00','UTC')
     add_window(store,'Parent work','parent','once','UTC',{'start':'2026-10-01T12:00','end':'2026-10-01T13:00'})

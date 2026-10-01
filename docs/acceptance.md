@@ -17,7 +17,7 @@
 | Hermes V2 signing | Implemented on companion requests/responses with durable execution polling; installed spike pending |
 | Durable AI completion and enforceable budgets | Fixture-tested signed execution states and transactional token/configured-price admission; restricted companion/adapter supplied; live Hermes/provider validation pending and default disabled |
 | Advice/exploration/handoff | Advice and selected-evidence exploration implemented with fixtures; checkpoint-based handoff implemented; live AI diagnostic execution pending |
-| Approval broker and recovery actions | Pending; all mutations unavailable |
+| Approval broker and recovery actions | Fixture-tested one-time approval for an allowlisted application service restart; disabled by default, live validation deferred. Autonomous recovery and higher-risk actions remain pending |
 | Configuration/enrollment/workflow audit and immutable timelines | Implemented and tested; login/security-event audit pending |
 | Schema upgrades and incident history filters | Implemented and tested |
 | Retention and configuration export/import | Routine unattached samples and heartbeat deduplication cleanup implemented; nonsecret preferences transfer implemented; full inventory transfer and incident archival pending |

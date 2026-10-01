@@ -1,6 +1,15 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 10
+CURRENT_VERSION = 11
 MIGRATIONS = {
+    11: (
+        'ALTER TABLE agents ADD COLUMN action_credential_digest TEXT',
+        "ALTER TABLE machines ADD COLUMN recovery_role TEXT NOT NULL DEFAULT 'protected'",
+        """CREATE TABLE action_proposals(id TEXT PRIMARY KEY,incident_id TEXT NOT NULL REFERENCES incidents(id),agent_id TEXT NOT NULL REFERENCES agents(id),version INTEGER NOT NULL,parent_id TEXT REFERENCES action_proposals(id),payload TEXT NOT NULL,payload_hash TEXT NOT NULL,state TEXT NOT NULL,created REAL NOT NULL,expires REAL NOT NULL,approved_generation INTEGER,dispatch_token TEXT,dispatched REAL,result TEXT,completed REAL,verification TEXT)""",
+        'CREATE INDEX action_incident ON action_proposals(incident_id,created)',
+        "CREATE UNIQUE INDEX action_target_lock ON action_proposals(agent_id) WHERE state IN ('dispatched','authorized','verifying','unknown')",
+        """CREATE TRIGGER action_payload_immutable BEFORE UPDATE OF payload,payload_hash,version,parent_id,incident_id,agent_id,created,expires ON action_proposals BEGIN SELECT RAISE(ABORT,'Proposal is immutable'); END""",
+        "CREATE TRIGGER action_no_delete BEFORE DELETE ON action_proposals BEGIN SELECT RAISE(ABORT,'Proposal is immutable'); END",
+    ),
     10: (
         'ALTER TABLE ai_jobs ADD COLUMN control_generation INTEGER NOT NULL DEFAULT 0',
         """CREATE TABLE incident_control(incident_id TEXT PRIMARY KEY REFERENCES incidents(id),owner TEXT NOT NULL DEFAULT 'available',generation INTEGER NOT NULL DEFAULT 0,checkpoint_id TEXT,updated REAL NOT NULL)""",

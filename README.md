@@ -2,7 +2,7 @@
 
 Self-hosted monitoring with useful incidents even when AI and the internet are unavailable.
 
-**Status: monitoring plus a restricted AI integration milestone; the full product is not complete.** AI defaults to disabled pending installed-Hermes/provider validation. The application now enforces per-call token and configured-price allowances through its budget gateway. All remediation remains unavailable.
+**Status: monitoring plus a restricted AI integration milestone; the full product is not complete.** AI defaults to disabled pending installed-Hermes/provider validation. The application now enforces per-call token and configured-price allowances through its budget gateway. Recovery defaults to disabled; an approval-required broker supports one explicitly allowlisted application service restart.
 
 Included: authenticated UI, stable machine inventory, HTTP/TCP and read-only Proxmox checks, configurable failure/recovery thresholds, parent suppression, temporary maintenance, deterministic reports, manual notes/resolution, durable Discord delivery, filtered incident history, immutable configuration audit, transactional schema upgrades, and DHCP-safe Linux agent enrollment/telemetry.
 
@@ -63,3 +63,5 @@ Milestone 8 adds [Hermes orchestration and budget admission](docs/hermes-contrac
 Milestone 9 adds incident-scoped advice chat and selected-evidence exploration, immutable conversations, duplicate submission protection, and shared incident/global budget enforcement. Exploration analyzes already completed read-only diagnostics; it does not execute tools. Update the companion bridge alongside the application. Live testing remains deferred.
 
 Milestone 10 adds persistent manual/AI investigation ownership, pause/take-control, immutable checkpoints and fresh read-only resume. Ownership generations fence old executions; queued manual diagnostics and AI investigations cannot overlap. Unknown provider usage stays reserved. Live testing remains deferred.
+
+Milestone 11 adds [approval-required service recovery](docs/action-broker.md): immutable proposals, exact hash/version approval, separate action credentials, fresh failed-service checks, one attempt per incident, target locks, cooldowns and independent recovery verification. No live restart has been tested; activation requires explicit local and application validation.

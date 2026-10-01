@@ -8,7 +8,7 @@ def legacy(path):
     c=sqlite3.connect(path)
     c.executescript(SCHEMA)
     c.execute('INSERT INTO schema_version VALUES(1)')
-    c.execute("INSERT INTO machines VALUES('m','Existing machine',NULL,1)")
+    c.execute("INSERT INTO machines(id,name,parent_id,created) VALUES('m','Existing machine',NULL,1)")
     c.execute("INSERT INTO checks(id,machine_id,name,kind,config,interval) VALUES('c','m','App','http','{}',60)")
     c.execute("INSERT INTO incidents(id,machine_id,check_id,severity,status,first_seen,last_seen,report,closed) VALUES('i','m','c','medium','Open',1,2,'{}',NULL)")
     c.execute("INSERT INTO timeline VALUES('t','i',1,'monitor','opened','Existing evidence')")
@@ -20,7 +20,7 @@ def test_schema_one_upgrade_preserves_history(tmp_path):
     path=tmp_path/'legacy.db'
     legacy(path)
     store=Store(path)
-    assert store.rows('SELECT version FROM schema_version')==[{'version':10}]
+    assert store.rows('SELECT version FROM schema_version')==[{'version':11}]
     assert store.rows('SELECT * FROM timeline')[0]['text']=='Existing evidence'
     assert store.rows('SELECT * FROM machines')[0]['name']=='Existing machine'
     Store(path)
@@ -51,7 +51,7 @@ def test_newer_database_rejected(environment):
 def test_audit_and_timeline_immutable(environment):
     _,store,_=environment
     with store.connect() as c:
-        c.execute("INSERT INTO machines VALUES('m','Machine',NULL,1)")
+        c.execute("INSERT INTO machines(id,name,parent_id,created) VALUES('m','Machine',NULL,1)")
         c.execute("INSERT INTO checks(id,machine_id,name,kind,config,interval) VALUES('c','m','App','http','{}',60)")
         c.execute("INSERT INTO incidents(id,machine_id,check_id,severity,status,first_seen,last_seen,report,closed) VALUES('i','m','c','medium','Open',1,2,'{}',NULL)")
         store.timeline(c,'i','note','Original')

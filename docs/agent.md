@@ -11,6 +11,7 @@ sudo useradd --system --home /var/lib/aiticket-agent --shell /usr/sbin/nologin a
 sudo install -d -m 0755 /opt/aiticket-agent
 sudo install -m 0644 agent/agent.py /opt/aiticket-agent/agent.py
 sudo install -m 0644 agent/diagnostics.py /opt/aiticket-agent/diagnostics.py
+sudo install -m 0644 agent/actions.py /opt/aiticket-agent/actions.py
 sudo install -d -o aiticket-agent -g aiticket-agent -m 0700 /var/lib/aiticket-agent
 sudo install -m 0644 agent/aiticket-agent.service /etc/systemd/system/aiticket-agent.service
 ```
@@ -43,8 +44,27 @@ sudo userdel aiticket-agent
 
 Incident history remains intact.
 
-Optional local policy: create root-managed `/etc/aiticket-agent/policy.json` with `{"services":{"web":"nginx.service"},"logs":false}`. Only those service aliases are accepted. Logs require an explicit local opt-in and existing unprivileged journal access; do not grant broad root or journal permissions automatically. Policy changes require a service restart.
+Optional local policy: create root-managed `/etc/aiticket-agent/policy.json` with `{"services":{"web":"nginx.service"},"logs":false}`. Only those service aliases are accepted. Logs require an explicit local opt-in and existing unprivileged journal access; do not grant broad root or journal permissions automatically. Policy changes are reloaded each heartbeat.
 
 ## Credential rotation
 
 Select “Rotate via new enrollment” on Hosts & checks. This immediately revokes the current credential, expires queued diagnostics and invalidates other unused enrollment tokens for the machine. The replacement token expires in ten minutes. Stop the agent service, deliberately remove `/var/lib/aiticket-agent/identity.json`, then run the enrollment command above with that token and restart the service. Do this promptly to avoid a missing-heartbeat incident. The server preserves the agent UUID, machine links and historical records; no agent IP is needed. If the token expires, generate another enrollment token for the same machine.
+
+## Optional service recovery
+
+Recovery is disabled by default. Read [the broker guide](action-broker.md) before enabling it. A local policy may include:
+
+```json
+{"services":{"web":"nginx.service"},"logs":false,"recovery":{"enabled":false,"validated":false,"services":["web"]}}
+```
+
+Keep both recovery flags false until live validation is completed. Configure the exact service alias on the application Recovery policy page, explicitly classify the machine as an application target, and issue a separate action credential. Stop the agent and enter that credential at the hidden prompt:
+
+```sh
+sudo -u aiticket-agent python3 /opt/aiticket-agent/agent.py recovery-credential
+sudo systemctl start aiticket-agent
+```
+
+The credential is stored in the existing mode-0600 identity file. Monitoring credential revocation or re-enrollment invalidates application-side action authority; issue a new separate credential afterward. Recovery execution identities remain in the durable ledger and are never evicted automatically.
+
+The agent runs unprivileged and installs no privilege grant. An administrator must separately configure and validate narrowly scoped operating-system permission for the exact service. Do not grant broad root, sudo or unrestricted service-management access. The supplied systemd hardening remains in place. No actual service restart has been performed during development.

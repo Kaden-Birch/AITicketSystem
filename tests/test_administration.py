@@ -24,7 +24,7 @@ def test_preferences_roundtrip_and_reject_secrets(environment):
 def test_retention_preserves_incident_evidence(environment):
     _, store, _ = environment
     with store.connect() as c:
-        c.execute("INSERT INTO machines VALUES('m','Machine',NULL,1)")
+        c.execute("INSERT INTO machines(id,name,parent_id,created) VALUES('m','Machine',NULL,1)")
         c.execute("INSERT INTO checks(id,machine_id,name,kind,config,interval) VALUES('c','m','App','http','{}',60)")
         c.execute("INSERT INTO incidents(id,machine_id,check_id,severity,status,first_seen,last_seen,report) VALUES('i','m','c','medium','Open',1,2,'{}')")
         c.execute("INSERT INTO observations VALUES('attached','c',1,'down','{}')")
@@ -58,7 +58,7 @@ def test_key_rotation_all_credentials_and_rollback(environment, tmp_path):
     _, store, old = environment
     store.save('discord_secret', old.encrypt('discord-value'))
     with store.connect() as c:
-        c.execute("INSERT INTO machines VALUES('m','Machine',NULL,1)")
+        c.execute("INSERT INTO machines(id,name,parent_id,created) VALUES('m','Machine',NULL,1)")
         c.execute("INSERT INTO checks(id,machine_id,name,kind,config,interval) VALUES('c','m','PVE','proxmox',?,60)", (json.dumps({'token_secret': old.encrypt('legacy-value')}),))
         c.execute("INSERT INTO proxmox_clusters VALUES('cluster','Cluster')")
         c.execute("INSERT INTO proxmox_connections VALUES('p','cluster','PVE','https://192.0.2.1','id',?,NULL,NULL,NULL)", (old.encrypt('connection-value'),))
@@ -84,7 +84,7 @@ def test_key_rotation_all_credentials_and_rollback(environment, tmp_path):
 def test_rotation_revokes_old_token_preserves_identity(signed_in):
     client, store, _, csrf = signed_in
     with store.connect() as c:
-        c.execute("INSERT INTO machines VALUES('m','Machine',NULL,1)")
+        c.execute("INSERT INTO machines(id,name,parent_id,created) VALUES('m','Machine',NULL,1)")
         c.execute("INSERT INTO agents(id,machine_id,credential_digest) VALUES('a','m',?)", (digest('old-token'),))
     response = client.post('/agents/a/rotate', data={'csrf': csrf})
     assert response.status_code == 200
@@ -115,9 +115,9 @@ def test_schema_six_migrates_without_losing_data(tmp_path):
             for sql in MIGRATIONS[version]:
                 c.execute(sql)
         c.execute('INSERT INTO schema_version VALUES(6)')
-        c.execute("INSERT INTO machines VALUES('existing','Preserved',NULL,1)")
+        c.execute("INSERT INTO machines(id,name,parent_id,created) VALUES('existing','Preserved',NULL,1)")
     store = Store(path)
-    assert store.rows('SELECT version FROM schema_version') == [{'version': 10}]
+    assert store.rows('SELECT version FROM schema_version') == [{'version': 11}]
     assert store.rows('SELECT name FROM machines') == [{'name': 'Preserved'}]
     assert store.rows("SELECT name FROM sqlite_master WHERE name='incident_observation_lookup'")
 

@@ -115,7 +115,7 @@ def create_app(data_dir=None, testing=False):
                 if parent and not c.execute('SELECT 1 FROM machines WHERE id=?', (parent,)).fetchone():
                     raise ValueError('Unknown parent machine.')
                 machine_id = uid()
-                c.execute('INSERT INTO machines VALUES(?,?,?,?)', (machine_id, name, parent, time.time()))
+                c.execute('INSERT INTO machines(id,name,parent_id,created) VALUES(?,?,?,?)', (machine_id, name, parent, time.time()))
                 store.audit(c, 'machine.created', machine_id, {'parent_id': parent})
             return redirect(url_for('hosts'))
         return render_template('hosts.html', machines=store.rows('SELECT * FROM machines ORDER BY name'), agents=store.rows('SELECT agents.*,machines.name FROM agents JOIN machines ON machines.id=machine_id'))
@@ -176,7 +176,7 @@ def create_app(data_dir=None, testing=False):
             abort(404)
         from .ai import meter
         from .handoff import view
-        return render_template('incident.html', ownership=view(store, incident_id), handoff_request_id=uid(), workspace_request_id=uid(), workspace_messages=store.rows('SELECT m.*,j.state,j.mode FROM ai_messages m JOIN ai_jobs j ON j.id=m.job_id WHERE m.incident_id=? ORDER BY m.created DESC LIMIT 100', (incident_id,)), workspace_sources=store.rows('SELECT s.check_id,c.name FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=?',(incident_id,)), ai_jobs=store.rows('SELECT id,state,mode,created,summary,error FROM ai_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100', (incident_id,)), ai_meter=meter(store, incident_id), incident=rows[0], report=json.loads(rows[0]['report']), timeline=store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at', (incident_id,)), links=store.rows('SELECT * FROM incident_links WHERE left_id=? OR right_id=?',(incident_id,incident_id)), diagnostic_jobs=store.rows('SELECT * FROM diagnostic_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,)), diagnostic_agents=[{**a,'caps':json.loads(a['capabilities'])} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))])
+        return render_template('incident.html', ownership=view(store, incident_id), handoff_request_id=uid(), proposals=[{**p,'data':json.loads(p['payload'])} for p in store.rows('SELECT * FROM action_proposals WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,))], action_agents=[{**a,'action_services':json.loads(a['capabilities']).get('action_services',{})} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))], workspace_request_id=uid(), workspace_messages=store.rows('SELECT m.*,j.state,j.mode FROM ai_messages m JOIN ai_jobs j ON j.id=m.job_id WHERE m.incident_id=? ORDER BY m.created DESC LIMIT 100', (incident_id,)), workspace_sources=store.rows('SELECT s.check_id,c.name FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=?',(incident_id,)), ai_jobs=store.rows('SELECT id,state,mode,created,summary,error FROM ai_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100', (incident_id,)), ai_meter=meter(store, incident_id), incident=rows[0], report=json.loads(rows[0]['report']), timeline=store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at', (incident_id,)), links=store.rows('SELECT * FROM incident_links WHERE left_id=? OR right_id=?',(incident_id,incident_id)), diagnostic_jobs=store.rows('SELECT * FROM diagnostic_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,)), diagnostic_agents=[{**a,'caps':json.loads(a['capabilities'])} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))])
 
     @app.post('/incidents/<incident_id>/note')
     @login_required
@@ -281,7 +281,7 @@ def create_app(data_dir=None, testing=False):
             agent = c.execute('SELECT * FROM agents WHERE id=?', (agent_id,)).fetchone()
             if not agent:
                 abort(404)
-            c.execute('UPDATE agents SET revoked=1 WHERE id=?', (agent_id,))
+            c.execute('UPDATE agents SET revoked=1,action_credential_digest=NULL WHERE id=?', (agent_id,))
             c.execute('UPDATE enrollments SET used=? WHERE machine_id=? AND used IS NULL', (time.time(), agent['machine_id']))
             c.execute("UPDATE diagnostic_jobs SET state='expired',lease_until=NULL,lease_token=NULL WHERE agent_id=? AND state IN ('pending','leased')", (agent_id,))
             c.execute('INSERT INTO enrollments VALUES(?,?,?,NULL)', (digest(token), agent['machine_id'], time.time()+600))
@@ -371,7 +371,7 @@ def create_app(data_dir=None, testing=False):
     @login_required
     def revoke(agent_id):
         with store.connect() as c:
-            result = c.execute('UPDATE agents SET revoked=1 WHERE id=?', (agent_id,))
+            result = c.execute('UPDATE agents SET revoked=1,action_credential_digest=NULL WHERE id=?', (agent_id,))
             if not result.rowcount:
                 abort(404)
             store.audit(c, 'agent.revoked', agent_id)
@@ -395,7 +395,7 @@ def create_app(data_dir=None, testing=False):
                 abort(409)
             credential, agent_id = secrets.token_urlsafe(48), existing['id'] if existing else uid()
             if existing:
-                c.execute('UPDATE agents SET credential_digest=?,revoked=0 WHERE id=?', (digest(credential), agent_id))
+                c.execute('UPDATE agents SET credential_digest=?,revoked=0,action_credential_digest=NULL WHERE id=?', (digest(credential), agent_id))
             else:
                 c.execute('INSERT INTO agents(id,machine_id,credential_digest) VALUES(?,?,?)', (agent_id, row['machine_id'], digest(credential)))
                 c.execute('INSERT INTO checks(id,machine_id,name,kind,config,interval) VALUES(?,?,?,?,?,?)', (uid(), row['machine_id'], 'Agent heartbeat', 'agent', json.dumps({'agent_id': agent_id, 'max_age': 180}), 60))
@@ -425,9 +425,13 @@ def create_app(data_dir=None, testing=False):
             if free in telemetry and total in telemetry and telemetry[free]>telemetry[total]:
                 abort(400)
         capabilities=payload.get('capabilities',{})
-        if not isinstance(capabilities,dict) or set(capabilities)-{'operations','services'} or any(not isinstance(capabilities.get(k,[]),list) for k in ('operations','services')):
+        if not isinstance(capabilities,dict) or set(capabilities)-{'operations','services','actions','action_services'} or any(not isinstance(capabilities.get(k,[]),list) for k in ('operations','services')):
             abort(400)
         if len(capabilities.get('operations',[]))>3 or any(x not in ('process_summary','service_status','service_logs') for x in capabilities.get('operations',[])) or len(capabilities.get('services',[]))>20 or any(not isinstance(x,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',x) for x in capabilities.get('services',[])):
+            abort(400)
+        actions=capabilities.get('actions',[])
+        action_services=capabilities.get('action_services',{})
+        if not isinstance(actions,list) or any(a!='service_restart' for a in actions) or len(actions)>1 or not isinstance(action_services,dict) or len(action_services)>20 or any(not isinstance(k,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',k) or not isinstance(v,str) or not re.fullmatch(r'[A-Za-z0-9_.@-]{1,100}\.service',v) or v.startswith('-') for k,v in action_services.items()):
             abort(400)
         sampled_at=payload.get('sampled_at')
         if sampled_at is not None and (type(sampled_at) not in (float,int) or not math.isfinite(sampled_at) or sampled_at<0):
@@ -439,14 +443,17 @@ def create_app(data_dir=None, testing=False):
                 abort(401)
             if c.execute('SELECT 1 FROM agent_events WHERE agent_id=? AND event_id=?', (row['id'], event)).fetchone():
                 from .diagnostics import poll
-                return {'status': 'duplicate', 'jobs': poll(c,row['id'],time.time())}
+                from .actions import poll as action_poll
+                return {'status': 'duplicate', 'jobs': poll(c,row['id'],time.time()), 'actions': action_poll(c,store,row['id'],time.time())}
             now = time.time()
             c.execute('INSERT INTO agent_events VALUES(?,?,?)', (row['id'], event, now))
             c.execute('DELETE FROM agent_events WHERE at<?', (now - 604800,))
             c.execute('UPDATE agents SET last_seen=?,address=?,version=?,telemetry=?,capabilities=?,sampled_at=? WHERE id=?', (now, request.remote_addr, str(payload.get('version', ''))[:32], json.dumps(telemetry), json.dumps(capabilities),sampled_at,row['id']))
             from .diagnostics import poll
             jobs=poll(c,row['id'],now)
-        return {'status': 'accepted', 'jobs': jobs}
+            from .actions import poll as action_poll
+            actions=action_poll(c,store,row['id'],now)
+        return {'status': 'accepted', 'jobs': jobs, 'actions': actions}
 
     @app.route('/proxmox', methods=['GET','POST'])
     @login_required
@@ -664,6 +671,87 @@ def create_app(data_dir=None, testing=False):
         from .ai import request_job
         request_job(store, vault, incident_id)
         return redirect(url_for('incident', incident_id=incident_id))
+
+    @app.route('/recovery-policy', methods=['GET','POST'])
+    @login_required
+    def recovery_policy():
+        from .actions import DEFAULTS
+        cfg=store.setting('action_policy',DEFAULTS)
+        if request.method=='POST':
+            f=request.form
+            if f.get('operation')=='disable':
+                store.save_many({'action_policy':{**cfg,'enabled':False}},actor='user')
+            elif f.get('operation')=='target':
+                if f.get('confirm_application')!='yes':
+                    raise ValueError('Explicitly confirm this is an application machine outside protected infrastructure.')
+                machine=f.get('machine_id')
+                services=f.get('services','').split()
+                if not 1<=len(services)<=20 or any(not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',s) for s in services):
+                    raise ValueError('Choose 1–20 local service aliases.')
+                with store.connect() as c:
+                    c.execute('BEGIN IMMEDIATE')
+                    if not c.execute('SELECT 1 FROM machines WHERE id=?',(machine,)).fetchone() or c.execute("SELECT 1 FROM proxmox_objects WHERE machine_id=? AND kind IN ('node','storage')",(machine,)).fetchone():
+                        raise ValueError('Unknown or protected infrastructure target.')
+                    c.execute("UPDATE machines SET recovery_role='application' WHERE id=?",(machine,))
+                    targets={**cfg.get('targets',{}),machine:services}
+                    updated={**cfg,'targets':targets,'enabled':False,'validated':False}
+                    c.execute("INSERT INTO settings VALUES('action_policy',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(json.dumps(updated),))
+                    store.audit(c,'action.target_configured',machine,{'service_aliases':services})
+            elif f.get('operation')=='enable':
+                if f.get('validated')!='yes' or not cfg.get('targets'):
+                    raise ValueError('Validate the target capability and permission with a bounded live test before enabling.')
+                store.save_many({'action_policy':{**cfg,'enabled':True,'validated':True}},actor='user')
+            else:
+                raise ValueError('Unknown recovery policy operation.')
+            return redirect(url_for('recovery_policy'))
+        return render_template('recovery-policy.html',policy=cfg,machines=store.rows('SELECT id,name,recovery_role FROM machines ORDER BY name'), agents=store.rows("SELECT a.id,m.name FROM agents a JOIN machines m ON m.id=a.machine_id WHERE a.revoked=0 AND m.recovery_role='application'"))
+
+    @app.post('/agents/<agent_id>/action-credential')
+    @login_required
+    def action_credential(agent_id):
+        credential=secrets.token_urlsafe(48)
+        with store.connect() as c:
+            c.execute('BEGIN IMMEDIATE')
+            row=c.execute("SELECT a.id FROM agents a JOIN machines m ON m.id=a.machine_id WHERE a.id=? AND a.revoked=0 AND m.recovery_role='application'",(agent_id,)).fetchone()
+            if not row: raise ValueError('Configure an eligible application agent before issuing an action credential.')
+            c.execute('UPDATE agents SET action_credential_digest=? WHERE id=?',(digest(credential),agent_id))
+            store.audit(c,'action.credential_rotated',agent_id)
+        return render_template('action-credential.html',credential=credential)
+
+    @app.post('/incidents/<incident_id>/proposals')
+    @login_required
+    def action_propose(incident_id):
+        from .actions import propose
+        f=request.form
+        propose(store,incident_id,f.get('agent_id'),f.get('service_id'),f.get('diagnostic_id'),f.get('rationale',''),f.get('impact',''),f.get('risk',''),f.get('alternatives',''),parent_id=f.get('parent_id') or None)
+        return redirect(url_for('incident',incident_id=incident_id))
+
+    @app.post('/proposals/<proposal_id>/decide')
+    @login_required
+    def action_decide(proposal_id):
+        from .actions import decide
+        decide(store,proposal_id,request.form.get('payload_hash'),request.form.get('decision'))
+        rows=store.rows('SELECT incident_id FROM action_proposals WHERE id=?',(proposal_id,))
+        return redirect(url_for('incident',incident_id=rows[0]['incident_id']))
+
+    def action_agent():
+        bearer=request.headers.get('Authorization','')
+        if not bearer.startswith('Bearer '): abort(401)
+        rows=store.rows('SELECT id FROM agents WHERE action_credential_digest=? AND revoked=0',(digest(bearer[7:]),))
+        if not rows: abort(401)
+        return rows[0]['id']
+
+    @app.post('/api/agent/action-authorize')
+    def action_authorize():
+        from .actions import authorize
+        payload=request.get_json()
+        if not isinstance(payload,dict): raise ValueError('Invalid action envelope.')
+        return authorize(store,action_agent(),payload)
+
+    @app.post('/api/agent/action-result')
+    def action_result():
+        from .actions import complete
+        return {'status':complete(store,action_agent(),request.get_json())}
 
     @app.post('/incidents/<incident_id>/handoff')
     @login_required

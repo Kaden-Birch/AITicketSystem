@@ -12,7 +12,7 @@ Secrets are Fernet-encrypted using a separately managed key. Cookies require HTT
 
 ## Remaining scope
 
-Not implemented: automatic scheduled discovery and automatic cluster identity verification, additional mount/swap rules, broader resource-pressure correlation and manual merge controls, per-scope notification overrides, full inventory export/import and incident archival, login/security-event auditing, installed Hermes/provider validation, live AI diagnostic/tool execution, approvals/action broker and remediation.
+Not implemented: automatic scheduled discovery and automatic cluster identity verification, additional mount/swap rules, broader resource-pressure correlation and manual merge controls, per-scope notification overrides, full inventory export/import and incident archival, login/security-event auditing, installed Hermes/provider validation, live AI diagnostic/tool execution, AI-authored recovery proposals, autonomous recovery and higher-risk remediation.
 
 Ordered transactional migrations upgrade schema 1 to schema 2 while preserving existing records. Failed upgrades roll back DDL and the version marker together. Newer schemas are rejected. History supports machine/severity/status/date filters and bounded pagination. GUI budget fields drive transactional per-call admission; AI defaults to disabled until installed bridge/provider controls are verified.
 
@@ -33,3 +33,5 @@ Schema 8 adds encrypted durable AI jobs and a model-call reservation/usage ledge
 Schema 9 adds job modes, request fingerprints and immutable incident conversation records. Selected context is scoped to one incident; completed conversation history is bounded. Advice/exploration share the existing per-call ledger and cumulative incident ceiling.
 
 Schema 10 adds persistent incident ownership generations and immutable handoff checkpoints. All model calls validate the execution’s ownership generation. User takeover cancels active jobs atomically; terminal completion releases only its matching generation. AI and manual diagnostic queueing cannot overlap. Checkpoint resume creates a new budgeted read-only execution; it never replays old work.
+
+Schema 11 adds immutable recovery proposals, separate hashed action credentials and a default-protected machine role. The application broker and agent both enforce exact allowlisted service recovery; see action-broker.md.

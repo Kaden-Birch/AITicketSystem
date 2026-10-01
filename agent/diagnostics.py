@@ -19,11 +19,18 @@ def load_policy(path):
     services=policy.get('services',{})
     if not isinstance(services,dict) or len(services)>20 or any(not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',str(k)) or not re.fullmatch(r'[A-Za-z0-9_.@-]{1,100}\.service',str(v)) or str(v).startswith('-') for k,v in services.items()):
         raise ValueError('Invalid local service allowlist')
-    return {'services':services,'logs':policy.get('logs') is True}
+    recovery=policy.get('recovery',{})
+    if not isinstance(recovery,dict) or not isinstance(recovery.get('services',[]),list) or any(s not in services for s in recovery.get('services',[])):
+        raise ValueError('Invalid recovery service allowlist')
+    return {'services':services,'logs':policy.get('logs') is True,'recovery':{'enabled':recovery.get('enabled') is True,'validated':recovery.get('validated') is True,'services':recovery.get('services',[])}}
 
 
 def capabilities(policy):
-    return {'operations':['process_summary','service_status']+(['service_logs'] if policy['logs'] else []),'services':list(policy['services'])}
+    result={'operations':['process_summary','service_status']+(['service_logs'] if policy['logs'] else []),'services':list(policy['services'])}
+    cfg=policy.get('recovery',{})
+    if cfg.get('enabled') and cfg.get('validated'):
+        result.update(actions=['service_restart'],action_services={s:policy['services'][s] for s in cfg['services']})
+    return result
 
 
 def command(argv):

@@ -5,7 +5,7 @@ from aiticket.engine import observe
 
 def seed(store,guest_severity='high'):
     with store.connect() as c:
-        c.execute("INSERT INTO machines VALUES('m','Guest',NULL,1)")
+        c.execute("INSERT INTO machines(id,name,parent_id,created) VALUES('m','Guest',NULL,1)")
         for id,kind,config,severity in [('guest','proxmox',{'resource':'qemu/209','expected':'running'},guest_severity),('agent','agent',{'agent_id':'a'},'medium'),('http','http',{'url':'https://192.0.2.10'},'medium')]:
             c.execute('INSERT INTO checks(id,machine_id,name,kind,config,interval,fail_after,recover_after,severity) VALUES(?,?,?,?,?,60,1,1,?)',(id,'m',id,kind,json.dumps(config),severity))
 
@@ -51,7 +51,7 @@ def test_same_addresses_do_not_merge_machines(environment):
     _,store,_=environment
     seed(store)
     with store.connect() as c:
-        c.execute("INSERT INTO machines VALUES('other','Guest',NULL,1)")
+        c.execute("INSERT INTO machines(id,name,parent_id,created) VALUES('other','Guest',NULL,1)")
         c.execute('UPDATE checks SET machine_id=? WHERE id=?',('other','agent'))
     observe(store,'guest',False,{'status':'stopped'},now=10)
     observe(store,'agent',False,{'heartbeat_age_seconds':200},now=11)

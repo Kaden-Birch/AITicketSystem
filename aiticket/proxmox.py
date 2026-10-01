@@ -140,7 +140,7 @@ def link(store, object_id, machine_id, expected, create_name=None):
             raise ValueError('Invalid expected state for this resource type')
         if create_name:
             machine_id = uid()
-            c.execute('INSERT INTO machines VALUES(?,?,NULL,?)',(machine_id,create_name,time.time()))
+            c.execute('INSERT INTO machines(id,name,parent_id,created) VALUES(?,?,NULL,?)',(machine_id,create_name,time.time()))
         if not c.execute('SELECT 1 FROM machines WHERE id=?',(machine_id,)).fetchone():
             raise ValueError('Select an existing machine or create one')
         other = c.execute("SELECT 1 FROM proxmox_objects WHERE machine_id=? AND present=1 AND machine_id IS NOT NULL AND kind IN ('node','qemu','lxc')",(machine_id,)).fetchone()

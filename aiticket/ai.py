@@ -106,6 +106,9 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
             raise ValueError('User has control; resume from the saved checkpoint before requesting AI.')
         if automatic and (not bridge.get('automatic') or SEVERITIES.index(incident['severity']) < SEVERITIES.index(bridge['minimum'])):
             return None
+        if c.execute("SELECT 1 FROM action_proposals WHERE incident_id=? AND state IN ('approved','dispatched','authorized','verifying','unknown')", (incident_id,)).fetchone():
+            if automatic: return None
+            raise ValueError('Recovery approval/execution is outstanding; cancel it or verify the outcome before starting AI.')
         if c.execute("SELECT 1 FROM diagnostic_jobs WHERE incident_id=? AND state IN ('pending','leased') AND expires>?", (incident_id, now)).fetchone():
             if automatic:
                 return None
