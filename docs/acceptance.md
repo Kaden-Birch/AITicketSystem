@@ -18,7 +18,9 @@
 | Durable AI completion and enforceable budgets | Pending; no dispatch |
 | Advice/exploration/handoff | Pending |
 | Approval broker and recovery actions | Pending; all mutations unavailable |
-| Full audit, retention, export/import, upgrade migrations | Pending; initial schema only |
+| Configuration/enrollment/workflow audit and immutable timelines | Implemented and tested; login/security-event audit pending |
+| Schema upgrades and incident history filters | Implemented and tested |
+| Retention and configuration export/import | Pending |
 | Docker/Ubuntu deployment | Files supplied; execution validation pending |
 | No backup operations | No backup code or endpoints |
 

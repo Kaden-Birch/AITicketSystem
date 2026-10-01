@@ -112,7 +112,9 @@ def create_app(data_dir=None, testing=False):
             with store.connect() as c:
                 if parent and not c.execute('SELECT 1 FROM machines WHERE id=?', (parent,)).fetchone():
                     raise ValueError('Unknown parent machine.')
-                c.execute('INSERT INTO machines VALUES(?,?,?,?)', (uid(), name, parent, time.time()))
+                machine_id = uid()
+                c.execute('INSERT INTO machines VALUES(?,?,?,?)', (machine_id, name, parent, time.time()))
+                store.audit(c, 'machine.created', machine_id, {'parent_id': parent})
             return redirect(url_for('hosts'))
         return render_template('hosts.html', machines=store.rows('SELECT * FROM machines ORDER BY name'), agents=store.rows('SELECT agents.*,machines.name FROM agents JOIN machines ON machines.id=machine_id'))
 
@@ -146,7 +148,9 @@ def create_app(data_dir=None, testing=False):
         if not 1 <= len(name) <= 100:
             raise ValueError('Check name must contain 1–100 characters.')
         with store.connect() as c:
-            c.execute('INSERT INTO checks(id,machine_id,name,kind,config,interval,fail_after,recover_after,severity) VALUES(?,?,?,?,?,?,?,?,?)', (uid(), machine, name, kind, json.dumps(cfg), interval, fail, recover, severity))
+            check_id = uid()
+            c.execute('INSERT INTO checks(id,machine_id,name,kind,config,interval,fail_after,recover_after,severity) VALUES(?,?,?,?,?,?,?,?,?)', (check_id, machine, name, kind, json.dumps(cfg), interval, fail, recover, severity))
+            store.audit(c, 'check.created', check_id, {'machine_id': machine, 'kind': kind})
         return redirect(url_for('dashboard'))
 
     @app.post('/checks/<check_id>/maintenance')
@@ -156,7 +160,10 @@ def create_app(data_dir=None, testing=False):
         if not 0 <= minutes <= 10080:
             raise ValueError('Maintenance must be between 0 and 10080 minutes.')
         with store.connect() as c:
-            c.execute('UPDATE checks SET maintenance_until=? WHERE id=?', (time.time() + minutes * 60, check_id))
+            result = c.execute('UPDATE checks SET maintenance_until=? WHERE id=?', (time.time() + minutes * 60, check_id))
+            if not result.rowcount:
+                abort(404)
+            store.audit(c, 'check.maintenance', check_id, {'minutes': minutes})
         return redirect(url_for('dashboard'))
 
     @app.get('/incidents/<incident_id>')
@@ -180,6 +187,7 @@ def create_app(data_dir=None, testing=False):
             if not row:
                 abort(404)
             store.timeline(c, incident_id, operation, text, actor='user')
+            store.audit(c, 'incident.' + operation, incident_id)
             if operation == 'resolve':
                 # Keep the condition attached; no endless reopening while it is unhealthy.
                 report = json.loads(row['report'])
@@ -192,18 +200,19 @@ def create_app(data_dir=None, testing=False):
     def settings():
         if request.method == 'POST':
             if request.form.get('section') == 'discord':
+                updates = {}
                 secret = request.form.get('webhook', '').strip()
                 if secret:
                     validate_url(secret, ('https',))
                     p = __import__('urllib.parse', fromlist=['urlsplit']).urlsplit(secret)
                     if p.hostname not in ('discord.com', 'discordapp.com') or not p.path.startswith('/api/webhooks/'):
                         raise ValueError('Use a Discord webhook URL.')
-                    store.save('discord_secret', vault.encrypt(secret))
+                    updates['discord_secret'] = vault.encrypt(secret)
                 minimum = request.form.get('minimum', 'medium')
                 if minimum not in SEVERITIES:
                     raise ValueError('Unknown severity.')
-                store.save('discord_minimum', minimum)
-                store.save('discord_recovery', bool(request.form.get('recovery')))
+                updates.update(discord_minimum=minimum, discord_recovery=bool(request.form.get('recovery')))
+                store.save_many(updates, actor='user')
             else:
                 cfg = {}
                 for key, default in AI_DEFAULTS.items():
@@ -211,10 +220,63 @@ def create_app(data_dir=None, testing=False):
                     cfg[key] = str(value)[:100] if isinstance(default, str) else type(default)(value)
                     if not isinstance(default, str) and (not math.isfinite(cfg[key]) or not 0 <= cfg[key] <= 1000000000):
                         raise ValueError('Budget values must be nonnegative and bounded.')
-                store.save('ai_config', cfg)
+                store.save_many({'ai_config': cfg}, actor='user')
             flash('Settings saved. AI remains disabled pending bridge validation.')
             return redirect(url_for('settings'))
         return render_template('settings.html', ai=store.setting('ai_config', AI_DEFAULTS), discord_configured=bool(store.setting('discord_secret')), minimum=store.setting('discord_minimum', 'medium'), recovery=store.setting('discord_recovery', True))
+
+
+    @app.get('/history')
+    @login_required
+    def history():
+        clauses, params = [], []
+        filters = {key: request.args.get(key, '') for key in ('machine', 'severity', 'status', 'from', 'to')}
+        page = int(request.args.get('page', 1))
+        if not 1 <= page <= 100000:
+            raise ValueError('Invalid page.')
+        if filters['machine']:
+            clauses.append('i.machine_id=?')
+            params.append(filters['machine'])
+        if filters['severity']:
+            if filters['severity'] not in SEVERITIES:
+                raise ValueError('Invalid severity.')
+            clauses.append('i.severity=?')
+            params.append(filters['severity'])
+        statuses = ['Open', 'Investigating', 'Awaiting approval', 'Needs user intervention', 'Monitoring recovery', 'Resolved']
+        if filters['status']:
+            if filters['status'] not in statuses:
+                raise ValueError('Invalid status.')
+            clauses.append('i.status=?')
+            params.append(filters['status'])
+        dates = {}
+        for key in ('from', 'to'):
+            if filters[key]:
+                dates[key] = datetime.strptime(filters[key], '%Y-%m-%d').replace(tzinfo=timezone.utc).timestamp()
+        if 'from' in dates and 'to' in dates and dates['from'] > dates['to']:
+            raise ValueError('Start date must precede end date.')
+        if 'from' in dates:
+            clauses.append('i.first_seen>=?')
+            params.append(dates['from'])
+        if 'to' in dates:
+            clauses.append('i.first_seen<?')
+            params.append(dates['to'] + 86400)
+        where = ' WHERE ' + ' AND '.join(clauses) if clauses else ''
+        total = store.rows('SELECT count(*) AS total FROM incidents i' + where, params)[0]['total']
+        rows = store.rows('SELECT i.*,m.name AS machine FROM incidents i JOIN machines m ON m.id=i.machine_id' + where + ' ORDER BY i.first_seen DESC,i.id LIMIT 50 OFFSET ?', params + [(page - 1) * 50])
+        links = {key: value for key, value in filters.items() if value}
+        return render_template('history.html', incidents=rows, filters=filters, statuses=statuses,
+                               machines=store.rows('SELECT * FROM machines ORDER BY name'), page=page, total=total,
+                               previous=url_for('history', **links, page=page-1) if page>1 else None,
+                               following=url_for('history', **links, page=page+1) if page*50<total else None)
+
+    @app.get('/audit')
+    @login_required
+    def audit_log():
+        page = int(request.args.get('page', 1))
+        if not 1 <= page <= 100000:
+            raise ValueError('Invalid page.')
+        rows = store.rows('SELECT * FROM audit ORDER BY at DESC,id LIMIT 51 OFFSET ?', ((page-1)*50,))
+        return render_template('audit.html', entries=rows[:50], page=page, more=len(rows)>50)
 
     @app.get('/queue')
     @login_required
@@ -225,7 +287,10 @@ def create_app(data_dir=None, testing=False):
     @login_required
     def retry(job_id):
         with store.connect() as c:
-            c.execute("UPDATE deliveries SET state='pending',next_attempt=?,expires=?,last_error=NULL WHERE id=? AND state IN ('failed','expired','pending')", (time.time(), time.time() + 86400, job_id))
+            result = c.execute("UPDATE deliveries SET state='pending',next_attempt=?,expires=?,last_error=NULL WHERE id=? AND state IN ('failed','expired','pending')", (time.time(), time.time() + 86400, job_id))
+            if not result.rowcount:
+                abort(409)
+            store.audit(c, 'delivery.retry_requested', job_id)
         return redirect(url_for('queue'))
 
     @app.post('/enrollments')
@@ -237,13 +302,17 @@ def create_app(data_dir=None, testing=False):
         token = secrets.token_urlsafe(32)
         with store.connect() as c:
             c.execute('INSERT INTO enrollments VALUES(?,?,?,NULL)', (digest(token), machine, time.time() + 600))
+            store.audit(c, 'agent.enrollment_issued', machine, {'ttl_seconds': 600})
         return render_template('enrollment.html', token=token)
 
     @app.post('/agents/<agent_id>/revoke')
     @login_required
     def revoke(agent_id):
         with store.connect() as c:
-            c.execute('UPDATE agents SET revoked=1 WHERE id=?', (agent_id,))
+            result = c.execute('UPDATE agents SET revoked=1 WHERE id=?', (agent_id,))
+            if not result.rowcount:
+                abort(404)
+            store.audit(c, 'agent.revoked', agent_id)
         return redirect(url_for('hosts'))
 
     @app.post('/api/agent/enroll')
@@ -269,6 +338,7 @@ def create_app(data_dir=None, testing=False):
                 c.execute('INSERT INTO agents(id,machine_id,credential_digest) VALUES(?,?,?)', (agent_id, row['machine_id'], digest(credential)))
                 c.execute('INSERT INTO checks(id,machine_id,name,kind,config,interval) VALUES(?,?,?,?,?,?)', (uid(), row['machine_id'], 'Agent heartbeat', 'agent', json.dumps({'agent_id': agent_id, 'max_age': 180}), 60))
             c.execute('UPDATE enrollments SET used=? WHERE digest=?', (time.time(), row['digest']))
+            store.audit(c, 'agent.reenrolled' if existing else 'agent.enrolled', agent_id, {'machine_id': row['machine_id']}, actor='agent')
         return {'agent_id': agent_id, 'credential': credential}
 
     @app.post('/api/agent/heartbeat')

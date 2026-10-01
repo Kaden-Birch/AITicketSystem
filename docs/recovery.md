@@ -11,3 +11,5 @@ For application migration, stop the app and preserve its database plus any remai
 Use one application worker in this milestone. `/health` can be checked by another device. Application downtime is not proof that all monitored hosts failed.
 
 Troubleshooting: verify agent service/heartbeat age, endpoint routing and TLS trust before assuming OS failure. Proxmox errors are sanitized; separate reachability/authentication/capability testing is pending. Discord jobs wait until a webhook is configured; inspect the queue for next attempt/errors. Production login requires HTTPS; local HTTP is loopback-development only.
+
+Schema 2 automatically upgrades the initial milestone database transactionally. Verify with a disposable copy before upgrading production. Failed migration leaves version 1 and its records intact. Never downgrade an upgraded database: older application versions cannot safely interpret newer schemas. Immutable audit/timeline rows cannot be silently edited or deleted. History filters use explicit UTC date boundaries.

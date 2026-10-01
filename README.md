@@ -4,7 +4,7 @@ Self-hosted monitoring with useful incidents even when AI and the internet are u
 
 **Status: initial runnable monitoring milestone, not the complete product.** AI investigations and all remediation are disabled. Budget settings are saved preferences, not enforced spending guarantees.
 
-Included: authenticated UI, stable machine inventory, HTTP/TCP and read-only Proxmox checks, configurable failure/recovery thresholds, parent suppression, temporary maintenance, deterministic reports, manual notes/resolution, durable Discord delivery, and DHCP-safe Linux agent enrollment/telemetry.
+Included: authenticated UI, stable machine inventory, HTTP/TCP and read-only Proxmox checks, configurable failure/recovery thresholds, parent suppression, temporary maintenance, deterministic reports, manual notes/resolution, durable Discord delivery, filtered incident history, immutable configuration audit, transactional schema upgrades, and DHCP-safe Linux agent enrollment/telemetry.
 
 ## Local development
 
@@ -45,3 +45,5 @@ All IPv4 destinations are permitted (`0.0.0.0/0`) as requested. Router/VLAN fire
 Tests use temporary databases, Flask clients and mocked providers. No live infrastructure, Discord, Hermes, model or backup endpoint is contacted.
 
 See [architecture and scope](docs/architecture.md), [acceptance coverage](docs/acceptance.md), [Hermes gate](docs/hermes-contract.md), [recovery guide](docs/recovery.md), and [execution results](docs/test-results.txt).
+
+Milestone 2 adds schema 1 → 2 migration, immutable audit/timeline storage, atomic settings saves, and paginated history filters. Existing evidence is retained; changes predating the audit milestone are not reconstructed.

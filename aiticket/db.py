@@ -4,10 +4,10 @@ import sqlite3
 import time
 import uuid
 from pathlib import Path
+from .migrations import upgrade
 
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS schema_version(version INTEGER PRIMARY KEY);
-INSERT OR IGNORE INTO schema_version VALUES(1);
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machines(id TEXT PRIMARY KEY, name TEXT NOT NULL, parent_id TEXT REFERENCES machines(id), created REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS checks(id TEXT PRIMARY KEY, machine_id TEXT NOT NULL REFERENCES machines(id), name TEXT NOT NULL, kind TEXT NOT NULL, config TEXT NOT NULL, interval INTEGER NOT NULL, failures INTEGER NOT NULL DEFAULT 0, successes INTEGER NOT NULL DEFAULT 0, fail_after INTEGER NOT NULL DEFAULT 3, recover_after INTEGER NOT NULL DEFAULT 2, severity TEXT NOT NULL DEFAULT 'medium', health TEXT NOT NULL DEFAULT 'unknown', next_run REAL NOT NULL DEFAULT 0, lease_until REAL, lease_token TEXT, maintenance_until REAL NOT NULL DEFAULT 0);
@@ -33,6 +33,7 @@ class Store:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as c:
             c.executescript(SCHEMA)
+            upgrade(c)
 
     @contextlib.contextmanager
     def connect(self):
@@ -56,8 +57,21 @@ class Store:
         return json.loads(row[0]) if row else default
 
     def save(self, key, value):
+        self.save_many({key: value})
+
+    def save_many(self, values, actor=None):
         with self.connect() as c:
-            c.execute('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', (key, json.dumps(value)))
+            c.execute('BEGIN IMMEDIATE')
+            for key, value in values.items():
+                c.execute('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', (key, json.dumps(value, allow_nan=False)))
+            if actor:
+                self.audit(c, 'settings.updated', 'settings', {'changed_keys': sorted(values)}, actor)
+
+    @staticmethod
+    def audit(c, action, target, details=None, actor='user'):
+        # Store metadata deliberately; never pass full credential/config payloads.
+        c.execute('INSERT INTO audit VALUES(?,?,?,?,?,?)',
+                  (uid(), time.time(), actor, action, target, json.dumps(details or {}, allow_nan=False)))
 
     def rows(self, sql, args=()):
         with self.connect() as c:
