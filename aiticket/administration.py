@@ -95,7 +95,7 @@ def rotate_key(store, old_vault, destination):
     new_vault = Vault(path)
     with store.connect() as c:
         c.execute('BEGIN IMMEDIATE')
-        for row in c.execute("SELECT key,value FROM settings WHERE key IN ('session_secret','discord_secret')").fetchall():
+        for row in c.execute("SELECT key,value FROM settings WHERE key IN ('session_secret','discord_secret','hermes_secret','ai_provider_secret')").fetchall():
             encrypted = new_vault.encrypt(old_vault.decrypt(json.loads(row['value'])))
             c.execute('UPDATE settings SET value=? WHERE key=?', (json.dumps(encrypted), row['key']))
         for row in c.execute('SELECT id,token_secret FROM proxmox_connections').fetchall():
@@ -105,5 +105,7 @@ def rotate_key(store, old_vault, destination):
             if config.get('token_secret'):
                 config['token_secret'] = new_vault.encrypt(old_vault.decrypt(config['token_secret']))
                 c.execute('UPDATE checks SET config=? WHERE id=?', (json.dumps(config), row['id']))
+        for row in c.execute('SELECT id,credential,bridge_secret FROM ai_jobs').fetchall():
+            c.execute('UPDATE ai_jobs SET credential=?,bridge_secret=? WHERE id=?', (new_vault.encrypt(old_vault.decrypt(row['credential'])), new_vault.encrypt(old_vault.decrypt(row['bridge_secret'])), row['id']))
         store.audit(c, 'encryption.rotated', 'vault', actor='console')
     return new_vault

@@ -117,7 +117,7 @@ def test_schema_six_migrates_without_losing_data(tmp_path):
         c.execute('INSERT INTO schema_version VALUES(6)')
         c.execute("INSERT INTO machines VALUES('existing','Preserved',NULL,1)")
     store = Store(path)
-    assert store.rows('SELECT version FROM schema_version') == [{'version': 7}]
+    assert store.rows('SELECT version FROM schema_version') == [{'version': 8}]
     assert store.rows('SELECT name FROM machines') == [{'name': 'Preserved'}]
     assert store.rows("SELECT name FROM sqlite_master WHERE name='incident_observation_lookup'")
 

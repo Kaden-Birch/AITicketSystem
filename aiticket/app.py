@@ -13,6 +13,7 @@ from werkzeug.security import check_password_hash
 from .db import Store, uid
 from .engine import SEVERITIES
 from .security import Vault, digest, validate_url
+from .diagnostics import redact
 
 AI_DEFAULTS = {'model': '', 'triage_tokens': 4000, 'incident_tokens': 20000, 'daily_tokens': 50000, 'monthly_tokens': 500000, 'daily_cost': 2.0, 'monthly_cost': 20.0, 'max_turns': 4, 'input_price': 0.0, 'output_price': 0.0}
 
@@ -40,7 +41,7 @@ def create_app(data_dir=None, testing=False):
 
     @app.before_request
     def guard():
-        if request.method == 'POST' and not request.path.startswith('/api/agent/'):
+        if request.method == 'POST' and not request.path.startswith(('/api/agent/', '/api/hermes/')):
             if not hmac.compare_digest(session.get('csrf', ''), request.form.get('csrf', '')) or not session.get('csrf'):
                 abort(403)
 
@@ -66,7 +67,7 @@ def create_app(data_dir=None, testing=False):
 
     @app.get('/health')
     def health():
-        return {'status': 'ok', 'ai_dispatch': 'disabled', 'version': '0.1.0'}
+        return {'status': 'ok', 'ai_dispatch': 'enabled' if store.setting('hermes_config', {}).get('enabled') else 'disabled', 'version': '0.1.0'}
 
     @app.route('/login', methods=['GET', 'POST'])
     def login():
@@ -100,7 +101,7 @@ def create_app(data_dir=None, testing=False):
     def dashboard():
         return render_template('dashboard.html', checks=store.rows('SELECT checks.*,machines.name AS machine FROM checks JOIN machines ON machines.id=machine_id ORDER BY machines.name'),
                                incidents=store.rows('SELECT incidents.*,machines.name AS machine FROM incidents JOIN machines ON machines.id=machine_id ORDER BY first_seen DESC LIMIT 100'),
-                               jobs=store.rows('SELECT state,count(*) AS count FROM deliveries GROUP BY state'))
+                               jobs=store.rows('SELECT state,count(*) AS count FROM deliveries GROUP BY state'), ai_enabled=store.setting('hermes_config', {}).get('enabled', False))
 
     @app.route('/hosts', methods=['GET', 'POST'])
     @login_required
@@ -173,7 +174,8 @@ def create_app(data_dir=None, testing=False):
         rows = store.rows('SELECT * FROM incidents WHERE id=?', (incident_id,))
         if not rows:
             abort(404)
-        return render_template('incident.html', incident=rows[0], report=json.loads(rows[0]['report']), timeline=store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at', (incident_id,)), links=store.rows('SELECT * FROM incident_links WHERE left_id=? OR right_id=?',(incident_id,incident_id)), diagnostic_jobs=store.rows('SELECT * FROM diagnostic_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,)), diagnostic_agents=[{**a,'caps':json.loads(a['capabilities'])} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))])
+        from .ai import meter
+        return render_template('incident.html', ai_jobs=store.rows('SELECT id,state,created,summary,error FROM ai_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100', (incident_id,)), ai_meter=meter(store, incident_id), incident=rows[0], report=json.loads(rows[0]['report']), timeline=store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at', (incident_id,)), links=store.rows('SELECT * FROM incident_links WHERE left_id=? OR right_id=?',(incident_id,incident_id)), diagnostic_jobs=store.rows('SELECT * FROM diagnostic_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,)), diagnostic_agents=[{**a,'caps':json.loads(a['capabilities'])} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))])
 
     @app.post('/incidents/<incident_id>/note')
     @login_required
@@ -222,9 +224,9 @@ def create_app(data_dir=None, testing=False):
                     if not isinstance(default, str) and (not math.isfinite(cfg[key]) or not 0 <= cfg[key] <= 1000000000):
                         raise ValueError('Budget values must be nonnegative and bounded.')
                 store.save_many({'ai_config': cfg}, actor='user')
-            flash('Settings saved. AI remains disabled pending bridge validation.')
+            flash('Settings saved. AI activation is managed on the Hermes page.')
             return redirect(url_for('settings'))
-        return render_template('settings.html', ai=store.setting('ai_config', AI_DEFAULTS), discord_configured=bool(store.setting('discord_secret')), minimum=store.setting('discord_minimum', 'medium'), recovery=store.setting('discord_recovery', True))
+        return render_template('settings.html', ai=store.setting('ai_config', AI_DEFAULTS), discord_configured=bool(store.setting('discord_secret')), minimum=store.setting('discord_minimum', 'medium'), recovery=store.setting('discord_recovery', True), ai_enabled=store.setting('hermes_config', {}).get('enabled', False))
 
 
     @app.route('/administration', methods=['GET', 'POST'])
@@ -601,5 +603,103 @@ def create_app(data_dir=None, testing=False):
             store.timeline(c,incident_id,'silenced' if minutes else 'notifications_resumed','Notification pause: '+str(minutes)+' minutes.',actor='user')
             store.audit(c,'incident.silence_changed',incident_id,{'minutes':minutes})
         return redirect(url_for('incident',incident_id=incident_id))
+
+    @app.route('/hermes', methods=['GET', 'POST'])
+    @login_required
+    def hermes():
+        from .ai import BRIDGE_DEFAULTS, PROVIDER_DEFAULTS, meter, valid_configuration
+        bridge = store.setting('hermes_config', BRIDGE_DEFAULTS)
+        provider = store.setting('ai_provider', PROVIDER_DEFAULTS)
+        if request.method == 'POST':
+            f = request.form
+            if f.get('operation') == 'disable':
+                bridge = {**bridge, 'enabled': False}
+                store.save_many({'hermes_config': bridge}, actor='user')
+            elif f.get('operation') == 'save':
+                bridge = {'url': validate_url(f.get('url', '').strip(), ('https',)).rstrip('/'), 'ca': f.get('bridge_ca', '').strip(), 'enabled': False, 'automatic': bool(f.get('automatic')), 'minimum': f.get('minimum', 'high'), 'runtime_verified': bool(f.get('runtime_verified'))}
+                provider = {'url': validate_url(f.get('provider_url', '').strip(), ('https',)).rstrip('/'), 'ca': f.get('provider_ca', '').strip(), 'verified': bool(f.get('provider_verified')), 'input_overhead': int(f.get('input_overhead', 8192)), 'output_tokens': int(f.get('output_tokens', 1000)), 'verified_model': store.setting('ai_config', {}).get('model', '')}
+                if bridge['minimum'] not in SEVERITIES or not 0 <= provider['input_overhead'] <= 1000000 or not 1 <= provider['output_tokens'] <= 100000:
+                    raise ValueError('Invalid severity or provider bounds.')
+                updates = {'hermes_config': bridge, 'ai_provider': provider, 'hermes_validation': None}
+                for field, key in (('secret', 'hermes_secret'), ('provider_secret', 'ai_provider_secret')):
+                    value = f.get(field, '').strip()
+                    if value:
+                        if not 16 <= len(value) <= 2048:
+                            raise ValueError('Credentials must contain 16–2048 characters.')
+                        updates[key] = vault.encrypt(value)
+                store.save_many(updates, actor='user')
+            elif f.get('operation') == 'test':
+                from .ai import bridge_request
+                secret = store.setting('hermes_secret')
+                if not secret:
+                    raise ValueError('Save bridge credentials first.')
+                try:
+                    result = bridge_request(vault, {'id': uid(), 'endpoint': bridge['url'], 'bridge_secret': secret}, 'GET', '/v1/capabilities', ca=bridge.get('ca'))
+                except Exception:
+                    raise ValueError('Bridge check failed. Review reachability, TLS, authentication and installed compatibility.')
+                if result.get('version') != 1 or result.get('tools') != [] or result.get('model_gateway') is not True or result.get('compatible') is not True:
+                    raise ValueError('Bridge reports an incompatible or unrestricted Hermes adapter.')
+                store.save_many({'hermes_validation': {'at': time.time(), 'url': bridge['url']}}, actor='user')
+                flash('Signed bridge compatibility check passed. No model request was made.')
+            elif f.get('operation') == 'enable':
+                validation = store.setting('hermes_validation') or {}
+                if validation.get('url') != bridge['url'] or time.time()-validation.get('at', 0)>86400:
+                    raise ValueError('Run a recent bridge compatibility check before enabling.')
+                bridge = {**bridge, 'enabled': True}
+                valid_configuration(store.setting('ai_config', {}), bridge, provider)
+                if not store.setting('ai_provider_secret'):
+                    raise ValueError('Save model-provider credentials first.')
+                store.save_many({'hermes_config': bridge}, actor='user')
+            else:
+                raise ValueError('Unknown Hermes settings operation.')
+            return redirect(url_for('hermes'))
+        return render_template('hermes.html', bridge=bridge, provider=provider, usage=meter(store), validation=store.setting('hermes_validation'), configured=bool(store.setting('hermes_secret')), provider_configured=bool(store.setting('ai_provider_secret')), held_calls=store.rows("SELECT id,job_id,created,input_reserved,output_reserved,cost_reserved FROM ai_calls WHERE state!='known' ORDER BY created LIMIT 100"), ai_jobs=store.rows('SELECT id,incident_id,state,error FROM ai_jobs ORDER BY created DESC LIMIT 100'))
+
+    @app.post('/incidents/<incident_id>/ai')
+    @login_required
+    def investigate(incident_id):
+        from .ai import request_job
+        request_job(store, vault, incident_id)
+        return redirect(url_for('incident', incident_id=incident_id))
+
+    @app.post('/ai/<job_id>/cancel')
+    @login_required
+    def cancel_ai(job_id):
+        from .ai import cancel
+        cancel(store, job_id)
+        return redirect(url_for('hermes'))
+
+    @app.post('/ai/calls/<call_id>/reconcile')
+    @login_required
+    def reconcile_ai(call_id):
+        from .ai import reconcile
+        if len(request.form.get('evidence', '').strip()) < 10:
+            raise ValueError('Record the provider usage evidence before reconciliation.')
+        usage = {'prompt_tokens': int(request.form.get('input_tokens', '')), 'completion_tokens': int(request.form.get('output_tokens', '')), 'prompt_tokens_details': {'cached_tokens': int(request.form.get('cached_tokens', '0'))}}
+        if not reconcile(store, call_id, usage, {}, manual=True):
+            raise ValueError('Usage rejected or exceeded the configured bound; inspect the budget ledger.')
+        with store.connect() as c:
+            store.audit(c, 'ai.usage_reconciled', call_id, {'evidence': redact(request.form['evidence'])[:1000]})
+        return redirect(url_for('hermes'))
+
+    def execution_auth(job_id):
+        bearer = request.headers.get('Authorization', '')
+        if not bearer.startswith('Bearer '):
+            abort(401)
+        rows = store.rows('SELECT id FROM ai_jobs WHERE id=? AND credential_digest=?', (job_id, digest(bearer[7:])))
+        if not rows:
+            abort(401)
+
+    @app.get('/api/hermes/<job_id>/v1/models')
+    def execution_models(job_id):
+        execution_auth(job_id)
+        model = store.rows('SELECT model FROM ai_jobs WHERE id=?', (job_id,))[0]['model']
+        return {'object': 'list', 'data': [{'id': model, 'object': 'model'}]}
+
+    @app.post('/api/hermes/<job_id>/v1/chat/completions')
+    def execution_model(job_id):
+        from .ai import model_call
+        execution_auth(job_id)
+        return model_call(store, vault, job_id, request.get_json())
 
     return app

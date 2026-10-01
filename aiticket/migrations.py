@@ -1,6 +1,13 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 7
+CURRENT_VERSION = 8
 MIGRATIONS = {
+    8: (
+        """CREATE TABLE ai_jobs(id TEXT PRIMARY KEY,incident_id TEXT NOT NULL REFERENCES incidents(id),state TEXT NOT NULL,created REAL NOT NULL,expires REAL NOT NULL,model TEXT NOT NULL,allowance INTEGER NOT NULL,max_calls INTEGER NOT NULL,evidence TEXT NOT NULL,credential_digest TEXT NOT NULL,credential TEXT NOT NULL,endpoint TEXT NOT NULL,bridge_secret TEXT NOT NULL,next_attempt REAL NOT NULL,lease_until REAL,lease_token TEXT,attempts INTEGER NOT NULL DEFAULT 0,summary TEXT,error TEXT,completed REAL)""",
+        'CREATE INDEX ai_job_queue ON ai_jobs(state,next_attempt)',
+        "CREATE UNIQUE INDEX ai_incident_active ON ai_jobs(incident_id) WHERE state IN ('pending','dispatching','running','unknown')",
+        """CREATE TABLE ai_calls(id TEXT PRIMARY KEY,job_id TEXT NOT NULL REFERENCES ai_jobs(id),created REAL NOT NULL,state TEXT NOT NULL,input_reserved INTEGER NOT NULL,output_reserved INTEGER NOT NULL,cost_reserved INTEGER NOT NULL,input_tokens INTEGER,output_tokens INTEGER,cached_tokens INTEGER,cost_actual INTEGER,prices TEXT NOT NULL)""",
+        'CREATE INDEX ai_call_usage ON ai_calls(created,job_id)',
+    ),
     7: (
         'CREATE INDEX incident_observation_lookup ON incident_observations(observation_id)',
         'CREATE INDEX agent_event_retention ON agent_events(at)',

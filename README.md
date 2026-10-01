@@ -2,7 +2,7 @@
 
 Self-hosted monitoring with useful incidents even when AI and the internet are unavailable.
 
-**Status: initial runnable monitoring milestone, not the complete product.** AI investigations and all remediation are disabled. Budget settings are saved preferences, not enforced spending guarantees.
+**Status: monitoring plus a restricted AI integration milestone; the full product is not complete.** AI defaults to disabled pending installed-Hermes/provider validation. The application now enforces per-call token and configured-price allowances through its budget gateway. All remediation remains unavailable.
 
 Included: authenticated UI, stable machine inventory, HTTP/TCP and read-only Proxmox checks, configurable failure/recovery thresholds, parent suppression, temporary maintenance, deterministic reports, manual notes/resolution, durable Discord delivery, filtered incident history, immutable configuration audit, transactional schema upgrades, and DHCP-safe Linux agent enrollment/telemetry.
 
@@ -57,3 +57,5 @@ Milestone 5 adds [agent resource rules and read-only diagnostics](docs/resource-
 Milestone 6 adds [scheduled maintenance and notification policies](docs/maintenance-notifications.md): timezone-aware one-time/weekly windows, incident silence, coalesced reminders and persistent-severity escalation. Live deployment testing remains deferred.
 
 Milestone 7 adds [administration and recovery](docs/recovery.md): routine-sample retention, nonsecret preference export/import, password change/console reset, agent rotation through re-enrollment, and offline encryption-key rotation. Schema 7 adds cleanup indexes. Live deployment testing remains deferred.
+
+Milestone 8 adds [Hermes orchestration and budget admission](docs/hermes-contract.md), a companion bridge and restricted tool-free adapter, signed durable status polling, usage/reservation meters and cancellation. The installed Hermes v0.20.0 and live provider remain untested; runtime/provider verification must remain unchecked until those deferred tests pass.

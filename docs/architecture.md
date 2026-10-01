@@ -1,6 +1,6 @@
 # Architecture and status
 
-Python 3.11+, Flask, SQLite WAL with synchronous FULL, and one bounded worker. Ubuntu 24.04 uses Compose. Agents initiate verified HTTPS to the static app IP. A persistent UUID and unique credential establish identity independently of DHCP addresses. User-facing DNS is optional.
+Python 3.11+, Flask, SQLite WAL with synchronous FULL, a bounded monitoring worker and a separate bounded AI orchestration thread. Ubuntu 24.04 uses Compose. Agents initiate verified HTTPS to the static app IP. A persistent UUID and unique credential establish identity independently of DHCP addresses. User-facing DNS is optional.
 
 Machine records and check sources are explicitly linked. Names/IPs never auto-merge identities. Parent relationships suppress new dependent incidents while preserving observations. Proxmox API monitoring is read-only and selected resource state remains distinct from application checks. No allocated-RAM value is presented as memory pressure.
 
@@ -12,9 +12,9 @@ Secrets are Fernet-encrypted using a separately managed key. Cookies require HTT
 
 ## Remaining scope
 
-Not implemented: automatic scheduled discovery and automatic cluster identity verification, additional mount/swap rules, broader resource-pressure correlation and manual merge controls, per-scope notification overrides, retention, configuration export/import,  credential rotation UI, login/security-event auditing, live Hermes orchestration, budget reservations, chat/exploration/handoff, approvals/action broker and remediation.
+Not implemented: automatic scheduled discovery and automatic cluster identity verification, additional mount/swap rules, broader resource-pressure correlation and manual merge controls, per-scope notification overrides, full inventory export/import and incident archival, login/security-event auditing, installed Hermes/provider validation, chat/exploration/handoff, approvals/action broker and remediation.
 
-Ordered transactional migrations upgrade schema 1 to schema 2 while preserving existing records. Failed upgrades roll back DDL and the version marker together. Newer schemas are rejected. History supports machine/severity/status/date filters and bounded pagination. GUI budget fields are preferences only; AI stays disabled until enforceable bridge controls are verified.
+Ordered transactional migrations upgrade schema 1 to schema 2 while preserving existing records. Failed upgrades roll back DDL and the version marker together. Newer schemas are rejected. History supports machine/severity/status/date filters and bounded pagination. GUI budget fields drive transactional per-call admission; AI defaults to disabled until installed bridge/provider controls are verified.
 
 Local validation uses Python 3.14. Target Python 3.12/Ubuntu and Docker execution require separate deployment validation. No production endpoint is a test fixture.
 
@@ -27,3 +27,5 @@ Schema 5 implements durable read-only agent diagnostics and resource-health rule
 Schema 6 provides one-time/weekly maintenance and global reminder/escalation policies with durable deduplication and incident silence. Bundled timezone data is versioned. See maintenance-notifications.md.
 
 Schema 7 indexes observation references and heartbeat timestamps for bounded retention. Authentication generations invalidate cookies after password recovery. Key rotation requires stopped processes and an explicit switch to a separately created key; details in recovery.md.
+
+Schema 8 adds encrypted durable AI jobs and a model-call reservation/usage ledger. A separate orchestration thread polls a signed companion bridge and never blocks check probes. The bridge uses an isolated tool-free Hermes adapter; provider keys stay on the main application, which admits and meters every supported model call. Unknown usage holds capacity and fences further admission. See hermes-contract.md for provider-bound assumptions and deferred validation.

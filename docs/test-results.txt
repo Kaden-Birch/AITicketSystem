@@ -1,6 +1,7 @@
-74 passed in 11.08s
+120 passed in 14.00s
 
 Local Python 3.14.6; bundled tzdata 2026.4; temporary fixtures and mocked external providers.
-Includes schema 6→7 migration, retention preservation, preference validation/atomicity, password session invalidation/console recovery, agent rotation and encryption rotation/rollback.
-No production testing, model calls, Discord sends, Hermes requests or backup endpoints.
-Live Ubuntu/Docker/infrastructure validation remains deferred at user request.
+Includes schema 7→8 preservation, atomic concurrent AI admission, token/cost/call ceilings, zero allowances, unknown usage across date/cancel/expiry, original-price reconciliation, provider-bound violations, signed polling, duplicate completion, bridge restart fencing, restricted adapter/environment, credential rotation, GUI activation gates and fixture bridge/app round-trip.
+Hermes settings rendered and visually inspected in a local fixture-only browser preview; screenshot in hermes-preview.jpg.
+No production testing, model calls, Discord sends, live Hermes requests or backup endpoints.
+Installed Hermes v0.20.0, provider contract, Ubuntu and Docker execution remain unverified; live testing deferred at user request. AI defaults disabled and requires explicit runtime/provider validation before activation.

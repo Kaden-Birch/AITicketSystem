@@ -63,6 +63,9 @@ def main():
         return
     from .worker import run
     stop = threading.Event()
+    from .ai import run as run_ai
+    ai_thread = threading.Thread(target=run_ai, args=(store, vault, stop), daemon=True)
+    ai_thread.start()
     if args.command == 'worker':
         try:
             run(store, vault, stop)
@@ -78,6 +81,7 @@ def main():
         finally:
             stop.set()
             thread.join(timeout=15)
+            ai_thread.join(timeout=15)
 
 
 if __name__ == '__main__':
