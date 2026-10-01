@@ -28,7 +28,7 @@ This milestone does not meet the full definition of done. Tests use mocks/dispos
 
 Correlation tests cover both arrival orders, explicit identity boundaries, API failure separation, stale evidence, independent recovery, severity filter crossing and uncertain links without merges.
 
-Maintenance/notification tests cover timezone boundaries, inherited scope, preserved observations, silence, duplicate reminders, backlog coalescing, escalation severity floors and dispatch filtering. Per-scope notification overrides remain pending.
+Maintenance/notification tests cover timezone boundaries, inherited scope, preserved observations, silence, duplicate reminders, backlog coalescing, escalation severity floors and dispatch filtering. Per-machine/group overrides, inheritance, disabled policies and dispatch rechecks are fixture-tested.
 
 Password change/console recovery, session invalidation, agent credential rotation and offline key rotation implemented with fixture tests. Live recovery drills remain deferred.
 

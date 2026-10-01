@@ -82,12 +82,12 @@ def fresh_failure(c,incident,now):
 def notifications(store,now=None):
     from .engine import SEVERITIES,enqueue
     now=time.time() if now is None else now
-    settings=store.setting('notification_policy',DEFAULTS)
-    if not settings['reminder_seconds'] and not settings['escalate_after_seconds']:
-        return
     with store.connect() as c:
         c.execute('BEGIN IMMEDIATE')
         for incident in c.execute("SELECT * FROM incidents WHERE closed IS NULL AND status<>'Resolved'").fetchall():
+            settings=effective(c,incident['machine_id'])
+            if not settings['enabled']:
+                continue
             if incident['silence_until']>now or maintained(c,incident['machine_id'],now) or not fresh_failure(c,incident,now):
                 continue
             if c.execute('SELECT 1 FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=? AND c.maintenance_until>?',(incident['id'],now)).fetchone():
@@ -112,3 +112,68 @@ def notifications(store,now=None):
                 # Coalesce old queued reminders rather than replaying every missed interval.
                 c.execute("UPDATE deliveries SET state='superseded',lease_token=NULL,lease_until=NULL WHERE incident_id=? AND event_key LIKE ? AND state IN ('pending','leased')",(incident['id'],incident['id']+':reminder:%'))
                 enqueue(c,incident['id'],'reminder:'+str(slot),now,store)
+
+
+def effective(c,machine_id):
+    def setting(key,default):
+        row=c.execute('SELECT value FROM settings WHERE key=?',(key,)).fetchone()
+        return json.loads(row[0]) if row else default
+    result={**DEFAULTS,**setting('notification_policy',{}),'enabled':True,'minimum':setting('discord_minimum','medium'),'recovery':setting('discord_recovery',True),'scope':'global'}
+    group=c.execute('SELECT group_id FROM machine_groups WHERE machine_id=?',(machine_id,)).fetchone()
+    scopes=([('group',group[0])] if group else [])+[('machine',machine_id)]
+    for kind,identifier in scopes:
+        row=c.execute('SELECT policy FROM notification_overrides WHERE scope_kind=? AND scope_id=?',(kind,identifier)).fetchone()
+        if row:
+            result.update(json.loads(row[0]),scope=kind+':'+identifier)
+    return result
+
+
+def validate_override(values):
+    from .engine import SEVERITIES
+    fields=set(DEFAULTS)|{'enabled','minimum','recovery'}
+    if not isinstance(values,dict) or set(values)!=fields or any(type(values[k]) is not bool for k in ('enabled','recovery')) or values['minimum'] not in SEVERITIES or values['escalate_to'] not in SEVERITIES:
+        raise ValueError('Invalid scoped notification policy.')
+    for key in ('reminder_seconds','escalate_after_seconds'):
+        value=values[key]
+        if type(value) is not int or (value!=0 and not 60<=value<=2592000):
+            raise ValueError('Intervals must be zero or 60–2592000 seconds.')
+    return values
+
+
+def override(store,kind,identifier,values):
+    if kind not in ('machine','group'):
+        raise ValueError('Unknown notification scope.')
+    if values is not None:
+        validate_override(values)
+    with store.connect() as c:
+        table='machines' if kind=='machine' else 'notification_groups'
+        if not c.execute('SELECT 1 FROM '+table+' WHERE id=?',(identifier,)).fetchone():
+            raise ValueError('Unknown notification target.')
+        if values is None:
+            c.execute('DELETE FROM notification_overrides WHERE scope_kind=? AND scope_id=?',(kind,identifier))
+        else:
+            c.execute('INSERT INTO notification_overrides VALUES(?,?,?) ON CONFLICT(scope_kind,scope_id) DO UPDATE SET policy=excluded.policy',(kind,identifier,json.dumps(values)))
+        store.audit(c,'notification.override_removed' if values is None else 'notification.override_saved',identifier,{'scope_kind':kind})
+
+
+def group_create(store,name):
+    name=name.strip()
+    if not 1<=len(name)<=100:
+        raise ValueError('Group name must contain 1–100 characters.')
+    with store.connect() as c:
+        if c.execute('SELECT 1 FROM notification_groups WHERE name=?',(name,)).fetchone():
+            raise ValueError('Group name already exists.')
+        identifier=uid()
+        c.execute('INSERT INTO notification_groups VALUES(?,?)',(identifier,name))
+        store.audit(c,'notification.group_created',identifier)
+    return identifier
+
+
+def group_assign(store,machine_id,group_id):
+    with store.connect() as c:
+        if not c.execute('SELECT 1 FROM machines WHERE id=?',(machine_id,)).fetchone() or (group_id and not c.execute('SELECT 1 FROM notification_groups WHERE id=?',(group_id,)).fetchone()):
+            raise ValueError('Unknown machine or group.')
+        c.execute('DELETE FROM machine_groups WHERE machine_id=?',(machine_id,))
+        if group_id:
+            c.execute('INSERT INTO machine_groups VALUES(?,?)',(machine_id,group_id))
+        store.audit(c,'notification.group_assigned',machine_id,{'group_id':group_id})

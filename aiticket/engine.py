@@ -123,11 +123,16 @@ def observe(store, check_id, healthy, evidence, now=None, lease_token=None):
 
 
 def enqueue(c, incident_id, event, now, store):
-    severity = c.execute('SELECT severity FROM incidents WHERE id=?', (incident_id,)).fetchone()[0]
-    minimum = store.setting('discord_minimum', 'medium')
+    incident=c.execute('SELECT severity,machine_id FROM incidents WHERE id=?',(incident_id,)).fetchone()
+    severity=incident['severity']
+    from .policies import effective
+    policy=effective(c,incident['machine_id'])
+    if not policy['enabled']:
+        return
+    minimum=policy['minimum']
     if SEVERITIES.index(severity) < SEVERITIES.index(minimum):
         return
-    if event == 'recovery' and not store.setting('discord_recovery', True):
+    if event == 'recovery' and not policy['recovery']:
         return
     c.execute('INSERT OR IGNORE INTO deliveries VALUES(?,?,?, ?,0,?,NULL,NULL,NULL,?,?)',
               (uid(), incident_id, incident_id + ':' + event, 'pending', now, now, now + 86400))

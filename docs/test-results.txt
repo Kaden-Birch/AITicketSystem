@@ -1,6 +1,6 @@
-179 passed in 19.11s
+183 passed in 19.50s
 
-Milestone 13 adds resource/outage relationships, identity/time boundaries, evidence-preserving merges and combined-source recovery tests.
+Milestone 14 adds notification override precedence, inheritance, disabled delivery and group reminder tests.
 Local Python 3.14.6; temporary databases, fake Hermes adapters and mocked external providers/subprocesses.
 Milestone 11 covers immutable approval/hash/version binding, cancellation, expiry, protected targets, separate action credentials, fresh execution preconditions, single delivery/authorization, one attempt per incident, ownership fencing, independent recovery verification, unknown outcomes, fixed local argv, timeout handling and durable agent replay prevention.
 Earlier monitoring, workspace, handoff, administration, bridge and budget-gateway tests remain passing.

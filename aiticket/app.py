@@ -581,7 +581,7 @@ def create_app(data_dir=None, testing=False):
     @app.route('/policies',methods=['GET','POST'])
     @login_required
     def maintenance_policies():
-        from .policies import add_window,DEFAULTS,active
+        from .policies import add_window,DEFAULTS,active,override,group_create,group_assign,effective
         if request.method=='POST':
             f=request.form
             if f.get('operation')=='window':
@@ -595,6 +595,15 @@ def create_app(data_dir=None, testing=False):
                     if not result.rowcount:
                         abort(404)
                     store.audit(c,'maintenance.enabled' if enabled else 'maintenance.disabled',f.get('window_id'))
+            elif f.get('operation')=='group':
+                group_create(store,f.get('name',''))
+            elif f.get('operation')=='membership':
+                group_assign(store,f.get('machine_id'),f.get('group_id') or None)
+            elif f.get('operation') in ('override','inherit'):
+                values=None
+                if f['operation']=='override':
+                    values={'enabled':f.get('enabled')=='yes','minimum':f.get('minimum','medium'),'recovery':f.get('recovery')=='yes','reminder_seconds':int(f.get('reminder_seconds','0')),'escalate_after_seconds':int(f.get('escalate_after_seconds','0')),'escalate_to':f.get('escalate_to','high')}
+                override(store,f.get('scope_kind'),f.get('scope_id'),values)
             elif f.get('operation')=='notifications':
                 reminder=int(f.get('reminder_seconds',0))
                 delay=int(f.get('escalate_after_seconds',0))
@@ -608,7 +617,9 @@ def create_app(data_dir=None, testing=False):
         windows=store.rows('SELECT w.*,m.name AS machine FROM maintenance_windows w LEFT JOIN machines m ON m.id=w.machine_id ORDER BY w.name')
         for window in windows:
             window['active_now']=active(window,time.time())
-        return render_template('policies.html',windows=windows,machines=store.rows('SELECT * FROM machines ORDER BY name'),policy=store.setting('notification_policy',DEFAULTS))
+        with store.connect() as c:
+            effective_policies=[{**dict(m),'policy':effective(c,m['id'])} for m in c.execute('SELECT * FROM machines ORDER BY name').fetchall()]
+        return render_template('policies.html',groups=store.rows('SELECT * FROM notification_groups ORDER BY name'),overrides=[{**r,'data':json.loads(r['policy'])} for r in store.rows('SELECT * FROM notification_overrides')],effective_policies=effective_policies,windows=windows,machines=store.rows('SELECT * FROM machines ORDER BY name'),policy=store.setting('notification_policy',DEFAULTS))
 
     @app.post('/incidents/<incident_id>/silence')
     @login_required

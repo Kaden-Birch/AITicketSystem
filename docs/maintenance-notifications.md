@@ -21,3 +21,9 @@ Escalation raises severity to the configured level once persistence reaches the 
 Queued non-recovery notifications become obsolete after resolution. Recovery settings are rechecked before delivery. Disabling reminders supersedes queued reminder messages at dispatch. Ownership tokens are rechecked before sending so cancelled/coalesced jobs do not dispatch using a stale lease. External Discord acceptance remains at-least-once: lost replies may still cause duplicate notifications.
 
 Monitoring outages, Docker execution and real notification endpoints remain untested in the deployment environment. Local tests cover schedules, timezone behavior, suppression, silence, coalescing, escalation floors and filter revalidation. No live infrastructure or model calls were made.
+
+## Scoped notification policies
+
+Policies can define one notification group per machine and complete overrides for groups or individual machines. Machine overrides take precedence over group overrides, then global defaults. The GUI displays effective settings. Removing an override restores inheritance. Groups are independent of dependency parents and maintenance scope.
+
+Each override configures enabled state, severity minimum, recovery messages, reminders and persistence escalation. Disabled policies suppress notification enqueueing and escalation; delivery rechecks current effective settings, including already queued events. Reminder evaluation honors overrides even when global reminders are disabled. Machine monitoring and incident evidence continue. Policy changes never authorize recovery or increase AI budgets.

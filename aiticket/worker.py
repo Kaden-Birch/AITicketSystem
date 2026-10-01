@@ -47,10 +47,13 @@ def deliver(store, vault, job):
         outcome(store, job, 'superseded', None)
         return
     from .engine import SEVERITIES
-    if SEVERITIES.index(incident['severity'])<SEVERITIES.index(store.setting('discord_minimum','medium')) or (job['event_key'].endswith(':recovery') and not store.setting('discord_recovery',True)):
+    from .policies import effective
+    with store.connect() as c:
+        policy=effective(c,incident['machine_id'])
+    if not policy['enabled'] or SEVERITIES.index(incident['severity'])<SEVERITIES.index(policy['minimum']) or (job['event_key'].endswith(':recovery') and not policy['recovery']):
         outcome(store,job,'superseded',None)
         return
-    if ':reminder:' in job['event_key'] and not store.setting('notification_policy',{}).get('reminder_seconds',0):
+    if ':reminder:' in job['event_key'] and not policy['reminder_seconds']:
         outcome(store,job,'superseded',None)
         return
     from .policies import maintained

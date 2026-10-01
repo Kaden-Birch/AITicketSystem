@@ -1,6 +1,11 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 13
+CURRENT_VERSION = 14
 MIGRATIONS = {
+    14: (
+        'CREATE TABLE notification_groups(id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE)',
+        'CREATE TABLE machine_groups(machine_id TEXT PRIMARY KEY REFERENCES machines(id),group_id TEXT NOT NULL REFERENCES notification_groups(id))',
+        'CREATE TABLE notification_overrides(scope_kind TEXT NOT NULL,scope_id TEXT NOT NULL,policy TEXT NOT NULL,PRIMARY KEY(scope_kind,scope_id))',
+    ),
     13: (
         'ALTER TABLE incidents ADD COLUMN merged_into TEXT REFERENCES incidents(id)',
         "CREATE TABLE incident_merges(source_id TEXT PRIMARY KEY REFERENCES incidents(id),target_id TEXT NOT NULL REFERENCES incidents(id),created REAL NOT NULL,reason TEXT NOT NULL)",
