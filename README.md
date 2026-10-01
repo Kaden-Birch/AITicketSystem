@@ -71,3 +71,5 @@ Milestone 12 adds persistent scheduled Proxmox inventory refresh, new-resource r
 Milestone 13 adds conservative resource/outage relationships and explicit same-machine incident merging with preserved history and independent multi-source recovery.
 
 Milestone 14 adds notification groups, per-machine/group overrides and visible effective policies, applied at enqueue, reminder/escalation and delivery time.
+
+Milestone 15 adds atomic full inventory configuration transfer, reviewed check activation, immutable incident archive downloads, archive history filters and login/security auditing. Imported credentials and execution authority remain unavailable until locally restored and reviewed.

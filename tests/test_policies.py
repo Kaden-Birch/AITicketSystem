@@ -90,7 +90,7 @@ def test_policy_ui_validation_and_audit(signed_in):
     assert client.post('/policies',data={'csrf':csrf,'operation':'notifications','reminder_seconds':'1'}).status_code==400
     assert not store.setting('notification_policy')
     assert client.post('/policies',data={'csrf':csrf,'operation':'notifications','reminder_seconds':'600','escalate_after_seconds':'3600','escalate_to':'critical'}).status_code==302
-    assert store.rows('SELECT action FROM audit')[0]['action']=='settings.updated'
+    assert store.rows("SELECT action FROM audit WHERE action NOT LIKE 'security.%'")[0]['action']=='settings.updated'
     iid=failure(store)
     assert client.post('/incidents/'+iid+'/silence',data={'csrf':csrf,'minutes':'60'}).status_code==302
     assert store.rows('SELECT silence_until FROM incidents')[0]['silence_until']>0

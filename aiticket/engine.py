@@ -100,7 +100,10 @@ def observe(store, check_id, healthy, evidence, now=None, lease_token=None):
             return
         iid=incident['id']
         c.execute('INSERT INTO incident_sources VALUES(?,?,?) ON CONFLICT(incident_id,check_id) DO UPDATE SET report=excluded.report',(iid,check_id,json.dumps(source)))
-        c.execute('INSERT INTO incident_observations VALUES(?,?)',(iid,observation_id))
+        c.execute('INSERT OR IGNORE INTO incident_observations VALUES(?,?)',(iid,observation_id))
+        if healthy is False:
+            # Retain the threshold-building failure samples as incident evidence too.
+            c.execute("INSERT OR IGNORE INTO incident_observations SELECT ?,id FROM observations WHERE check_id=? AND at>=? AND at<=? AND health='down'",(iid,check_id,first_failure,now))
         sources=[]
         for row in c.execute('SELECT s.report,c.enabled,c.interval FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=?',(iid,)):
             report=json.loads(row['report'])

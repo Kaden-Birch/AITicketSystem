@@ -34,9 +34,9 @@ def test_settings_validate_before_atomic_save_and_exclude_secrets(signed_in):
     response=client.post('/settings',data={'csrf':csrf,'section':'discord','webhook':'https://discord.com/api/webhooks/123/secret-value','minimum':'invalid'})
     assert response.status_code==400
     assert not store.setting('discord_secret')
-    assert not store.rows('SELECT * FROM audit')
+    assert not store.rows("SELECT * FROM audit WHERE action NOT LIKE 'security.%'")
     client.post('/settings',data={'csrf':csrf,'section':'discord','webhook':'https://discord.com/api/webhooks/123/secret-value','minimum':'high'})
-    records=store.rows('SELECT * FROM audit')
+    records=store.rows("SELECT * FROM audit WHERE action NOT LIKE 'security.%'")
     assert len(records)==1 and records[0]['action']=='settings.updated'
     assert 'secret-value' not in json.dumps(records)
     response=client.get('/audit')
@@ -46,6 +46,6 @@ def test_settings_validate_before_atomic_save_and_exclude_secrets(signed_in):
 def test_machine_and_maintenance_audit(signed_in):
     client,store,_,csrf=signed_in
     client.post('/hosts',data={'csrf':csrf,'name':'New machine'})
-    assert store.rows('SELECT * FROM audit')[0]['action']=='machine.created'
+    assert store.rows("SELECT * FROM audit WHERE action NOT LIKE 'security.%'")[0]['action']=='machine.created'
     assert client.post('/checks/missing/maintenance',data={'csrf':csrf,'minutes':60}).status_code==404
-    assert len(store.rows('SELECT * FROM audit'))==1
+    assert len(store.rows("SELECT * FROM audit WHERE action NOT LIKE 'security.%'"))==1

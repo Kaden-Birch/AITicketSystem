@@ -109,3 +109,36 @@ def rotate_key(store, old_vault, destination):
             c.execute('UPDATE ai_jobs SET credential=?,bridge_secret=? WHERE id=?', (new_vault.encrypt(old_vault.decrypt(row['credential'])), new_vault.encrypt(old_vault.decrypt(row['bridge_secret'])), row['id']))
         store.audit(c, 'encryption.rotated', 'vault', actor='console')
     return new_vault
+
+
+def archive_incident(store,incident_id,restore=False):
+    from .db import uid
+    with store.connect() as c:
+        c.execute('BEGIN IMMEDIATE')
+        incident=c.execute('SELECT * FROM incidents WHERE id=?',(incident_id,)).fetchone()
+        if not incident or incident['closed'] is None:
+            raise ValueError('Only closed incidents can be archived; manually resolved unhealthy conditions remain active.')
+        if restore:
+            if incident['archived_at'] is None:
+                return
+            c.execute('UPDATE incidents SET archived_at=NULL WHERE id=?',(incident_id,))
+            store.timeline(c,incident_id,'unarchived','Restored to normal history; archived snapshots are retained.',actor='user')
+            store.audit(c,'incident.unarchived',incident_id)
+            return
+        if incident['archived_at'] is not None:
+            return
+        now=time.time()
+        c.execute('UPDATE incidents SET archived_at=? WHERE id=?',(now,incident_id))
+        store.timeline(c,incident_id,'archived','Closed incident archived; all evidence remains accessible.',actor='user')
+        snapshot={
+            'format':'aiticket-incident-archive','version':1,'incident':dict(c.execute('SELECT * FROM incidents WHERE id=?',(incident_id,)).fetchone()),
+            'sources':[dict(r) for r in c.execute('SELECT * FROM incident_sources WHERE incident_id=?',(incident_id,))],
+            'observations':[dict(r) for r in c.execute('SELECT o.* FROM observations o JOIN incident_observations i ON i.observation_id=o.id WHERE i.incident_id=? ORDER BY o.at',(incident_id,))],
+            'timeline':[dict(r) for r in c.execute('SELECT * FROM timeline WHERE incident_id=? ORDER BY at',(incident_id,))],
+            'diagnostics':[dict(r) for r in c.execute('SELECT id,agent_id,operation,parameters,state,created,result,completed FROM diagnostic_jobs WHERE incident_id=?',(incident_id,))],
+            'ai_messages':[dict(r) for r in c.execute('SELECT * FROM ai_messages WHERE incident_id=? ORDER BY created',(incident_id,))],
+            'proposals':[dict(r) for r in c.execute('SELECT id,version,parent_id,payload,payload_hash,state,created,result,completed,verification FROM action_proposals WHERE incident_id=?',(incident_id,))],
+            'links':[dict(r) for r in c.execute('SELECT * FROM incident_links WHERE left_id=? OR right_id=?',(incident_id,incident_id))],
+        }
+        c.execute('INSERT INTO incident_archives VALUES(?,?,?,?)',(uid(),incident_id,now,json.dumps(snapshot)))
+        store.audit(c,'incident.archived',incident_id)

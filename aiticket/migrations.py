@@ -1,6 +1,12 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 14
+CURRENT_VERSION = 15
 MIGRATIONS = {
+    15: (
+        'ALTER TABLE incidents ADD COLUMN archived_at REAL',
+        'CREATE TABLE incident_archives(id TEXT PRIMARY KEY,incident_id TEXT NOT NULL REFERENCES incidents(id),created REAL NOT NULL,document TEXT NOT NULL)',
+        "CREATE TRIGGER archive_no_update BEFORE UPDATE ON incident_archives BEGIN SELECT RAISE(ABORT,'Archive is immutable'); END",
+        "CREATE TRIGGER archive_no_delete BEFORE DELETE ON incident_archives BEGIN SELECT RAISE(ABORT,'Archive is immutable'); END",
+    ),
     14: (
         'CREATE TABLE notification_groups(id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE)',
         'CREATE TABLE machine_groups(machine_id TEXT PRIMARY KEY REFERENCES machines(id),group_id TEXT NOT NULL REFERENCES notification_groups(id))',

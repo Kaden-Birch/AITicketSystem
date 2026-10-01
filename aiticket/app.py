@@ -26,7 +26,7 @@ def create_app(data_dir=None, testing=False):
         raise RuntimeError('Run python -m aiticket init before starting the server.')
     app = Flask(__name__)
     app.config.update(SECRET_KEY=vault.decrypt(store.setting('session_secret')), TESTING=testing,
-                      MAX_CONTENT_LENGTH=65536, SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Strict',
+                      MAX_CONTENT_LENGTH=2100000, MAX_FORM_MEMORY_SIZE=2100000, SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Strict',
                       SESSION_COOKIE_SECURE=not testing and os.environ.get('AITICKET_LOCAL_HTTP') != '1',
                       PERMANENT_SESSION_LIFETIME=3600)
     app.extensions.update(store=store, vault=vault)
@@ -35,6 +35,10 @@ def create_app(data_dir=None, testing=False):
         @functools.wraps(fn)
         def wrapped(*args, **kwargs):
             if not session.get('admin') or session.get('auth_generation') != store.setting('auth_generation'):
+                if session.get('admin'):
+                    with store.connect() as c:
+                        store.audit(c,'security.session_invalid','administrator',actor='security')
+                    session.clear()
                 return redirect(url_for('login'))
             return fn(*args, **kwargs)
         return wrapped
@@ -47,6 +51,9 @@ def create_app(data_dir=None, testing=False):
 
     @app.after_request
     def headers(response):
+        if response.status_code in (401,403,429):
+            with store.connect() as c:
+                store.audit(c,'security.request_denied',request.endpoint or 'unknown',{'status':response.status_code,'address_digest':digest(request.remote_addr or 'unknown')},actor='security')
         response.headers['Content-Security-Policy'] = "default-src 'self'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Cache-Control'] = 'no-store'
@@ -81,18 +88,22 @@ def create_app(data_dir=None, testing=False):
                     abort(429)
                 if check_password_hash(store.setting('admin_hash'), request.form.get('password', '')):
                     c.execute('DELETE FROM login_attempts WHERE address=?', (address,))
+                    store.audit(c,'security.login_succeeded','administrator',{'address_digest':digest(address)},actor='security')
                     session.clear()
                     session.update(admin=True, csrf=secrets.token_urlsafe(32), auth_generation=store.setting('auth_generation'))
                     session.permanent = True
                     return redirect(url_for('dashboard'))
                 failures = (row['failures'] if row else 0) + 1
                 c.execute('INSERT INTO login_attempts VALUES(?,?,?) ON CONFLICT(address) DO UPDATE SET failures=excluded.failures,blocked_until=excluded.blocked_until', (address, failures, now + 60 if failures >= 5 else 0))
+                store.audit(c,'security.login_failed','administrator',{'address_digest':digest(address)},actor='security')
             flash('Incorrect password.')
         return render_template('login.html')
 
     @app.post('/logout')
     @login_required
     def logout():
+        with store.connect() as c:
+            store.audit(c,'security.logout','administrator',actor='security')
         session.clear()
         return redirect(url_for('login'))
 
@@ -100,7 +111,7 @@ def create_app(data_dir=None, testing=False):
     @login_required
     def dashboard():
         return render_template('dashboard.html', checks=store.rows('SELECT checks.*,machines.name AS machine FROM checks JOIN machines ON machines.id=machine_id ORDER BY machines.name'),
-                               incidents=store.rows('SELECT incidents.*,machines.name AS machine FROM incidents JOIN machines ON machines.id=machine_id ORDER BY first_seen DESC LIMIT 100'),
+                               incidents=store.rows('SELECT incidents.*,machines.name AS machine FROM incidents JOIN machines ON machines.id=machine_id WHERE incidents.archived_at IS NULL ORDER BY first_seen DESC LIMIT 100'),
                                jobs=store.rows('SELECT state,count(*) AS count FROM deliveries GROUP BY state'), ai_enabled=store.setting('hermes_config', {}).get('enabled', False))
 
     @app.route('/hosts', methods=['GET', 'POST'])
@@ -118,7 +129,7 @@ def create_app(data_dir=None, testing=False):
                 c.execute('INSERT INTO machines(id,name,parent_id,created) VALUES(?,?,?,?)', (machine_id, name, parent, time.time()))
                 store.audit(c, 'machine.created', machine_id, {'parent_id': parent})
             return redirect(url_for('hosts'))
-        return render_template('hosts.html', machines=store.rows('SELECT * FROM machines ORDER BY name'), agents=store.rows('SELECT agents.*,machines.name FROM agents JOIN machines ON machines.id=machine_id'))
+        return render_template('hosts.html', checks=store.rows('SELECT c.*,m.name AS machine FROM checks c JOIN machines m ON m.id=c.machine_id ORDER BY m.name,c.name'), machines=store.rows('SELECT * FROM machines ORDER BY name'), agents=store.rows('SELECT agents.*,machines.name FROM agents JOIN machines ON machines.id=machine_id'))
 
     @app.post('/checks')
     @login_required
@@ -177,6 +188,25 @@ def create_app(data_dir=None, testing=False):
         from .ai import meter
         from .handoff import view
         return render_template('incident.html', merge_candidates=store.rows("SELECT id,severity,first_seen FROM incidents WHERE machine_id=? AND id<>? AND closed IS NULL AND status<>'Resolved'",(rows[0]['machine_id'],incident_id)), ownership=view(store, incident_id), handoff_request_id=uid(), proposals=[{**p,'data':json.loads(p['payload'])} for p in store.rows('SELECT * FROM action_proposals WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,))], action_agents=[{**a,'action_services':json.loads(a['capabilities']).get('action_services',{})} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))], workspace_request_id=uid(), workspace_messages=store.rows('SELECT m.*,j.state,j.mode FROM ai_messages m JOIN ai_jobs j ON j.id=m.job_id WHERE m.incident_id=? ORDER BY m.created DESC LIMIT 100', (incident_id,)), workspace_sources=store.rows('SELECT s.check_id,c.name FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=?',(incident_id,)), ai_jobs=store.rows('SELECT id,state,mode,created,summary,error FROM ai_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100', (incident_id,)), ai_meter=meter(store, incident_id), incident=rows[0], report=json.loads(rows[0]['report']), timeline=store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at', (incident_id,)), links=store.rows('SELECT * FROM incident_links WHERE left_id=? OR right_id=?',(incident_id,incident_id)), diagnostic_jobs=store.rows('SELECT * FROM diagnostic_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,)), diagnostic_agents=[{**a,'caps':json.loads(a['capabilities'])} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))])
+
+    @app.post('/incidents/<incident_id>/archive')
+    @login_required
+    def archive(incident_id):
+        from .administration import archive_incident
+        operation=request.form.get('operation')
+        if operation not in ('archive','restore'):
+            raise ValueError('Unknown archive operation.')
+        archive_incident(store,incident_id,restore=operation=='restore')
+        return redirect(url_for('incident',incident_id=incident_id))
+
+    @app.get('/incidents/<incident_id>/archive-export')
+    @login_required
+    def archive_export(incident_id):
+        rows=store.rows('SELECT document FROM incident_archives WHERE incident_id=? ORDER BY created DESC LIMIT 1',(incident_id,))
+        if not rows: abort(404)
+        response=app.response_class(rows[0]['document'],mimetype='application/json')
+        response.headers['Content-Disposition']='attachment; filename="aiticket-incident-archive.json"'
+        return response
 
     @app.post('/incidents/<incident_id>/merge')
     @login_required
@@ -259,6 +289,15 @@ def create_app(data_dir=None, testing=False):
             elif operation == 'retention':
                 values = validate({'retention_days': int(request.form.get('days', '90'))})
                 store.save_many(values, actor='user')
+            elif operation == 'inventory_import':
+                from .inventory import import_inventory
+                if request.form.get('confirm')!='yes':
+                    raise ValueError('Confirm importing inventory with monitoring disabled for review.')
+                try:
+                    document=json.loads(request.form.get('document',''))
+                except (ValueError,RecursionError):
+                    raise ValueError('Provide valid inventory JSON.')
+                import_inventory(store,vault,document)
             elif operation == 'import':
                 try:
                     document = json.loads(request.form.get('document', ''))
@@ -281,6 +320,45 @@ def create_app(data_dir=None, testing=False):
         response.headers['Content-Disposition'] = 'attachment; filename="aiticket-preferences.json"'
         return response
 
+    @app.get('/administration/inventory-export')
+    @login_required
+    def inventory_export():
+        from .inventory import export_inventory
+        document=export_inventory(store)
+        with store.connect() as c:
+            store.audit(c,'inventory.exported','inventory')
+        response=app.response_class(json.dumps(document,indent=2),mimetype='application/json')
+        response.headers['Content-Disposition']='attachment; filename="aiticket-inventory.json"'
+        return response
+
+    @app.post('/checks/<check_id>/enabled')
+    @login_required
+    def check_enabled(check_id):
+        enabled=request.form.get('enabled')=='yes'
+        with store.connect() as c:
+            c.execute('BEGIN IMMEDIATE')
+            row=c.execute('SELECT * FROM checks WHERE id=?',(check_id,)).fetchone()
+            if not row: abort(404)
+            cfg=json.loads(row['config'])
+            if enabled:
+                from .inventory import config,CONFIG
+                config(row['kind'],{k:v for k,v in cfg.items() if k in CONFIG[row['kind']]})
+                if row['kind']=='proxmox':
+                    secret=request.form.get('token_secret','')
+                    if secret: cfg['token_secret']=vault.encrypt(secret)
+                    if not vault.decrypt(cfg.get('token_secret','')):
+                        raise ValueError('Provide the read-only token secret before enabling this imported check.')
+                if row['kind'] in ('agent','agent_metric') and not c.execute('SELECT 1 FROM agents WHERE id=? AND machine_id=? AND revoked=0',(cfg['agent_id'],row['machine_id'])).fetchone():
+                    raise ValueError('Enroll this agent before enabling its checks.')
+                if row['kind']=='proxmox_linked':
+                    obj=c.execute('SELECT * FROM proxmox_objects WHERE id=? AND present=1 AND template=0 AND machine_id=? AND check_id=?',(cfg['object_id'],row['machine_id'],check_id)).fetchone()
+                    credentials=c.execute('SELECT token_secret FROM proxmox_connections WHERE cluster_id=?',(cfg['cluster_id'],)).fetchall()
+                    if not obj or not any(vault.decrypt(r[0]) for r in credentials):
+                        raise ValueError('Review the source identity and restore a read-only connection credential first.')
+            c.execute('UPDATE checks SET enabled=?,config=?,lease_token=NULL,lease_until=NULL,next_run=0 WHERE id=?',(int(enabled),json.dumps(cfg),check_id))
+            store.audit(c,'check.enabled' if enabled else 'check.disabled',check_id)
+        return redirect(url_for('hosts'))
+
     @app.post('/agents/<agent_id>/rotate')
     @login_required
     def rotate_agent(agent_id):
@@ -301,7 +379,11 @@ def create_app(data_dir=None, testing=False):
     @login_required
     def history():
         clauses, params = [], []
-        filters = {key: request.args.get(key, '') for key in ('machine', 'severity', 'status', 'from', 'to')}
+        filters = {key: request.args.get(key, '') for key in ('machine', 'severity', 'status', 'from', 'to','archived')}
+        if filters['archived'] not in ('','only','all'):
+            raise ValueError('Invalid archive filter.')
+        if filters['archived']!='all':
+            clauses.append('i.archived_at IS NOT NULL' if filters['archived']=='only' else 'i.archived_at IS NULL')
         page = int(request.args.get('page', 1))
         if not 1 <= page <= 100000:
             raise ValueError('Invalid page.')
@@ -496,6 +578,16 @@ def create_app(data_dir=None, testing=False):
                     connection_id=uid()
                     c.execute('INSERT INTO proxmox_connections VALUES(?,?,?,?,?,?,?,NULL,NULL)',(connection_id,cluster,name,url,token_id,vault.encrypt(secret),ca))
                     store.audit(c,'proxmox.connection_created',connection_id,{'cluster_id':cluster})
+            elif operation=='credentials':
+                identifier=f.get('connection_id')
+                secret=f.get('token_secret','')
+                ca=f.get('ca','').strip() or None
+                if not 1<=len(secret)<=2048 or (ca and (not Path(ca).is_absolute() or not Path(ca).is_file())):
+                    raise ValueError('Supply a read-only secret and an optional existing absolute CA path.')
+                with store.connect() as c:
+                    changed=c.execute('UPDATE proxmox_connections SET token_secret=?,ca=?,last_test=NULL WHERE id=?',(vault.encrypt(secret),ca,identifier))
+                    if not changed.rowcount: abort(404)
+                    store.audit(c,'proxmox.credentials_replaced',identifier)
             elif operation=='schedule':
                 schedule(store,f.get('connection_id'),int(f.get('interval','0')))
             elif operation in ('test','discover'):

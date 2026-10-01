@@ -1,6 +1,6 @@
-183 passed in 19.50s
+188 passed in 20.48s
 
-Milestone 14 adds notification override precedence, inheritance, disabled delivery and group reminder tests.
+Milestone 15 adds inventory roundtrip, secret exclusion, disabled import, graph/binding rollback, archive immutability/history and login/security event tests.
 Local Python 3.14.6; temporary databases, fake Hermes adapters and mocked external providers/subprocesses.
 Milestone 11 covers immutable approval/hash/version binding, cancellation, expiry, protected targets, separate action credentials, fresh execution preconditions, single delivery/authorization, one attempt per incident, ownership fencing, independent recovery verification, unknown outcomes, fixed local argv, timeout handling and durable agent replay prevention.
 Earlier monitoring, workspace, handoff, administration, bridge and budget-gateway tests remain passing.
