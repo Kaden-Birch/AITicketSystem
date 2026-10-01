@@ -1,5 +1,7 @@
 # Linux agent installation
 
+For the complete main VM and agent walkthrough, see [installation.md](installation.md).
+
 Requires Linux `/proc`, Python 3.11+, and verified HTTPS. The unprivileged agent has no listener or shell execution. Read-only process/service diagnostics use a local allowlist and durable execution ledger. It never self-reboots or updates automatically.
 
 Deliver reviewed files through an authenticated trusted channel and verify the artifact digest. Do not pipe unauthenticated LAN downloads into a shell.

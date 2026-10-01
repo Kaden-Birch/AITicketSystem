@@ -32,7 +32,7 @@ Administration configures 1–3650 days of routine observation retention (defaul
 
 Download/paste the versioned preferences JSON through Administration. Import validates the whole document before one audited transaction. Only AI allowances, Discord severity/recovery, global reminder/escalation and routine retention are transferred. Credentials, session keys, accounts, machines, checks, discovery links and maintenance windows are excluded. Use a matched database/key backup for complete migration; a preferences file is not a backup. Preference import does not transfer connection credentials or activation/verification controls.
 
-Normal restart retains committed observations, incidents, notes and delivery jobs. Abandoned leases recover after expiry; stale worker results are rejected. Expired/failed delivery jobs remain visible for review. Delivery may duplicate if Discord accepted a request but the reply was lost. No unsafe action replay is possible because actions are not implemented.
+Normal restart retains committed observations, incidents, notes and delivery jobs. Abandoned leases recover after expiry; stale worker results are rejected. Expired/failed delivery jobs remain visible for review. Delivery may duplicate if Discord accepted a request but the reply was lost. Approval-required service recovery uses durable broker and agent ledgers; uncertain outcomes are never automatically replayed.
 
 For application migration, stop the app and preserve its database plus any remaining WAL sidecars and the separately managed key. Preserve ownership/permissions. Start the same version and verify health, inventory and queue before upgrading. No existing Proxmox backup system is accessed.
 

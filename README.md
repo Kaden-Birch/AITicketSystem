@@ -19,6 +19,8 @@ Open http://127.0.0.1:8080. Initialization prompts for the administrator passwor
 
 ## Ubuntu 24.04 deployment
 
+Follow the [complete main VM and monitored-host installation guide](docs/installation.md) for HTTPS, administrator setup, agent enrollment, verification and upgrades.
+
 ```sh
 docker compose build
 docker compose run --rm app python -m aiticket init
