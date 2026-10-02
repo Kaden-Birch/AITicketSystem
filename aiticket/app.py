@@ -450,6 +450,7 @@ def create_app(data_dir=None, testing=False):
         checks=store.rows('SELECT * FROM checks WHERE id=?',(check_id,))
         if not checks: abort(404)
         check=checks[0]
+        if check['kind']=='unifi': return redirect(url_for('unifi_page'))
         if check['kind']=='manual': raise ValueError('Edit manual tickets through their ticket workspace.')
         if request.method=='POST': return save_check(check)
         return render_template('check-edit.html',check=check,cfg=json.loads(check['config']),machines=store.rows('SELECT id,name FROM machines WHERE id=?',(check['machine_id'],)))
@@ -659,7 +660,9 @@ def create_app(data_dir=None, testing=False):
             cfg=json.loads(row['config'])
             if enabled:
                 from .inventory import config,CONFIG
-                config(row['kind'],{k:v for k,v in cfg.items() if k in CONFIG[row['kind']]})
+                if row['kind']=='unifi':
+                    if not c.execute('SELECT 1 FROM unifi_connections WHERE id=? AND machine_id=?',(cfg.get('connection_id'),row['machine_id'])).fetchone(): raise ValueError('Restore the UniFi connection first.')
+                else: config(row['kind'],{k:v for k,v in cfg.items() if k in CONFIG[row['kind']]})
                 if row['kind']=='proxmox':
                     secret=request.form.get('token_secret','')
                     if secret: cfg['token_secret']=vault.encrypt(secret)
@@ -911,6 +914,22 @@ def create_app(data_dir=None, testing=False):
         version=rows[0]['version'] or ''
         docker_supported=bool(re.fullmatch(r'\d+\.\d+\.\d+',version)) and tuple(int(v) for v in version.split('.'))>=(0,7,0)
         return {'checks':[{'id':r['id'],'kind':r['kind'],'config':json.loads(r['config'])} for r in store.rows("SELECT * FROM checks WHERE machine_id=? AND enabled=1 AND kind IN ('process','smb','docker') AND (kind<>'docker' OR ?) AND next_run<=? ORDER BY next_run,id LIMIT 20",(machine,docker_supported,time.time()))]}
+
+    @app.route('/unifi', methods=['GET','POST'])
+    @login_required
+    def unifi_page():
+        from .unifi import save, refresh
+        if request.method=='POST':
+            if request.form.get('operation')=='refresh':
+                refresh(store,vault,request.form.get('id'))
+                flash('Read-only telemetry refreshed. Review endpoint results below.')
+            else:
+                save(store,vault,request.form)
+                flash('UniFi read-only connection saved; monitoring is scheduled.')
+            return redirect(url_for('unifi_page'))
+        rows=store.rows('SELECT u.id,u.name,u.kind,u.url,u.ca,u.insecure_tls,u.site,u.machine_id,u.ai_context,u.check_id,u.snapshot,c.interval,c.severity,c.fail_after,c.recover_after FROM unifi_connections u JOIN checks c ON c.id=u.check_id ORDER BY u.name')
+        for row in rows: row['snapshot']=json.loads(row['snapshot']) if row['snapshot'] else None
+        return render_template('unifi.html',connections=rows,machines=store.rows('SELECT id,name FROM machines ORDER BY name'))
 
     @app.route('/proxmox', methods=['GET','POST'])
     @login_required

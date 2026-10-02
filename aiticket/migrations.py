@@ -1,6 +1,9 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 25
+CURRENT_VERSION = 26
 MIGRATIONS = {
+    26: (
+        "CREATE TABLE unifi_connections(id TEXT PRIMARY KEY,name TEXT NOT NULL,kind TEXT NOT NULL,url TEXT NOT NULL,secret TEXT NOT NULL,ca TEXT,insecure_tls INTEGER NOT NULL DEFAULT 0,site TEXT NOT NULL DEFAULT '',machine_id TEXT NOT NULL REFERENCES machines(id),ai_context INTEGER NOT NULL DEFAULT 0,check_id TEXT NOT NULL,snapshot TEXT)",
+    ),
     25: (
         "CREATE TABLE metric_samples(entity_id TEXT NOT NULL,source TEXT NOT NULL,at REAL NOT NULL,metrics TEXT NOT NULL,PRIMARY KEY(entity_id,source,at))",
         "CREATE INDEX metric_samples_at ON metric_samples(at)",

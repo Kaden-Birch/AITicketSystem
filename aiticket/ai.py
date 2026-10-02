@@ -157,6 +157,13 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
                 evidence=json.dumps(document)
                 if len(evidence)>16000:
                     raise ValueError('Recovery draft context exceeds limits.')
+        from .unifi import ai_context as unifi_context
+        unifi_facts=unifi_context(c,incident['machine_id'])
+        if unifi_facts:
+            document=json.loads(evidence)
+            document['unifi_read_only']=unifi_facts
+            evidence=json.dumps(document)
+            if len(evidence)>16000: raise ValueError('Selected context including UniFi exceeds limits.')
         if codex and bridge.get('command_tools'):
             document=json.loads(evidence)
             report=json.loads(incident['report'])

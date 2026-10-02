@@ -34,7 +34,7 @@ def export_inventory(store):
     with store.connect() as c:
         c.execute('BEGIN')
         tables={name:[dict(r) for r in c.execute('SELECT '+','.join(fields)+' FROM '+name)] for name,fields in FIELDS.items()}
-    tables['checks']=[r for r in tables['checks'] if r['kind']!='manual']
+    tables['checks']=[r for r in tables['checks'] if r['kind'] not in ('manual','unifi')]
     for row in tables['checks']:
         cfg=json.loads(row['config'])
         row['config']={key:cfg[key] for key in CONFIG[row['kind']] if key in cfg}

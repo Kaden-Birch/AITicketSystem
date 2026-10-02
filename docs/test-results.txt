@@ -1,4 +1,4 @@
-342 passed in 30.60s
+349 passed in 32.09s
 
 HTTP opt-in tests cover cookie configuration, URL restrictions, persisted agent enrollment, nonredirecting credential delivery, continued HTTPS verification and isolated Hermes configuration.
 Local Python 3.14.6; temporary databases, fake Hermes adapters and mocked external providers/subprocesses.
@@ -49,3 +49,5 @@ Proxmox manual power now reuses the selected linked connection token. Tests veri
 Check editing: container target correction preserves host/type/check identity and incident history, rejects stale agent results, resets current status, retains blank replacement encrypted Proxmox secrets without disclosure, and validates missing checks. Full suite 339 passed; final editing/monitoring checks 9 passed.
 
 AI/timestamp/work-log correction: Medium vs High automatic admission and queueing when minimum is Medium, resolved running jobs do not reopen sessions, preserved legacy bookkeeping rows are excluded from visible totals, Mountain MDT/MST formatting and timezone setting validation. Full suite 342 passed; final status tests 3 passed. No model calls or live deployment configuration changes.
+
+UniFi read-only integration: seven fixture tests cover fixed GET endpoint boundaries, discarded credential fields, redirects/non-JSON/size rejection, bounded pagination, partial Drive results and capacity/health alerts, optional shared AI context and size limits, CSRF, encrypted-key preservation/rotation, monitoring toggles, credential-free UI and inventory-transfer exclusion. Live Network/Drive console compatibility remains pending. No UniFi writes, host commands or model requests executed.

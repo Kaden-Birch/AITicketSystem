@@ -95,3 +95,5 @@ Automatic AI investigations include eligible monitoring and manual tickets when 
 Agent reporting is configurable down to 20 seconds in Settings. Dashboard, host and incident information updates automatically every five seconds while preserving unfinished forms.
 
 Ticket workspace, dark appearance, work sessions and blocker notifications: [guide](docs/ticket-workspace.md).
+
+[UniFi Network and experimental UNAS monitoring](docs/unifi.md) adds read-only telemetry, host checks and optional AI network context. No UniFi action or configuration tools are exposed.
