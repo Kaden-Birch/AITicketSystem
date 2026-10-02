@@ -378,15 +378,15 @@ def create_app(data_dir=None, testing=False):
             return redirect(url_for('hosts'))
         return render_template('hosts.html', checks=store.rows("SELECT c.*,m.name AS machine FROM checks c JOIN machines m ON m.id=c.machine_id WHERE c.kind<>'manual' ORDER BY m.name,c.name"), machines=store.rows('SELECT * FROM machines ORDER BY name'), agents=store.rows('SELECT agents.*,machines.name FROM agents JOIN machines ON machines.id=machine_id'))
 
-    @app.post('/checks')
-    @login_required
-    def add_check():
+    def save_check(existing=None):
         f = request.form
-        kind = f.get('kind')
-        machine = f.get('machine_id')
+        kind = existing['kind'] if existing else f.get('kind')
+        machine = existing['machine_id'] if existing else f.get('machine_id')
         if not store.rows('SELECT id FROM machines WHERE id=?', (machine,)):
             raise ValueError('Select an existing machine.')
-        if kind == 'http':
+        if existing and kind in ('agent','agent_metric','proxmox_linked'):
+            cfg=json.loads(existing['config'])
+        elif kind == 'http':
             cfg = {'url': validate_url(f.get('url', '')), 'status': int(f.get('expected_status', 200))}
             if not 100 <= cfg['status'] <= 599:
                 raise ValueError('Invalid HTTP status.')
@@ -411,11 +411,14 @@ def create_app(data_dir=None, testing=False):
             if not cfg['host'] or len(cfg['host']) > 253 or not 1 <= cfg['port'] <= 65535:
                 raise ValueError('Enter a valid host and port.')
         elif kind == 'proxmox':
-            cfg = {'url': validate_url(f.get('url', ''), ('https',)), 'token_id': f.get('token_id', ''), 'token_secret': vault.encrypt(f.get('token_secret', '')), 'resource': f.get('resource', '').strip(), 'expected': f.get('expected', 'running')}
-            if not cfg['token_id'] or not f.get('token_secret') or cfg['expected'] not in ('running', 'stopped', 'online', 'offline', 'available'):
+            old_cfg=json.loads(existing['config']) if existing else {}
+            secret=vault.encrypt(f['token_secret']) if f.get('token_secret') else old_cfg.get('token_secret')
+            cfg = {'url': validate_url(f.get('url', ''), ('https',)), 'token_id': f.get('token_id', ''), 'token_secret': secret, 'resource': f.get('resource', '').strip(), 'expected': f.get('expected', 'running')}
+            if not cfg['token_id'] or not secret or cfg['expected'] not in ('running', 'stopped', 'online', 'offline', 'available'):
                 raise ValueError('Provide a read-only token and valid expected state.')
         else:
             raise ValueError('Unsupported check type.')
+        if existing and kind=='proxmox' and old_cfg.get('ca'): cfg['ca']=old_cfg['ca']
         interval, fail, recover = int(f.get('interval', 60)), int(f.get('fail_after', 3)), int(f.get('recover_after', 2))
         severity = f.get('severity', 'medium')
         if not (1 if kind=='ping' else 20 if kind in ('process','smb','docker') else 10) <= interval <= 86400 or not 1 <= fail <= 100 or not 1 <= recover <= 100 or severity not in SEVERITIES:
@@ -424,10 +427,31 @@ def create_app(data_dir=None, testing=False):
         if not 1 <= len(name) <= 100:
             raise ValueError('Check name must contain 1–100 characters.')
         with store.connect() as c:
-            check_id = uid()
-            c.execute('INSERT INTO checks(id,machine_id,name,kind,config,interval,fail_after,recover_after,severity) VALUES(?,?,?,?,?,?,?,?,?)', (check_id, machine, name, kind, json.dumps(cfg), interval, fail, recover, severity))
-            store.audit(c, 'check.created', check_id, {'machine_id': machine, 'kind': kind})
+            if existing:
+                cfg['_revision']=uid()
+                cfg['_edited_at']=time.time()
+                c.execute("UPDATE checks SET name=?,config=?,interval=?,fail_after=?,recover_after=?,severity=?,health='unknown',failures=0,successes=0,first_failure_at=NULL,next_run=0,lease_token=NULL,lease_until=NULL WHERE id=?",(name,json.dumps(cfg),interval,fail,recover,severity,existing['id']))
+                store.audit(c,'check.edited',existing['id'],{'machine_id':machine,'kind':kind})
+            else:
+                check_id=uid()
+                c.execute('INSERT INTO checks(id,machine_id,name,kind,config,interval,fail_after,recover_after,severity) VALUES(?,?,?,?,?,?,?,?,?)',(check_id,machine,name,kind,json.dumps(cfg),interval,fail,recover,severity))
+                store.audit(c,'check.created',check_id,{'machine_id':machine,'kind':kind})
         return redirect(url_for('host_detail',machine_id=machine))
+
+    @app.post('/checks')
+    @login_required
+    def add_check():
+        return save_check()
+
+    @app.route('/checks/<check_id>/edit',methods=['GET','POST'])
+    @login_required
+    def edit_check(check_id):
+        checks=store.rows('SELECT * FROM checks WHERE id=?',(check_id,))
+        if not checks: abort(404)
+        check=checks[0]
+        if check['kind']=='manual': raise ValueError('Edit manual tickets through their ticket workspace.')
+        if request.method=='POST': return save_check(check)
+        return render_template('check-edit.html',check=check,cfg=json.loads(check['config']),machines=store.rows('SELECT id,name FROM machines WHERE id=?',(check['machine_id'],)))
 
     @app.post('/checks/<check_id>/maintenance')
     @login_required

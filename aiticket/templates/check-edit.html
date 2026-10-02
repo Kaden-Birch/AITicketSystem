@@ -1,0 +1,1 @@
+{% extends 'base.html' %}{% block content %}<a href='/hosts/{{ check.machine_id }}/settings'>← Host settings</a><h1>{{ check.name }}</h1><p>Changes keep the check identity and ticket history. Results restart with fresh observations after saving.</p>{% include 'check-form.html' %}{% endblock %}

@@ -286,3 +286,11 @@ Checks run against the local Docker daemon, with the agent's existing OS account
 Upgrade the main application and copy both `agent/agent.py` and `agent/monitoring.py` to each monitored host using the commands above. Agent version is **0.7.0**. Hermes needs no update. Agent checks follow the existing reporting cadence, as low as 20 seconds.
 
 Container failures use the normal automatic ticket/AI workflow. With automatic triage enabled, a severity that meets its minimum and Full access, AI can investigate and use commands such as `docker restart immich_server`. Guarded access asks for approval for changes; read-only access blocks them. Subsequent checks establish recovery before closure. No automatic restart is performed by the inspection itself.
+
+## Editing an existing check
+
+Open **Host settings → Monitoring → Edit check**, or use **Edit check** in the **Hosts & checks** list. Correct the Docker container name/ID, process name, mounted SMB path, ping/TCP destination or HTTP URL. Intervals, failure/recovery thresholds, name and severity can also be changed. The machine and check type stay fixed; built-in agent, resource and linked-Proxmox checks retain their managed source configuration.
+
+Saving retains the check ID, observations and ticket history. Failure counters and current health reset while fresh results are collected; stale agent results and in-flight check leases are not applied to the new configuration. Existing tickets are not deleted or immediately closed by an edit. A blank replacement Proxmox token secret retains the existing encrypted secret; secrets are never displayed in the form.
+
+Update only the main application for check editing; no agent or Hermes update is required.
