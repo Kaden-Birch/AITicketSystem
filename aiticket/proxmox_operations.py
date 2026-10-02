@@ -91,8 +91,10 @@ def execute(store,vault,identifier,ai_job=None,external=False):
             except ValueError: body=redact(raw.decode('utf-8','replace'))
             result={'http_status':response.status_code,'body':body}
             state='completed' if 200<=response.status_code<300 else ('failed' if 400<=response.status_code<500 else 'unknown')
-            result['note']='HTTP acceptance is not task completion. Query the returned UPID and fresh resource status to verify effects.'
-    except Exception: pass
+            result['note']='HTTP acceptance is not task completion. Query the returned UPID and fresh resource status to verify effects.' if state=='completed' else 'Proxmox rejected this request; inspect the HTTP status and response.' if state=='failed' else 'Proxmox returned a server error; inspect this UUID and resource state before another operation.'
+    except Exception as exc:
+        result['error_type']=type(exc).__name__
+        result['note']='Proxmox request failed; inspect this UUID before issuing another operation. No automatic replay.'
     with store.connect() as c:
         c.execute('UPDATE proxmox_api_jobs SET state=?,result=?,completed=? WHERE id=?',(state,json.dumps(result),time.time(),identifier))
         store.audit(c,'proxmox.api_result',identifier,{'state':state})

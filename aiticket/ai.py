@@ -161,6 +161,8 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
             document=json.loads(evidence)
             report=json.loads(incident['report'])
             task=question.strip() or (report.get('description','') if report.get('manual_ticket') else 'Investigate the incident using current read-only diagnostics. Report findings; do not change systems without an explicit administrator task.')
+            from .machine_context import context as machine_context
+            document['machine']=machine_context(c,incident['machine_id'])
             document['administrator_task']=task
             document['task_origin']='Administrator selected this operational investigation; checkpoint resumption restates its saved question as the current task.'
             from .proxmox_operations import context as proxmox_context

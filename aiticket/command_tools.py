@@ -5,7 +5,7 @@ import requests
 from .security import hermes_headers,validate_url
 
 NAME='aiticket_host'
-SCHEMA={'name':NAME,'description':'Remote shell on authorized hosts. targets lists exact machine IDs. run queues one arbitrary command; status returns exit/stdout/stderr; cancel stops local work. Approval policy and OS privileges apply. proxmox requests any token-permitted API endpoint on a linked connection; proxmox_status inspects the durable request. block records a need for human clarification/permission and notifies the administrator. resolve requests verified incident closure and recovery notification. Unknown outcomes must never be replayed.','parameters':{'type':'object','properties':{'action':{'type':'string','enum':['targets','run','status','cancel','proxmox','proxmox_status','resolve','block']},'summary':{'type':'string','description':'Brief repair explanation for resolve. Closure waits for fresh healthy monitoring after this run; AI text alone never proves recovery.'},'connection_id':{'type':'string'},'method':{'type':'string','enum':['GET','POST','PUT','DELETE']},'path':{'type':'string','description':'Relative Proxmox API path, e.g. /nodes/node/qemu/100/status/start. Token controls all API permissions.'},'params':{'type':'object','additionalProperties':True},'machine_id':{'type':'string'},'command':{'type':'string'},'id':{'type':'string','description':'Stable command UUID; reuse only for the exact same run. Required for status/cancel.'},'offset':{'type':'integer','minimum':0,'maximum':65536}},'required':['action'],'additionalProperties':False}}
+SCHEMA={'name':NAME,'description':'Remote shell on authorized hosts. targets lists machine IDs, observed agent connection addresses, freshness and shell availability. run queues one arbitrary command; status returns exit/stdout/stderr; cancel stops local work. Approval policy and OS privileges apply. proxmox requests any token-permitted API endpoint on a linked connection; proxmox_status inspects the durable request. block records a need for human clarification/permission and notifies the administrator. resolve requests verified incident closure and recovery notification. Unknown outcomes must never be replayed.','parameters':{'type':'object','properties':{'action':{'type':'string','enum':['targets','run','status','cancel','proxmox','proxmox_status','resolve','block']},'summary':{'type':'string','description':'Brief repair explanation for resolve. Closure waits for fresh healthy monitoring after this run; AI text alone never proves recovery.'},'connection_id':{'type':'string'},'method':{'type':'string','enum':['GET','POST','PUT','DELETE']},'path':{'type':'string','description':'Relative Proxmox API path, e.g. /nodes/node/qemu/100/status/start. Token controls all API permissions.'},'params':{'type':'object','additionalProperties':True},'machine_id':{'type':'string'},'command':{'type':'string'},'id':{'type':'string','description':'Stable command UUID; reuse only for the exact same run. Required for status/cancel.'},'offset':{'type':'integer','minimum':0,'maximum':65536}},'required':['action'],'additionalProperties':False}}
 
 
 def invoke(server,args,credential=None,job=None,secret=None,ca=None):
@@ -21,7 +21,12 @@ def invoke(server,args,credential=None,job=None,secret=None,ca=None):
         if not job: headers=hermes_headers(secret,body,args.get('id',str(uuid.uuid4())))
         with requests.post(server.rstrip('/')+path,data=body,headers=headers,timeout=(3,10),verify=ca or True,allow_redirects=False,stream=True) as response:
             raw=response.raw.read(512001)
-            if response.status_code!=200 or len(raw)>512000: raise ValueError('Command API refused or returned an incompatible response.')
+            if len(raw)>512000: raise ValueError('Command API returned an oversized response.')
+            if response.status_code!=200:
+                from .diagnostics import redact
+                try: detail=json.loads(raw).get('error','Command API rejected the request.')
+                except (ValueError,AttributeError): detail='Command API rejected the request.'
+                return json.dumps({'state':'rejected' if 400<=response.status_code<500 else 'unknown','http_status':response.status_code,'error':redact(str(detail))[:500],'id':args.get('id'),'note':'Inspect this UUID before submitting another operation; do not replay unknown outcomes.'})
             result=json.loads(raw)
         if result.get('state') not in ('pending','dispatched','running') or time.monotonic()>=deadline: break
         time.sleep(1)

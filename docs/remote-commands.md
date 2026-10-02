@@ -214,3 +214,7 @@ Dashboard, host workspaces, incident pages, Proxmox inventory and history/queue/
 ## Ticket workspace and blocker requests
 
 The operational tool also supports `block` with a brief `summary` when human input is needed. The ticket shows a blocker banner, stops its work session, and can notify Discord with a configured public ticket URL. See [ticket workspace](ticket-workspace.md) for appearance, session tracking and upgrading both the application and bridge.
+
+## Machine addresses and unavailable shell access
+
+Operational ticket context and `targets` include the tagged machine even if shell execution is unavailable. They report the monitoring agent connection peer address, observation time/freshness, and a specific shell availability reason. A connection peer may reflect NAT or a proxy; it is not a complete list of guest interface addresses. Stale addresses are last-known evidence. Direct guest interface queries still require an enrolled, fresh agent advertising shell capability and the existing host/local permissions. Proxmox QEMU network-interface queries additionally require the guest agent inside the VM. HTTP rejections now retain bounded error details; Proxmox network exceptions retain their error type in request history without exposing credentials or replaying an uncertain request. Update both the main application and Hermes bridge for this improvement.

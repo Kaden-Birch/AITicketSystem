@@ -70,6 +70,8 @@ def create_app(data_dir=None, testing=False):
 
     @app.errorhandler(ValueError)
     def invalid(exc):
+        if request.path.startswith(('/api/hermes/','/api/operations/')):
+            return {'error':redact(str(exc))[:500],'state':'rejected'},400
         return render_template('error.html', message=str(exc)), 400
 
     @app.get('/health')
@@ -215,8 +217,10 @@ def create_app(data_dir=None, testing=False):
         from . import proxmox_operations as pxops
         if action=='targets':
             targets=store.rows('SELECT m.id,m.name FROM machines m JOIN command_policies p ON p.machine_id=m.id WHERE p.enabled=1 AND '+('m.id=? AND p.hermes=1' if ai_job else 'p.external=1'),(machine,) if ai_job else ())
+            if ai_job: targets=store.rows('SELECT id,name FROM machines WHERE id=?',(machine,))
             with store.connect() as c:
-                for target in targets: target['proxmox']=pxops.context(c,target['id'])
+                from .machine_context import context as machine_context
+                targets=[{**machine_context(c,target['id'],external=external),'proxmox':pxops.context(c,target['id'])} for target in targets]
             return {'targets':targets}
         if action=='proxmox':
             identifier=pxops.queue(store,vault,machine,payload,ai_job,external)
