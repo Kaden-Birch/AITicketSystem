@@ -129,6 +129,25 @@ def create_app(data_dir=None, testing=False):
         data['proxmox_api_jobs']=[px_view(store,vault,r['id']) for r in store.rows('SELECT id FROM proxmox_api_jobs WHERE machine_id=? ORDER BY created DESC LIMIT 20',(machine_id,))]
         return render_template('host-detail.html',**data)
 
+    @app.route('/hosts/<machine_id>/settings',methods=['GET','POST'])
+    @login_required
+    def host_settings(machine_id):
+        from .hostview import detail
+        from .commands import configure
+        from .machine_context import context as access_context
+        data=detail(store,machine_id)
+        if not data: abort(404)
+        old=next(iter(store.rows('SELECT * FROM command_policies WHERE machine_id=?',(machine_id,))),None)
+        if request.method=='POST':
+            mode=request.form.get('access_mode')
+            if mode not in ('readonly','guarded','immediate'): raise ValueError('Choose one of the three host access modes.')
+            configure(store,machine_id,{'enabled':'yes','hermes':'yes','external':'yes','approval':mode,'timeout':request.form.get('timeout','120'),'output_limit':request.form.get('output_limit','8192')})
+            flash('Host access saved: '+{'readonly':'Read only commands','guarded':'Ask before potentially dangerous commands','immediate':'Full access — commands run without per-command approval'}[mode]+'.')
+            return redirect(url_for('host_settings',machine_id=machine_id))
+        with store.connect() as c: access=access_context(c,machine_id)
+        data.update(command_policy=old,access=access,access_mode=old['approval'] if old and old['enabled'] else 'readonly')
+        return render_template('host-settings.html',**data)
+
     @app.post('/hosts/<machine_id>/command-policy')
     @login_required
     def command_policy(machine_id):

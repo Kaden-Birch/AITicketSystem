@@ -64,7 +64,7 @@ route `/incidents/<ticket UUID>`. The public URL does not affect agent or bridge
 network addresses. Leave it blank to omit links until an address is configured.
 
 Provide clarification through **Reply & resume AI**. Approval must still be given
-in the machine workspace. Immediate-policy commands lose AI execution permission when the run ends.
+in the machine workspace. Preapproved queued commands may finish after a successful AI run. Explicit takeover, cancellation, expiry and permission changes still fence them.
 Requests requiring approval remain subject to explicit administrator approval,
 current host policy and expiry; expired/cancelled requests need a fresh request. Resumption
 never replays an operation whose outcome is unknown.

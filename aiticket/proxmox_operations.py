@@ -61,10 +61,11 @@ def queue(store,vault,machine,payload,ai_job=None,external=False):
             return identifier
         if method!='GET' and (c.execute("SELECT 1 FROM command_jobs WHERE machine_id=? AND state IN ('awaiting','pending','dispatched','running','cancelling','unknown')",(machine,)).fetchone() or c.execute("SELECT 1 FROM power_jobs WHERE machine_id=? AND state IN ('awaiting','approved','dispatched','authorized','verifying','unknown')",(machine,)).fetchone()): raise ValueError('Complete or reconcile other host operations before Proxmox writes.')
         if c.execute("SELECT 1 FROM proxmox_api_jobs WHERE machine_id=? AND state IN ('dispatched','unknown')",(machine,)).fetchone(): raise ValueError('Reconcile the outstanding Proxmox request first.')
-        # GETs are proposals too: permission does not imply approval to read secrets.
+        from .host_access import requires_approval
+        approval=requires_approval(p['approval'],method=method)
         c.execute('INSERT INTO proxmox_api_jobs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(identifier,machine,ai_job,vault.encrypt(json.dumps(data)),fingerprint,p['version'],binding(linked['objects']),'awaiting',time.time(),time.time()+600,None,None,None))
         store.audit(c,'proxmox.api_proposed',identifier,{'machine_id':machine,'method':method,'fingerprint':fingerprint})
-    if p['approval']=='immediate': execute(store,vault,identifier,ai_job,external)
+    if not approval: execute(store,vault,identifier,ai_job,external)
     return identifier
 
 
@@ -74,6 +75,8 @@ def execute(store,vault,identifier,ai_job=None,external=False):
         if not r or r['state']!='awaiting': return
         p=policy(c,r['machine_id'],ai_job,external)
         data=json.loads(vault.decrypt(r['payload']));linked=context(c,r['machine_id'])
+        from .host_access import requires_approval
+        requires_approval(p['approval'],method=data['method'])
         if p['version']!=r['policy_version'] or r['expires']<=time.time() or binding(linked['objects'])!=r['binding']:
             raise ValueError('Policy or Proxmox binding changed; submit a new reviewed request.')
         if data['method']!='GET' and (c.execute("SELECT 1 FROM command_jobs WHERE machine_id=? AND state IN ('awaiting','pending','dispatched','running','cancelling','unknown')",(r['machine_id'],)).fetchone() or c.execute("SELECT 1 FROM power_jobs WHERE machine_id=? AND state IN ('awaiting','approved','dispatched','authorized','verifying','unknown')",(r['machine_id'],)).fetchone()): raise ValueError('Other host operations are outstanding.')

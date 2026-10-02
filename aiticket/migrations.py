@@ -1,6 +1,12 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 23
+CURRENT_VERSION = 24
 MIGRATIONS = {
+    24: (
+        "ALTER TABLE command_jobs ADD COLUMN requires_approval INTEGER NOT NULL DEFAULT 1",
+        "UPDATE command_jobs SET requires_approval=0 WHERE machine_id IN (SELECT machine_id FROM command_policies WHERE approval='immediate')",
+        "DROP TRIGGER command_immutable",
+        "CREATE TRIGGER command_immutable BEFORE UPDATE OF machine_id,agent_id,incident_id,ai_job_id,command,fingerprint,policy_version,timeout,output_limit,created,expires,requires_approval ON command_jobs BEGIN SELECT RAISE(ABORT,'Command identity is immutable'); END",
+    ),
     23: (
         "ALTER TABLE incident_control ADD COLUMN handling_mode TEXT NOT NULL DEFAULT 'automatic'",
         "UPDATE incident_control SET handling_mode='human' WHERE owner='user'",

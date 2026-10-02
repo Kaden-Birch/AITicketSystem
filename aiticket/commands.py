@@ -9,7 +9,7 @@ TERMINAL=('completed','failed','cancelled','expired','unknown')
 def configure(store,machine,values):
     approval=values.get('approval','required')
     timeout=int(values.get('timeout',120));limit=int(values.get('output_limit',8192))
-    if approval not in ('required','immediate') or not 5<=timeout<=3600 or not 1024<=limit<=65536:
+    if approval not in ('required','immediate','readonly','guarded') or not 5<=timeout<=3600 or not 1024<=limit<=65536:
         raise ValueError('Command timeout must be 5–3600s; output 1024–65536 bytes; choose a valid approval policy.')
     with store.connect() as c:
         c.execute('BEGIN IMMEDIATE')
@@ -18,6 +18,7 @@ def configure(store,machine,values):
         version=old[0]+1 if old else 1
         c.execute('INSERT OR REPLACE INTO command_policies VALUES(?,?,?,?,?,?,?,?)',(machine,int(values.get('enabled')=='yes'),approval,int(values.get('hermes')=='yes'),int(values.get('external')=='yes'),timeout,limit,version))
         c.execute("UPDATE command_jobs SET state=CASE WHEN state IN ('awaiting','pending') THEN 'cancelled' ELSE 'cancelling' END WHERE machine_id=? AND state IN ('awaiting','pending','dispatched','running')",(machine,))
+        c.execute("UPDATE proxmox_api_jobs SET state='cancelled' WHERE machine_id=? AND state='awaiting'",(machine,))
         store.audit(c,'commands.policy',machine,{'approval':approval,'version':version,'enabled':values.get('enabled')=='yes'})
 
 
@@ -52,18 +53,27 @@ def queue(store,vault,machine,command,identifier,incident=None,ai_job=None,exter
         if c.execute("SELECT 1 FROM proxmox_api_jobs WHERE machine_id=? AND state IN ('dispatched','unknown')",(machine,)).fetchone(): raise ValueError('Reconcile Proxmox API operations before shell commands.')
         if c.execute("SELECT 1 FROM power_jobs WHERE machine_id=? AND state IN ('awaiting','approved','dispatched','authorized','verifying','unknown')",(machine,)).fetchone() or c.execute("SELECT 1 FROM action_proposals p JOIN agents a ON a.id=p.agent_id WHERE a.machine_id=? AND p.state IN ('awaiting','approved','dispatched','authorized','verifying','unknown')",(machine,)).fetchone(): raise ValueError('Complete outstanding power/recovery work before shell commands.')
         if c.execute("SELECT 1 FROM command_jobs WHERE agent_id=? AND state IN ('awaiting','pending','dispatched','running','cancelling','unknown')",(agent['id'],)).fetchone(): raise ValueError('Complete or reconcile the existing command before sending another.')
-        now=time.time();state='awaiting' if policy['approval']=='required' else 'pending'
-        c.execute('INSERT INTO command_jobs(id,machine_id,agent_id,incident_id,ai_job_id,command,fingerprint,policy_version,timeout,output_limit,state,created,expires) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(identifier,machine,agent['id'],incident,ai_job,vault.encrypt(command),fingerprint,policy['version'],policy['timeout'],policy['output_limit'],state,now,now+policy['timeout']+600))
+        from .host_access import requires_approval
+        approval=requires_approval(policy['approval'],command=command)
+        now=time.time();state='awaiting' if approval else 'pending'
+        c.execute('INSERT INTO command_jobs(id,machine_id,agent_id,incident_id,ai_job_id,command,fingerprint,policy_version,timeout,output_limit,state,created,expires,requires_approval) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(identifier,machine,agent['id'],incident,ai_job,vault.encrypt(command),fingerprint,policy['version'],policy['timeout'],policy['output_limit'],state,now,now+policy['timeout']+600,int(approval)))
         store.audit(c,'command.queued',identifier,{'machine_id':machine,'fingerprint':fingerprint,'caller':'hermes' if ai_job else 'external' if external else 'administrator'})
         if incident: store.timeline(c,incident,'command_queued','Shell command '+identifier+' '+state+'; hash '+fingerprint,actor='hermes' if ai_job else 'user')
     return identifier
+
+
+def admitted_execution(c,identifier):
+    """Preapproved queued work can finish after success, but takeover/cancel fences it."""
+    from .codex_mode import permission
+    job=c.execute('SELECT * FROM ai_jobs WHERE id=?',(identifier,)).fetchone()
+    return bool(job and job['command_tools'] and permission(c,job,admitted=True))
 
 
 def permitted(c,job,now):
     policy=c.execute('SELECT * FROM command_policies WHERE machine_id=?',(job['machine_id'],)).fetchone()
     agent=c.execute('SELECT revoked,capabilities FROM agents WHERE id=?',(job['agent_id'],)).fetchone()
     incident=c.execute('SELECT closed,status FROM incidents WHERE id=?',(job['incident_id'],)).fetchone() if job['incident_id'] else None
-    return bool(job['expires']>now and policy and policy['enabled'] and policy['version']==job['policy_version'] and agent and not agent['revoked'] and json.loads(agent['capabilities']).get('shell_commands') is True and (not job['incident_id'] or (incident and incident['closed'] is None and incident['status']!='Resolved')) and (not job['ai_job_id'] or (policy['hermes'] and (policy['approval']=='required' or ai_allowed(c,job['ai_job_id'])))))
+    return bool(job['expires']>now and policy and policy['enabled'] and policy['version']==job['policy_version'] and agent and not agent['revoked'] and json.loads(agent['capabilities']).get('shell_commands') is True and (not job['incident_id'] or (incident and incident['closed'] is None and incident['status']!='Resolved')) and (not job['ai_job_id'] or (policy['hermes'] and ((policy['approval'] in ('required','guarded') and job['requires_approval']) or admitted_execution(c,job['ai_job_id'])))))
 
 
 def poll(c,store,vault,agent_id,now):

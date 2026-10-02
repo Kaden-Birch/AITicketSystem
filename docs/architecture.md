@@ -51,3 +51,5 @@ Schema 21 preserves host/Proxmox identity in operational snapshots and adds an e
 Schema 22 records AI resolution requests. Successful current investigations can request closure, but independent fresh monitoring and operation reconciliation govern resolution. Automatic admission includes manual tickets under the same opt-in, severity, ownership and run limits; recovery notifications contain an observed recovery summary.
 
 Schema 23 adds durable server-owned work sessions, explicit ticket handling modes and deduplicated intervention requests. Agent-host permissions are unchanged. Public notification URLs are independent of IP-based agent/Hermes transport.
+
+Schema 24 records immutable per-command approval requirements. Unified host settings apply read-only, guarded and full access consistently to shell and general Proxmox requests. Recognized diagnostics bypass approval in read-only/guarded modes; full access bypasses classification and per-command approval. Successful AI completion can release ownership without revoking already preapproved work; explicit cancellation/takeover still fences it.

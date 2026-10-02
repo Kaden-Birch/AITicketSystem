@@ -29,7 +29,7 @@ def admit(c,incident_id,bridge,now):
     return cfg
 
 
-def permission(c,job,now=None):
+def permission(c,job,now=None,admitted=False):
     import json
     now=time.time() if now is None else now
     setting=c.execute("SELECT value FROM settings WHERE key='hermes_config'").fetchone()
@@ -38,4 +38,4 @@ def permission(c,job,now=None):
     model=json.loads(row[0]).get('model') if row else None
     incident=c.execute('SELECT closed,status FROM incidents WHERE id=?',(job['incident_id'],)).fetchone()
     control=c.execute('SELECT owner,generation FROM incident_control WHERE incident_id=?',(job['incident_id'],)).fetchone()
-    return bool((not job['command_tools'] or config.get('command_tools')) and model==job['model'] and job['execution_mode']=='codex' and job['state'] in ('dispatching','running') and job['expires']>now and config.get('enabled') and config.get('execution_mode')=='codex' and config.get('runtime_verified') and incident and incident['closed'] is None and incident['status']!='Resolved' and control and control['owner']=='ai' and control['generation']==job['control_generation'])
+    return bool((not job['command_tools'] or config.get('command_tools')) and model==job['model'] and job['execution_mode']=='codex' and (job['state'] in ('dispatching','running') or (admitted and job['state']=='completed')) and job['expires']>now and config.get('enabled') and config.get('execution_mode')=='codex' and config.get('runtime_verified') and incident and incident['closed'] is None and incident['status']!='Resolved' and control and (control['owner']=='ai' or (admitted and job['state']=='completed' and control['owner']=='available')) and control['generation']==job['control_generation'])

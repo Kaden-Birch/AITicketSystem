@@ -1,6 +1,6 @@
 # General remote command access for Hermes
 
-This milestone implements arbitrary shell commands through the outbound Linux agent. It is not an allowlist of restart actions. Commands execute as the agent service's OS account, with optional locally configured sudo or root service privileges. The host policy chooses immediate execution or exact-command approval. All command access defaults disabled; updating software alone does not grant execution permissions.
+This milestone implements arbitrary shell commands through the outbound Linux agent. It is not an allowlist of restart actions. Commands execute as the agent service's OS account, with optional locally configured sudo or root service privileges. The host settings page offers read-only, approval for potentially dangerous commands, or full access. All command access defaults disabled; updating software alone does not grant execution permissions.
 
 The application supplies a durable command queue and audit trail. A compact `aiticket_host` tool is available to ticket investigations and to independent Hermes sessions through a stdio MCP server. Independent sessions need no ticket, active incident or enabled ticket AI. The application/agent channel remains necessary to reach DHCP hosts; Hermes does not need an inbound agent IP or SSH port.
 
@@ -81,17 +81,19 @@ For Proxmox `qm`/`pct` administration, install and enable a suitably privileged 
 
 ## 3. Configure a host in the GUI
 
-Open its host workspace → **Remote commands → Configure remote command access**:
+Open the host and select **Host settings**. Choose one mode and save:
 
-- Enable remote commands.
-- Enable **Allow ticket Hermes investigations** if the ticket agent may execute commands.
-- Enable **Allow independent Hermes/MCP sessions** if ordinary Hermes sessions may access this host.
-- Choose **Require approval of each exact command** or **Execute immediately under this host permission**.
-- Set elapsed-time and output limits, then confirm and save.
+- **Read only commands**: recognized diagnostics and Proxmox GET requests run automatically; changes are blocked.
+- **Ask before potentially dangerous commands**: recognized diagnostics run automatically; changes and unrecognized shell commands require exact approval.
+- **Full access**: arbitrary shell commands and all token-permitted Proxmox API operations execute without per-command approval.
 
-The first submitted command should be harmless, such as `id; uptime; df -h`. The host workspace shows exact command text, UUID, fingerprint, state, exit code, stdout/stderr, truncation and approvals. Choose **Approve exact command** if required. Optional ticket tagging connects command queue/results to its immutable timeline. Independent operations are recorded in host history and audit without fabricating a ticket.
+Saving enables the chosen mode for ticket AI and independent authenticated Hermes/MCP sessions. No additional host permission checkboxes are needed. OS privileges and the agent's locally enabled shell capability still determine what can execute; the settings page reports missing capability or stale enrollment.
 
-Configuration changes fence outstanding jobs. Approval-required AI proposals can remain for the administrator to review after an AI run finishes; approval independently rechecks current host policy and ticket state. Immediate AI work is tied to the investigation permission and stops when that execution ends, is cancelled, loses ownership or expires.
+Read classification is deliberately conservative: known diagnostic executables and syntax are recognized. Scripts, substitutions, redirections and unknown commands require approval in the middle mode and are blocked in read-only mode. Full access does not use this classifier. Shell and Proxmox results remain in host history with UUID, state and output. Approval and unknown-outcome reconciliation remain available there when applicable.
+
+Changing modes cancels old queued requests instead of approving them retrospectively. Submit a fresh request under the new mode. Preapproved commands can finish after a successful AI session; takeover, cancellation, expiry and permission changes still fence execution. Existing legacy policies are retained on upgrade and identified in settings; they are replaced when you save one of the three modes.
+
+The settings page also holds host details, Proxmox association and optional manual power-button configuration. Monitoring and notification configuration links are collected there.
 
 ## 4. Enable commands in ticket Hermes investigations
 
@@ -145,7 +147,7 @@ sudo install -o assistant -g assistant -m 0600 \
 
 Do not paste the secret into a model prompt or chat. Update this private copy when rotating the shared secret. Restart normal Hermes (or reload MCP if supported by the installed version). It should discover `aiticket_host`.
 
-Ask it to list authorized targets, then execute a harmless command on the exact machine ID. `targets` lists only hosts explicitly enabled for independent operations. `run` returns a stable command UUID; `status` returns state/exit/output, with bounded polling inside the tool; `cancel` denies further execution and stops local running work on the next permission check. Neither normal Hermes model/provider configuration nor the Codex OAuth profile is copied or replaced by this MCP entry. These independent model sessions use their own configured model/account limits, not the ticket application's AI-run limits. Disable external access in the host policy to revoke it; disabling ticket AI alone does not revoke independent MCP operations.
+Ask it to list authorized targets, then execute a harmless command on the exact machine ID. `targets` lists only hosts explicitly enabled for independent operations. `run` returns a stable command UUID; `status` returns state/exit/output, with bounded polling inside the tool; `cancel` denies further execution and stops local running work on the next permission check. Neither normal Hermes model/provider configuration nor the Codex OAuth profile is copied or replaced by this MCP entry. These independent model sessions use their own configured model/account limits, not the ticket application's AI-run limits. Use read-only mode to restrict changes, or the legacy administration interface to revoke independent host access entirely; disabling ticket AI alone does not revoke independent MCP operations.
 
 ## Execution semantics and overhead
 
