@@ -852,7 +852,7 @@ def create_app(data_dir=None, testing=False):
             if previous and json.loads(previous[0]['evidence']).get('sampled_at',0)>=sampled: continue
             if result.get('config')!=json.loads(check['config']) or check['next_run']>time.time(): continue
             observe(store,check['id'],result['healthy'],{'target':result['config']['target'],'reason':'Agent check passed' if result['healthy'] else 'Agent check failed','sampled_at':sampled})
-        return {'checks':[{'id':r['id'],'kind':r['kind'],'config':json.loads(r['config'])} for r in store.rows("SELECT * FROM checks WHERE machine_id=? AND enabled=1 AND kind IN ('process','smb') AND next_run<=? LIMIT 20",(machine,time.time()))]}
+        return {'checks':[{'id':r['id'],'kind':r['kind'],'config':json.loads(r['config'])} for r in store.rows("SELECT * FROM checks WHERE machine_id=? AND enabled=1 AND kind IN ('process','smb') AND next_run<=? ORDER BY next_run,id LIMIT 20",(machine,time.time()))]}
 
     @app.route('/proxmox', methods=['GET','POST'])
     @login_required

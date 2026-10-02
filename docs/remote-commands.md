@@ -255,4 +255,16 @@ sudo systemctl start aiticket-agent
 sudo systemctl status aiticket-agent --no-pager
 ```
 
-Agent version is `0.6.0`. Existing credentials and local permissions are retained. Hermes does not need an update for these checks.
+Agent version is `0.6.1`. Existing credentials and local permissions are retained. Hermes does not need an update for these checks.
+
+### Heartbeats stopped after the process/SMB update
+
+Agent 0.6.0 incorrectly let an optional check import or HTTP failure prevent the primary heartbeat. Agent 0.6.1 sends its heartbeat first and isolates optional check failures. Install both `agent.py` and `monitoring.py` using the monitored-host upgrade above. Optional check errors are logged separately, including HTTP status, while heartbeats continue. Each cycle evaluates at most two checks in oldest-due order, bounding the time spent on slow SMB mounts.
+
+Verify on the monitored host:
+
+```sh
+sudo journalctl -u aiticket-agent --since "5 minutes ago" --no-pager -n 50
+```
+
+A `ModuleNotFoundError` in the optional-check log indicates `monitoring.py` was not copied beside `agent.py`. HTTP 404 indicates the main application must be updated/rebuilt to provide `/api/agent/checks`. These errors no longer suppress heartbeats. Healthy heartbeat checks recover existing incidents using their configured success threshold.

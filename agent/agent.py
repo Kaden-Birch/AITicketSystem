@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-VERSION = '0.6.0'
+VERSION = '0.6.1'
 
 
 def endpoint(value,allow_http=False):
@@ -140,6 +140,21 @@ def process_actions(state,path,jobs,policy,authorize,policy_loader=None):
         write_state(path,state)
 
 
+def monitor_checks(send,base,state,path):
+    """Optional checks must never prevent the primary heartbeat."""
+    try:
+        from monitoring import evaluate
+        reply=send(base,'/api/agent/checks',{'results':state.get('monitor_results',[])},state.get('ca'),state['credential'])
+        state['monitor_results']=[evaluate(check) for check in reply.get('checks',[])[:2]]
+        write_state(path,state)
+        if state['monitor_results']:
+            send(base,'/api/agent/checks',{'results':state['monitor_results']},state.get('ca'),state['credential'])
+            state['monitor_results']=[];write_state(path,state)
+    except Exception as exc:
+        status=getattr(exc,'code',None)
+        print('Optional process/SMB checks unavailable: '+type(exc).__name__+(' (HTTP '+str(status)+')' if status else '')+'; heartbeat continues.',flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('command', choices=['enroll', 'run', 'recovery-credential'])
@@ -186,13 +201,6 @@ def main():
     while running:
         try:
             policy=load_policy(args.policy)
-            from monitoring import evaluate
-            checks_reply=send(base,'/api/agent/checks',{'results':state.get('monitor_results',[])},state.get('ca'),state['credential'])
-            state['monitor_results']=[evaluate(check) for check in checks_reply.get('checks',[])[:20]]
-            write_state(path,state)
-            if state['monitor_results']:
-                send(base,'/api/agent/checks',{'results':state['monitor_results']},state.get('ca'),state['credential'])
-                state['monitor_results']=[];write_state(path,state)
             drain(state,path,write_state)
             while state.get('command_results'):
                 try:
@@ -232,6 +240,7 @@ def main():
             process_actions(state,path,response.get('actions',[]),policy,lambda payload:send(base,'/api/agent/action-authorize',payload,state.get('ca'),state.get('action_credential','')),policy_loader=lambda:load_policy(args.policy))
             requested=response.get("poll_interval_seconds",30)
             delay=requested if type(requested) is int and 20<=requested<=300 else 30
+            monitor_checks(send,base,state,path)
         except Exception as exc:
             print('Heartbeat unavailable: ' + type(exc).__name__, flush=True)
             delay = min(delay * 2, 300)

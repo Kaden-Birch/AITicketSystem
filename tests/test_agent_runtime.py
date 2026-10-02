@@ -92,3 +92,29 @@ def test_telemetry_cpu_deltas_available_memory_and_inodes():
         assert second['cpu_percent']==50
         assert second['memory_available_bytes']==512000
         assert second['inode_free']==10 and second['memory_pressure_percent']==1.5
+
+
+@pytest.mark.parametrize('failure',['missing_module','http_404','http_500'])
+def test_optional_checks_failure_does_not_suppress_following_heartbeats(tmp_path,monkeypatch,failure,capsys):
+    import urllib.error
+    from agent import agent as runtime
+    monkeypatch.syspath_prepend(str(ROOT))
+    identity=tmp_path/'identity.json'
+    identity.write_text(json.dumps({'server':'http://10.0.0.1:8080','allow_http':True,'credential':'test'}))
+    monkeypatch.setattr(sys,'argv',['agent.py','run','--state',str(identity),'--policy',str(tmp_path/'absent.json')])
+    if failure=='missing_module':monkeypatch.setitem(sys.modules,'monitoring',None)
+    routes=[]
+    def send(base,route,*args,**kwargs):
+        routes.append(route)
+        if route=='/api/agent/checks':raise urllib.error.HTTPError('redacted',404 if failure=='http_404' else 500,'test',{},None)
+        return {'poll_interval_seconds':20,'commands':[],'jobs':[],'actions':[]}
+    sleeps=0
+    def sleep(seconds):
+        nonlocal sleeps
+        sleeps+=1
+        if sleeps>20:raise SystemExit
+    with patch.object(runtime,'post',side_effect=send),patch.object(runtime,'telemetry',return_value={}),patch.object(runtime,'host_info',return_value={}),patch.object(runtime.time,'sleep',side_effect=sleep),patch.object(runtime.signal,'signal'),patch('commands.recover'),patch('commands.drain'),patch('commands.start'):
+        with pytest.raises(SystemExit):runtime.main()
+    assert routes.count('/api/agent/heartbeat')==2
+    assert routes[0]=='/api/agent/heartbeat'
+    assert 'heartbeat continues' in capsys.readouterr().out
