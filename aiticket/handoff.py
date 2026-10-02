@@ -61,11 +61,13 @@ def view(store, incident_id):
         checkpoint = c.execute('SELECT * FROM handoff_checkpoints WHERE id=?', (current['checkpoint_id'],)).fetchone()
         current['checkpoint'] = {**dict(checkpoint), 'data':json.loads(checkpoint['snapshot'])} if checkpoint else None
         current['waiting'] = 'AI paused; user has control.' if current['owner']=='user' else 'No active AI execution.'
-        job = c.execute("SELECT state FROM ai_jobs WHERE incident_id=? AND state IN ('pending','dispatching','running','unknown') ORDER BY created DESC LIMIT 1", (incident_id,)).fetchone()
+        job = c.execute("SELECT state,execution_mode FROM ai_jobs WHERE incident_id=? AND state IN ('pending','dispatching','running','unknown') ORDER BY created DESC LIMIT 1", (incident_id,)).fetchone()
         if job:
             current['waiting'] = {'pending':'Queued for the bridge.', 'dispatching':'Waiting for bridge acceptance.', 'running':'Waiting for metered AI findings.', 'unknown':'Execution outcome unknown; polling without replay.'}[job['state']]
+        if job and job['execution_mode']=='codex' and job['state']=='running':
+            current['waiting']='Waiting for Codex subscription findings; local cancellation is monitored.'
         if c.execute("SELECT 1 FROM ai_calls WHERE state!='known'").fetchone():
-            current['waiting'] += ' Unknown model usage blocks further admission globally.'
+            current['waiting'] += ' Unknown API model usage blocks further API-mode admission globally.'
         return current
 
 

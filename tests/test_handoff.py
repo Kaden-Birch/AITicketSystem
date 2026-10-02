@@ -72,7 +72,7 @@ def test_unknown_usage_survives_pause_and_blocks_resume_calls(environment):
     state=handoff.view(store,incident)
     checkpoint=handoff.pause(store,incident,state['generation'])
     state=handoff.view(store,incident)
-    assert 'Unknown model usage' in state['waiting']
+    assert 'Unknown API model usage' in state['waiting']
     resumed=handoff.resume(store,vault,incident,checkpoint,state['generation'],uid())
     with store.connect() as c: c.execute("UPDATE ai_jobs SET state='running' WHERE id=?",(resumed,))
     with pytest.raises(ValueError,match='unknown usage'): ai.admit(store,resumed,payload())

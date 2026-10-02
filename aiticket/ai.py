@@ -12,7 +12,7 @@ from .diagnostics import redact
 from .security import digest, hermes_headers, validate_url
 from .engine import SEVERITIES
 
-BRIDGE_DEFAULTS = {'url': '', 'ca': '', 'enabled': False, 'automatic': False, 'minimum': 'high', 'runtime_verified': False}
+BRIDGE_DEFAULTS = {'url': '', 'ca': '', 'enabled': False, 'automatic': False, 'minimum': 'high', 'runtime_verified': False, 'execution_mode':'gateway'}
 PROVIDER_DEFAULTS = {'url': '', 'ca': '', 'verified': False, 'input_overhead': 8192, 'output_tokens': 1000, 'verified_model': ''}
 TERMINAL = ('completed', 'failed', 'cancelled', 'expired')
 
@@ -32,6 +32,13 @@ def cost(input_tokens, output_tokens, cfg):
 
 
 def valid_configuration(cfg, bridge, provider, mode='triage'):
+    if bridge.get('execution_mode','gateway')=='codex':
+        from .codex_mode import options
+        options(bridge)
+        if not bridge.get('enabled') or not bridge.get('runtime_verified') or not cfg.get('model'):
+            raise ValueError('Configure the model and validate the restricted Codex runtime before enabling.')
+        validate_url(bridge.get('url',''),('https',))
+        return
     if not bridge.get('enabled') or not bridge.get('runtime_verified') or not provider.get('verified'):
         raise ValueError('AI is disabled or the provider token-bound contract has not been verified.')
     if provider.get('verified_model') != cfg.get('model'):
@@ -80,7 +87,7 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
         valid_configuration(cfg, bridge, provider, mode)
         if mode != 'triage' and mode not in (setting(c, 'hermes_validation', {}) or {}).get('workspace_modes', []):
             raise ValueError('Update the companion bridge and run its compatibility check for workspace support.')
-        if not setting(c, 'hermes_secret') or not setting(c, 'ai_provider_secret'):
+        if not setting(c, 'hermes_secret') or (bridge.get('execution_mode','gateway')=='gateway' and not setting(c, 'ai_provider_secret')):
             raise ValueError('Save both bridge and model-provider credentials.')
         incident = c.execute('SELECT * FROM incidents WHERE id=?', (incident_id,)).fetchone()
         if not incident or incident['closed'] is not None or incident['status'] == 'Resolved':
@@ -129,6 +136,13 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
             return existing['id']
         if c.execute("SELECT count(*) FROM ai_jobs WHERE state IN ('pending','dispatching','running','unknown')").fetchone()[0] >= 10:
             raise ValueError('AI queue is full; review existing jobs.')
+        codex=None
+        if bridge.get('execution_mode','gateway')=='codex':
+            validation=setting(c,'hermes_validation',{}) or {}
+            if validation.get('execution_mode')!='codex' or validation.get('url')!=bridge['url'] or now-validation.get('at',0)>86400:
+                raise ValueError('Run a recent signed Codex bridge check first.')
+            from .codex_mode import admit
+            codex=admit(c,incident_id,bridge,now)
         job_id, token = uid(), secrets.token_urlsafe(48)
         # Snapshot only the deterministic report; notes, credentials and raw configs are excluded.
         evidence = json.dumps(evidence_snapshot(json.loads(incident['report'])), ensure_ascii=True)[:16000]
@@ -144,6 +158,8 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
         c.execute('INSERT INTO ai_jobs(id,incident_id,state,created,expires,model,allowance,max_calls,evidence,credential_digest,credential,endpoint,bridge_secret,next_attempt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                   (job_id, incident_id, 'pending', now, now+3600, cfg['model'], min(cfg['triage_tokens'], cfg['incident_tokens']), min(cfg['max_turns'], 100), evidence, digest(token), vault.encrypt(token), bridge['url'].rstrip('/'), setting(c, 'hermes_secret'), now))
         c.execute('UPDATE ai_jobs SET mode=?,request_id=?,request_fingerprint=?,allowance=? WHERE id=?', (mode, request_id, fingerprint, min(cfg['triage_tokens'], cfg['incident_tokens']) if mode=='triage' else cfg['incident_tokens'], job_id))
+        if codex:
+            c.execute("UPDATE ai_jobs SET execution_mode='codex',reasoning_effort=?,run_timeout=?,allowance=0,max_calls=1 WHERE id=?",(codex['reasoning'],codex['timeout_seconds'],job_id))
         generation = ownership['generation']+1
         c.execute("UPDATE incident_control SET owner='ai',generation=?,updated=? WHERE incident_id=?", (generation, now, incident_id))
         c.execute('UPDATE ai_jobs SET control_generation=? WHERE id=?', (generation, job_id))
@@ -193,8 +209,12 @@ def admit(store, job_id, payload, now=None):
         c.execute('BEGIN IMMEDIATE')
         job = c.execute('SELECT * FROM ai_jobs WHERE id=?', (job_id,)).fetchone()
         cfg, bridge, provider = setting(c, 'ai_config', {}), setting(c, 'hermes_config', BRIDGE_DEFAULTS), setting(c, 'ai_provider', PROVIDER_DEFAULTS)
+        if job and job['execution_mode']!=bridge.get('execution_mode','gateway'):
+            raise ValueError('AI execution mode changed; this job is no longer authorized.')
         valid_configuration(cfg, bridge, provider, job['mode'] if job else 'triage')
         incident = c.execute('SELECT closed,status FROM incidents WHERE id=?', (job['incident_id'],)).fetchone() if job else None
+        if job and job['execution_mode']!='gateway':
+            raise ValueError('Codex subscription jobs cannot access the API budget gateway.')
         if not job or job['state'] not in ('dispatching', 'running') or job['expires'] <= now or not incident or incident['closed'] is not None or incident['status']=='Resolved' or payload.get('model') != job['model'] or cfg['model'] != job['model']:
             raise ValueError('This execution is no longer authorized.')
         from .handoff import control
@@ -316,7 +336,9 @@ def apply_status(store, job_id, document, now=None):
         if not job or job['state'] in TERMINAL:
             return
         state = 'failed' if document['state']=='not_found' else 'running' if document['state'] in ('accepted','running') else ('unknown' if document['state']=='interrupted' else document['state'])
-        if state=='completed' and not c.execute('SELECT 1 FROM ai_calls WHERE job_id=?', (job_id,)).fetchone():
+        if state=='completed' and job['execution_mode']=='codex' and (document.get('execution_mode')!='codex' or document.get('model')!=job['model'] or document.get('reasoning')!=job['reasoning_effort']):
+            raise ValueError('Codex result does not match the execution mode/model/reasoning.')
+        if state=='completed' and job['execution_mode']=='gateway' and not c.execute('SELECT 1 FROM ai_calls WHERE job_id=?', (job_id,)).fetchone():
             raise ValueError('Completion without a metered model call is invalid.')
         if state=='completed' and job['mode']=='recovery_proposal':
             from .recovery_drafts import record
@@ -390,6 +412,9 @@ def tick(store, vault, now=None):
     try:
         if was_pending:
             body = json.dumps({'version': 1, 'execution_id': job['id'], 'model': job['model'], 'evidence': job['evidence'], 'credential': vault.decrypt(job['credential']), 'max_calls': job['max_calls'], 'expires': job['expires']}, separators=(',', ':'), sort_keys=True).encode()
+            if job['execution_mode']=='codex':
+                payload=json.loads(body);payload.update(execution_mode='codex',reasoning=job['reasoning_effort'],timeout_seconds=job['run_timeout'])
+                body=json.dumps(payload,separators=(',',':'),sort_keys=True).encode()
             document = bridge_request(vault, job, 'POST', '/v1/executions', body, bridge.get('ca'))
         else:
             # Never POST again after ambiguous acceptance. Durable status query only.

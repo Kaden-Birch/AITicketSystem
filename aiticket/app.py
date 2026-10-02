@@ -66,7 +66,7 @@ def create_app(data_dir=None, testing=False):
     @app.context_processor
     def context():
         session.setdefault('csrf', secrets.token_urlsafe(32))
-        return {'csrf': session['csrf'], 'severities': SEVERITIES}
+        return {'csrf': session['csrf'], 'severities': SEVERITIES,'ai_execution_mode':store.setting('hermes_config',{}).get('execution_mode','gateway')}
 
     @app.errorhandler(ValueError)
     def invalid(exc):
@@ -229,7 +229,7 @@ def create_app(data_dir=None, testing=False):
             abort(404)
         from .ai import meter
         from .handoff import view
-        return render_template('incident.html', recovery_drafts=[{**d,'data':json.loads(d['payload'])} for d in store.rows('SELECT d.*,a.proposal_id FROM recovery_drafts d LEFT JOIN draft_adoptions a ON a.job_id=d.job_id WHERE d.incident_id=? ORDER BY d.created DESC LIMIT 100',(incident_id,))], merge_candidates=store.rows("SELECT id,severity,first_seen FROM incidents WHERE machine_id=? AND id<>? AND closed IS NULL AND status<>'Resolved'",(rows[0]['machine_id'],incident_id)), ownership=view(store, incident_id), handoff_request_id=uid(), proposals=[{**p,'data':json.loads(p['payload'])} for p in store.rows('SELECT * FROM action_proposals WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,))], action_agents=[{**a,'action_services':json.loads(a['capabilities']).get('action_services',{})} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))], workspace_request_id=uid(), workspace_messages=store.rows('SELECT m.*,j.state,j.mode FROM ai_messages m JOIN ai_jobs j ON j.id=m.job_id WHERE m.incident_id=? ORDER BY m.created DESC LIMIT 100', (incident_id,)), workspace_sources=store.rows('SELECT s.check_id,c.name FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=?',(incident_id,)), ai_jobs=store.rows('SELECT id,state,mode,created,summary,error FROM ai_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100', (incident_id,)), ai_meter=meter(store, incident_id), incident=rows[0], report=json.loads(rows[0]['report']), timeline=store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at', (incident_id,)), links=store.rows('SELECT * FROM incident_links WHERE left_id=? OR right_id=?',(incident_id,incident_id)), diagnostic_jobs=store.rows('SELECT * FROM diagnostic_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,)), diagnostic_agents=[{**a,'caps':json.loads(a['capabilities'])} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))])
+        return render_template('incident.html', recovery_drafts=[{**d,'data':json.loads(d['payload'])} for d in store.rows('SELECT d.*,a.proposal_id FROM recovery_drafts d LEFT JOIN draft_adoptions a ON a.job_id=d.job_id WHERE d.incident_id=? ORDER BY d.created DESC LIMIT 100',(incident_id,))], merge_candidates=store.rows("SELECT id,severity,first_seen FROM incidents WHERE machine_id=? AND id<>? AND closed IS NULL AND status<>'Resolved'",(rows[0]['machine_id'],incident_id)), ownership=view(store, incident_id), handoff_request_id=uid(), proposals=[{**p,'data':json.loads(p['payload'])} for p in store.rows('SELECT * FROM action_proposals WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,))], action_agents=[{**a,'action_services':json.loads(a['capabilities']).get('action_services',{})} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))], workspace_request_id=uid(), workspace_messages=store.rows('SELECT m.*,j.state,j.mode FROM ai_messages m JOIN ai_jobs j ON j.id=m.job_id WHERE m.incident_id=? ORDER BY m.created DESC LIMIT 100', (incident_id,)), workspace_sources=store.rows('SELECT s.check_id,c.name FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=?',(incident_id,)), ai_jobs=store.rows('SELECT id,state,mode,execution_mode,model,reasoning_effort,created,summary,error FROM ai_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100', (incident_id,)), ai_meter=meter(store, incident_id), incident=rows[0], report=json.loads(rows[0]['report']), timeline=store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at', (incident_id,)), links=store.rows('SELECT * FROM incident_links WHERE left_id=? OR right_id=?',(incident_id,incident_id)), diagnostic_jobs=store.rows('SELECT * FROM diagnostic_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,)), diagnostic_agents=[{**a,'caps':json.loads(a['capabilities'])} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))])
 
     @app.post('/incidents/<incident_id>/archive')
     @login_required
@@ -791,10 +791,20 @@ def create_app(data_dir=None, testing=False):
                 store.save_many({'hermes_config': bridge}, actor='user')
             elif f.get('operation') == 'save':
                 bridge = {'url': validate_url(f.get('url', '').strip(), ('https',)).rstrip('/'), 'ca': f.get('bridge_ca', '').strip(), 'enabled': False, 'automatic': bool(f.get('automatic')), 'minimum': f.get('minimum', 'high'), 'runtime_verified': bool(f.get('runtime_verified'))}
-                provider = {'url': validate_url(f.get('provider_url', '').strip(), ('https',)).rstrip('/'), 'ca': f.get('provider_ca', '').strip(), 'verified': bool(f.get('provider_verified')), 'input_overhead': int(f.get('input_overhead', 8192)), 'output_tokens': int(f.get('output_tokens', 1000)), 'verified_model': store.setting('ai_config', {}).get('model', '')}
+                mode=f.get('execution_mode','gateway')
+                if mode not in ('gateway','codex'): raise ValueError('Unknown AI execution mode.')
+                bridge['execution_mode']=mode
+                if mode=='codex':
+                    from .codex_mode import options
+                    bridge.update(options({'reasoning':f.get('reasoning','low'),**{k:int(f.get(k,v)) for k,v in [('incident_runs',3),('daily_runs',10),('monthly_runs',100),('timeout_seconds',90)]}}))
+                provider = {'url': validate_url(f.get('provider_url', '').strip(), ('https',)).rstrip('/') if mode=='gateway' else provider.get('url',''), 'ca': f.get('provider_ca', '').strip(), 'verified': bool(f.get('provider_verified')), 'input_overhead': int(f.get('input_overhead', 8192)), 'output_tokens': int(f.get('output_tokens', 1000)), 'verified_model': store.setting('ai_config', {}).get('model', '')}
                 if bridge['minimum'] not in SEVERITIES or not 0 <= provider['input_overhead'] <= 1000000 or not 1 <= provider['output_tokens'] <= 100000:
                     raise ValueError('Invalid severity or provider bounds.')
                 updates = {'hermes_config': bridge, 'ai_provider': provider, 'hermes_validation': None}
+                if mode=='codex':
+                    model=f.get('codex_model','').strip()
+                    if not 1<=len(model)<=100: raise ValueError('Supply the exact Codex model ID.')
+                    updates['ai_config']={**AI_DEFAULTS,**store.setting('ai_config',{}),'model':model}
                 for field, key in (('secret', 'hermes_secret'), ('provider_secret', 'ai_provider_secret')):
                     value = f.get(field, '').strip()
                     if value:
@@ -811,9 +821,9 @@ def create_app(data_dir=None, testing=False):
                     result = bridge_request(vault, {'id': uid(), 'endpoint': bridge['url'], 'bridge_secret': secret}, 'GET', '/v1/capabilities', ca=bridge.get('ca'))
                 except Exception:
                     raise ValueError('Bridge check failed. Review reachability, TLS, authentication and installed compatibility.')
-                if result.get('version') != 1 or result.get('tools') != [] or result.get('model_gateway') is not True or result.get('compatible') is not True:
+                if result.get('version') != 1 or result.get('tools') != [] or result.get('model_gateway') is not (bridge.get('execution_mode','gateway')=='gateway') or result.get('execution_mode','gateway')!=bridge.get('execution_mode','gateway') or result.get('compatible') is not True:
                     raise ValueError('Bridge reports an incompatible or unrestricted Hermes adapter.')
-                store.save_many({'hermes_validation': {'at': time.time(), 'url': bridge['url'], 'workspace_modes': [m for m in ('advice', 'exploration') if m in result.get('workspace_modes', [])]}}, actor='user')
+                store.save_many({'hermes_validation': {'at': time.time(), 'url': bridge['url'], 'execution_mode':bridge.get('execution_mode','gateway'), 'workspace_modes': [m for m in ('advice', 'exploration','recovery_proposal') if m in result.get('workspace_modes', [])]}}, actor='user')
                 flash('Signed bridge compatibility check passed. No model request was made.')
             elif f.get('operation') == 'enable':
                 validation = store.setting('hermes_validation') or {}
@@ -821,13 +831,13 @@ def create_app(data_dir=None, testing=False):
                     raise ValueError('Run a recent bridge compatibility check before enabling.')
                 bridge = {**bridge, 'enabled': True}
                 valid_configuration(store.setting('ai_config', {}), bridge, provider, mode='advice')
-                if not store.setting('ai_provider_secret'):
+                if bridge.get('execution_mode','gateway')=='gateway' and not store.setting('ai_provider_secret'):
                     raise ValueError('Save model-provider credentials first.')
                 store.save_many({'hermes_config': bridge}, actor='user')
             else:
                 raise ValueError('Unknown Hermes settings operation.')
             return redirect(url_for('hermes'))
-        return render_template('hermes.html', bridge=bridge, provider=provider, usage=meter(store), validation=store.setting('hermes_validation'), configured=bool(store.setting('hermes_secret')), provider_configured=bool(store.setting('ai_provider_secret')), held_calls=store.rows("SELECT id,job_id,created,input_reserved,output_reserved,cost_reserved FROM ai_calls WHERE state!='known' ORDER BY created LIMIT 100"), ai_jobs=store.rows('SELECT id,incident_id,state,error FROM ai_jobs ORDER BY created DESC LIMIT 100'))
+        return render_template('hermes.html', codex_model=store.setting('ai_config',{}).get('model',''), codex_runs=store.rows("SELECT state,count(*) count FROM ai_jobs WHERE execution_mode='codex' GROUP BY state"), bridge=bridge, provider=provider, usage=meter(store), validation=store.setting('hermes_validation'), configured=bool(store.setting('hermes_secret')), provider_configured=bool(store.setting('ai_provider_secret')), held_calls=store.rows("SELECT id,job_id,created,input_reserved,output_reserved,cost_reserved FROM ai_calls WHERE state!='known' ORDER BY created LIMIT 100"), ai_jobs=store.rows('SELECT id,incident_id,execution_mode,model,reasoning_effort,state,error FROM ai_jobs ORDER BY created DESC LIMIT 100'))
 
     @app.post('/incidents/<incident_id>/ai')
     @login_required
@@ -988,6 +998,17 @@ def create_app(data_dir=None, testing=False):
         rows = store.rows('SELECT id FROM ai_jobs WHERE id=? AND credential_digest=?', (job_id, digest(bearer[7:])))
         if not rows:
             abort(401)
+
+    @app.get('/api/hermes/<job_id>/permission')
+    def codex_permission(job_id):
+        execution_auth(job_id)
+        from .codex_mode import permission
+        with store.connect() as c:
+            job=c.execute('SELECT * FROM ai_jobs WHERE id=?',(job_id,)).fetchone()
+            allowed=permission(c,job)
+        response=app.json.response({'allowed':allowed})
+        response.headers['Cache-Control']='no-store'
+        return response
 
     @app.get('/api/hermes/<job_id>/v1/models')
     def execution_models(job_id):

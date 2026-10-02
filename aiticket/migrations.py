@@ -1,6 +1,12 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 18
+CURRENT_VERSION = 19
 MIGRATIONS = {
+    19: (
+        "ALTER TABLE ai_jobs ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'gateway'",
+        "ALTER TABLE ai_jobs ADD COLUMN reasoning_effort TEXT NOT NULL DEFAULT 'low'",
+        "ALTER TABLE ai_jobs ADD COLUMN run_timeout INTEGER NOT NULL DEFAULT 90",
+        "CREATE INDEX codex_run_counts ON ai_jobs(execution_mode,created,incident_id)",
+    ),
     18: (
         "CREATE TABLE power_policies(machine_id TEXT PRIMARY KEY REFERENCES machines(id),backend TEXT NOT NULL,object_id TEXT REFERENCES proxmox_objects(id),connection_id TEXT REFERENCES proxmox_connections(id),token_id TEXT,token_secret TEXT,enabled INTEGER NOT NULL DEFAULT 0,validated INTEGER NOT NULL DEFAULT 0,version INTEGER NOT NULL)",
         "CREATE TABLE power_jobs(id TEXT PRIMARY KEY,machine_id TEXT NOT NULL REFERENCES machines(id),agent_id TEXT REFERENCES agents(id),payload TEXT NOT NULL,payload_hash TEXT NOT NULL,state TEXT NOT NULL,created REAL NOT NULL,expires REAL NOT NULL,policy_version INTEGER NOT NULL,dispatch_token TEXT,dispatched REAL,task TEXT,result TEXT,completed REAL)",

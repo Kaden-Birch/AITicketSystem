@@ -1,5 +1,7 @@
 # Hermes bridge and budget gateway
 
+This document describes API gateway mode. For Codex subscription authentication, use the [Codex setup guide](hermes-codex.md): it has separate run/time limits and a dedicated OAuth profile, rather than API credentials or spending meters. Both modes retain the restricted tool-free runner and durable signed execution protocol.
+
 Milestone 8 implements a durable application queue, a companion service on the Hermes VM, a restricted Hermes Python adapter, per-model-call admission and metering, GUI activation/usage controls, and fixture tests. **The user-reported Hermes v0.20.0 installation has not been inspected or run. Live validation remains deferred. AI defaults to disabled.**
 
 ## Why a companion bridge
@@ -12,9 +14,9 @@ Tool-free incident triage, advice chat and selected-evidence exploration are sup
 
 ## Deployment on the Hermes VM
 
-Use one dedicated unprivileged account and a clean, separately reviewed Hermes installation with the intended pinned revision and dependencies. Do not reuse the normal assistant profile or copy its credentials. The source directory must not contain a project `.env`; the runner refuses it. Each execution receives an isolated temporary `HOME`/`HERMES_HOME`, no inherited provider keys, and a minimal configuration with streaming disabled. Keep this account away from infrastructure credentials, privileged groups and shell integrations. The application holds the sole model-provider credential used by this integration.
+Use one dedicated unprivileged account and a clean, separately reviewed Hermes installation with the intended pinned revision and dependencies. Do not reuse the normal assistant profile or copy its credentials. The source directory must not contain a project `.env`; the runner refuses it. Each execution receives an isolated temporary `HOME`/`HERMES_HOME`, no inherited provider keys, and a minimal configuration with streaming disabled. Keep this account away from infrastructure credentials, privileged groups and shell integrations. In API gateway mode, the application holds the sole model-provider credential used by this integration. Codex mode instead uses a separate bridge-owned OAuth profile as described in its guide.
 
-Install this repository's package/dependencies in the bridge environment and make its Python package available to the dedicated Hermes interpreter. The subprocess includes the repository root and configured Hermes source directory in `PYTHONPATH`. Do not point it at a remote executable or an unreviewed installation.
+Install this repository's dependencies in a separate bridge environment; install Hermes and its dependencies in its own interpreter environment to avoid conflicting dependency pins. The subprocess includes the repository root and configured Hermes source directory in `PYTHONPATH`. Do not point it at a remote executable or an unreviewed installation.
 
 Create a shared secret through a secure local process; store the bridge copy in an account-readable mode-0600 file. Enter the same secret in the application's Hermes page. It is encrypted at rest and not redisplayed. Example **documentation IPs must be replaced**:
 
@@ -29,7 +31,7 @@ python -m aiticket.hermes_bridge \
   --host 127.0.0.1 --port 8090
 ```
 
-Expose the loopback service through the VM's HTTPS reverse proxy with a certificate covering its static IP SAN. The application bridge URL must be HTTPS; optional CA paths are local files on the application VM. The gateway IP must be the main application's static address. No agent IP is configured. This adds no application IP-range ACL; signed requests and execution credentials authenticate identities independently of router/VLAN policy.
+Expose the loopback service through the VM's HTTPS reverse proxy with a certificate covering its static IP SAN. HTTPS is the default. Explicit `AITICKET_ALLOW_INSECURE_HTTP=1` on both services permits HTTP; optional CA paths are local files on the application VM. The gateway IP must be the main application's static address. No agent IP is configured. This adds no application IP-range ACL; signed requests and execution credentials authenticate identities independently of router/VLAN policy.
 
 The bridge uses a SQLite WAL ledger and separate encryption key. Preserve both with restrictive permissions. A process lock permits only one bridge per state directory. Do not launch multiple instances against copied ledgers. Supervisor termination should stop the whole process group. A child is killed as a group after 180 seconds or the earlier job expiry; provider work already in flight might continue and remains reserved.
 

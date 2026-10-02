@@ -22,6 +22,8 @@ def isolated_environment(source, home, gateway, ca=None):
            'PYTHONPATH': str(Path(__file__).resolve().parent.parent)+os.pathsep+str(source),
            'AITICKET_HERMES_SOURCE': str(source), 'AITICKET_GATEWAY': gateway,
            'PYTHONUNBUFFERED': '1', 'HERMES_SINGLE_QUERY_SESSION': '1'}
+    if os.environ.get('AITICKET_EXECUTION_MODE')=='codex':
+        env.update(AITICKET_EXECUTION_MODE='codex',AITICKET_CODEX_HOME=os.environ.get('AITICKET_CODEX_HOME',''))
     if os.environ.get('AITICKET_ALLOW_INSECURE_HTTP')=='1':
         env['AITICKET_ALLOW_INSECURE_HTTP']='1'
     if ca:
@@ -68,8 +70,10 @@ class Ledger:
 
     def accept(self, job):
         import hashlib
-        if not isinstance(job, dict) or set(job) != {'version','execution_id','model','evidence','credential','max_calls','expires'} or job['version'] != 1:
+        if not isinstance(job, dict) or set(job) != ({'version','execution_id','model','evidence','credential','max_calls','expires'} | ({'execution_mode','reasoning','timeout_seconds'} if job.get('execution_mode')=='codex' else set())) or job['version'] != 1:
             raise ValueError('Invalid execution envelope.')
+        if job.get('execution_mode')=='codex' and (job.get('reasoning') not in ('low','medium','high') or type(job.get('timeout_seconds')) is not int or not 15<=job['timeout_seconds']<=180 or job.get('max_calls')!=1):
+            raise ValueError('Invalid Codex subscription run controls.')
         try:
             uuid.UUID(job['execution_id'])
         except (ValueError, TypeError, AttributeError):
@@ -91,8 +95,12 @@ class Ledger:
 
     def status(self, execution_id):
         with self.connect() as c:
-            row = c.execute('SELECT id,state,summary FROM executions WHERE id=?', (execution_id,)).fetchone()
-            return {'execution_id': execution_id, 'state': row['state'] if row else 'not_found', 'summary': row['summary'] if row else ''}
+            row = c.execute('SELECT id,state,summary,payload FROM executions WHERE id=?', (execution_id,)).fetchone()
+            result={'execution_id': execution_id, 'state': row['state'] if row else 'not_found', 'summary': row['summary'] if row else ''}
+            if row:
+                job=json.loads(self.vault.decrypt(row['payload']))
+                if job.get('execution_mode')=='codex': result.update(execution_mode='codex',model=job['model'],reasoning=job['reasoning'])
+            return result
 
     def claim(self):
         with self.connect() as c:
@@ -124,7 +132,20 @@ def check_adapter(python, source, gateway, ca=None):
             return False
 
 
+def execution_permission(job,gateway,ca=None):
+    import requests
+    try:
+        response=requests.get(gateway.rstrip('/')+'/api/hermes/'+job['execution_id']+'/permission',headers={'Authorization':'Bearer '+job['credential']},timeout=(2,2),verify=ca or True,allow_redirects=False,stream=True)
+        try:
+            raw=response.raw.read(1025)
+            return response.status_code==200 and len(raw)<=1024 and json.loads(raw).get('allowed') is True
+        finally: response.close()
+    except Exception: return False
+
+
 def run_child(job, python, source, gateway, ca=None):
+    if job.get('execution_mode','gateway')!=os.environ.get('AITICKET_EXECUTION_MODE','gateway'):
+        return {'state':'failed','summary':'Stored execution mode no longer matches this bridge; no model call started.'}
     with tempfile.TemporaryDirectory() as directory:
         home = Path(directory)
         (home/'config.yaml').write_text('model:\n  streaming: false\n')
@@ -132,13 +153,26 @@ def run_child(job, python, source, gateway, ca=None):
         input_path.write_text(json.dumps(job))
         os.chmod(input_path, 0o600)
         command = child_command(python, str(input_path))+[str(result_path)]
+        codex=job.get('execution_mode')=='codex'
+        if codex and not execution_permission(job,gateway,ca):
+            return {'state':'failed','summary':'Codex run was cancelled or permission could not be established; no model request started.'}
         process = subprocess.Popen(command, env=isolated_environment(source, home, gateway, ca), cwd=home, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         try:
-            process.wait(timeout=max(1, min(180, job['expires']-time.time())))
+            if codex:
+                deadline=time.monotonic()+max(1,min(job['timeout_seconds'],job['expires']-time.time()))
+                while True:
+                    try:
+                        process.wait(timeout=min(1,max(.01,deadline-time.monotonic())))
+                        break
+                    except subprocess.TimeoutExpired:
+                        if time.monotonic()>=deadline or not execution_permission(job,gateway,ca):
+                            raise subprocess.TimeoutExpired(command,job['timeout_seconds'])
+            else:
+                process.wait(timeout=max(1, min(180, job['expires']-time.time())))
         except subprocess.TimeoutExpired:
             os.killpg(process.pid, signal.SIGKILL)
             process.wait()
-            return {'state': 'interrupted', 'summary': 'Hermes exceeded the elapsed-time limit. In-flight provider usage may be unknown.'}
+            return {'state': 'interrupted', 'summary': 'Codex run stopped by elapsed-time limit, cancellation or permission failure. In-flight account usage may be unknown.' if codex else 'Hermes exceeded the elapsed-time limit. In-flight provider usage may be unknown.'}
         if process.returncode or not result_path.exists() or result_path.stat().st_size>80000:
             return {'state': 'failed', 'summary': 'Hermes adapter could not produce a compatible result.'}
         result = json.loads(result_path.read_text())
@@ -147,7 +181,7 @@ def run_child(job, python, source, gateway, ca=None):
         return result
 
 
-def create_bridge(ledger, secret, compatible=False):
+def create_bridge(ledger, secret, compatible=False, execution_mode='gateway'):
     app = Flask(__name__)
     app.config['MAX_CONTENT_LENGTH'] = 65536
 
@@ -165,14 +199,17 @@ def create_bridge(ledger, secret, compatible=False):
 
     @app.get('/v1/capabilities')
     def capabilities():
-        return signed({'version': 1, 'compatible': compatible, 'tools': [], 'model_gateway': True, 'workspace_modes': ['advice', 'exploration','recovery_proposal']})
+        return signed({'version': 1, 'compatible': compatible, 'tools': [], 'model_gateway': execution_mode=='gateway', 'execution_mode':execution_mode, 'workspace_modes': ['advice', 'exploration','recovery_proposal']})
 
     @app.post('/v1/executions')
     def accept():
         if not compatible:
             abort(503)
         try:
-            return signed(ledger.accept(request.get_json()))
+            job=request.get_json()
+            if not isinstance(job,dict) or job.get('execution_mode','gateway')!=execution_mode:
+                raise ValueError('Execution mode does not match this bridge.')
+            return signed(ledger.accept(job))
         except ValueError:
             abort(400)
 
@@ -203,10 +240,18 @@ def main():
     parser.add_argument('--hermes-python', required=True)
     parser.add_argument('--gateway', required=True, help='Application IP URL; HTTP requires AITICKET_ALLOW_INSECURE_HTTP=1')
     parser.add_argument('--ca')
+    parser.add_argument('--execution-mode',choices=['gateway','codex'],default='gateway')
+    parser.add_argument('--codex-home',help='Dedicated Hermes OAuth profile; Codex mode only')
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8090)
     args = parser.parse_args()
     validate_url(args.gateway, ('https',))
+    if args.execution_mode=='codex':
+        if not args.codex_home or not Path(args.codex_home).is_absolute():
+            raise SystemExit('Codex mode requires an absolute dedicated Hermes OAuth profile path.')
+        os.environ.update(AITICKET_EXECUTION_MODE='codex',AITICKET_CODEX_HOME=args.codex_home)
+    else:
+        os.environ.pop('AITICKET_EXECUTION_MODE',None);os.environ.pop('AITICKET_CODEX_HOME',None)
     secret = Path(args.secret_file).read_text().strip()
     if len(secret)<16:
         raise SystemExit('Use a bridge secret of at least 16 characters.')
@@ -223,7 +268,7 @@ def main():
         worker.start()
     from waitress import serve
     try:
-        serve(create_bridge(ledger, secret, compatible), host=args.host, port=args.port, threads=4)
+        serve(create_bridge(ledger, secret, compatible,args.execution_mode), host=args.host, port=args.port, threads=4)
     finally:
         stop.set()
         if compatible:
