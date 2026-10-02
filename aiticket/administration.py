@@ -114,6 +114,11 @@ def rotate_key(store, old_vault, destination):
         for row in c.execute('SELECT id,command FROM command_jobs').fetchall():
             c.execute('UPDATE command_jobs SET command=? WHERE id=?',(new_vault.encrypt(old_vault.decrypt(row['command'])),row['id']))
         c.execute(trigger)
+        px_trigger=c.execute("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='proxmox_api_immutable'").fetchone()[0]
+        c.execute('DROP TRIGGER proxmox_api_immutable')
+        for row in c.execute('SELECT id,payload FROM proxmox_api_jobs').fetchall():
+            c.execute('UPDATE proxmox_api_jobs SET payload=? WHERE id=?',(new_vault.encrypt(old_vault.decrypt(row['payload'])),row['id']))
+        c.execute(px_trigger)
         store.audit(c, 'encryption.rotated', 'vault', actor='console')
     return new_vault
 

@@ -168,6 +168,7 @@ def unlink(store,object_id,retire=False):
         obj=c.execute('SELECT * FROM proxmox_objects WHERE id=?',(object_id,)).fetchone()
         if not obj:
             raise ValueError('Unknown resource')
+        if obj['machine_id'] and c.execute("SELECT 1 FROM proxmox_api_jobs WHERE machine_id=? AND state IN ('dispatched','unknown')",(obj['machine_id'],)).fetchone(): raise ValueError('Reconcile Proxmox API operations before unlinking.')
         if obj['machine_id'] and c.execute("SELECT 1 FROM power_jobs WHERE machine_id=? AND state IN ('dispatched','authorized','verifying','unknown')",(obj['machine_id'],)).fetchone():
             raise ValueError('Reconcile the existing power execution before unlinking this resource.')
         if obj['machine_id']:

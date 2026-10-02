@@ -49,6 +49,7 @@ def queue(store,vault,machine,command,identifier,incident=None,ai_job=None,exter
         agents=c.execute('SELECT * FROM agents WHERE machine_id=? AND revoked=0 ORDER BY last_seen DESC',(machine,)).fetchall()
         agent=next((a for a in agents if json.loads(a['capabilities']).get('shell_commands') is True and a['last_seen'] and time.time()-a['last_seen']<=180),None)
         if not agent: raise ValueError('A fresh agent with locally enabled shell capability is required.')
+        if c.execute("SELECT 1 FROM proxmox_api_jobs WHERE machine_id=? AND state IN ('dispatched','unknown')",(machine,)).fetchone(): raise ValueError('Reconcile Proxmox API operations before shell commands.')
         if c.execute("SELECT 1 FROM power_jobs WHERE machine_id=? AND state IN ('awaiting','approved','dispatched','authorized','verifying','unknown')",(machine,)).fetchone() or c.execute("SELECT 1 FROM action_proposals p JOIN agents a ON a.id=p.agent_id WHERE a.machine_id=? AND p.state IN ('awaiting','approved','dispatched','authorized','verifying','unknown')",(machine,)).fetchone(): raise ValueError('Complete outstanding power/recovery work before shell commands.')
         if c.execute("SELECT 1 FROM command_jobs WHERE agent_id=? AND state IN ('awaiting','pending','dispatched','running','cancelling','unknown')",(agent['id'],)).fetchone(): raise ValueError('Complete or reconcile the existing command before sending another.')
         now=time.time();state='awaiting' if policy['approval']=='required' else 'pending'

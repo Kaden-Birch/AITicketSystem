@@ -1,4 +1,4 @@
-247 passed in 24.98s
+255 passed in 25.69s; additional payload-rotation regression passed (256 tests total)
 
 HTTP opt-in tests cover cookie configuration, URL restrictions, persisted agent enrollment, nonredirecting credential delivery, continued HTTPS verification and isolated Hermes configuration.
 Local Python 3.14.6; temporary databases, fake Hermes adapters and mocked external providers/subprocesses.
@@ -19,3 +19,5 @@ Codex stream compatibility: the native Responses adapter receives no Chat Comple
 General remote command milestone: authenticated per-host arbitrary shell queue, exact-command approval/immediate execution, immutable UUID identity and no dispatch replay, agent restart/unknown reconciliation, cancellation, nonzero exit handling, combined output/time bounds, ticket-bound operational tool isolation, independent MCP/HMAC access, command key rotation and inventory import fencing verified. Harmless local shell fixtures executed; no live privileged, Proxmox, Hermes-tool or model operations executed. Host command controls visually checked locally. Installed Hermes tool registration and root execution require deployment validation.
 
 Hermes deferred-tool correction: both temporary child profiles disable tool-search assembly; compatibility now loads the scoped registry catalog and rejects anything except the single aiticket_host schema. Regression verifies child profile delivery. Installed Hermes source f88f6f8e676c710fadb12cc090a792fff695469c supports this setting; live runtime retest remains required.
+
+General Proxmox operations and current-task correction: offline guest execution path, unrestricted token-authorized API methods, linked namespace validation, exact approval UI, migration/identity fencing, unknown outcome reconciliation, redacted bounded results and encrypted payload rotation/immutability covered by fixtures. Operational evidence carries the current administrator instruction and linked guest metadata without credentials. No live provider or Proxmox mutation performed.

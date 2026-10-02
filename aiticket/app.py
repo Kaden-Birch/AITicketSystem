@@ -123,6 +123,8 @@ def create_app(data_dir=None, testing=False):
         if not data: abort(404)
         from .commands import view as command_view
         data.update(command_request_id=uid(),command_policy=next(iter(store.rows('SELECT * FROM command_policies WHERE machine_id=?',(machine_id,))),None),command_jobs=[command_view(store,vault,r['id']) for r in store.rows('SELECT id FROM command_jobs WHERE machine_id=? ORDER BY created DESC LIMIT 20',(machine_id,))])
+        from .proxmox_operations import view as px_view
+        data['proxmox_api_jobs']=[px_view(store,vault,r['id']) for r in store.rows('SELECT id FROM proxmox_api_jobs WHERE machine_id=? ORDER BY created DESC LIMIT 20',(machine_id,))]
         return render_template('host-detail.html',**data)
 
     @app.post('/hosts/<machine_id>/command-policy')
@@ -149,6 +151,14 @@ def create_app(data_dir=None, testing=False):
         machine=store.rows('SELECT machine_id FROM command_jobs WHERE id=?',(identifier,))[0]['machine_id']
         return redirect(url_for('host_detail',machine_id=machine))
 
+    @app.post('/proxmox-requests/<identifier>/decide')
+    @login_required
+    def proxmox_request_decision(identifier):
+        from .proxmox_operations import decide,view
+        if request.form.get('confirm')!='yes': raise ValueError('Confirm the exact Proxmox API decision.')
+        decide(store,vault,identifier,request.form.get('operation'),request.form.get('fingerprint'))
+        return redirect(url_for('host_detail',machine_id=view(store,vault,identifier)['machine_id']))
+
     def command_agent():
         bearer=request.headers.get('Authorization','')
         rows=store.rows('SELECT id FROM agents WHERE credential_digest=? AND revoked=0',(digest(bearer[7:]) if bearer.startswith('Bearer ') else '',))
@@ -167,7 +177,7 @@ def create_app(data_dir=None, testing=False):
 
     def command_tool_action(payload,ai_job=None,external=False):
         from .commands import queue,view,decide
-        if not isinstance(payload,dict) or set(payload)-{'action','machine_id','incident_id','command','id'}: raise ValueError('Invalid command tool envelope.')
+        if not isinstance(payload,dict) or set(payload)-{'action','machine_id','incident_id','command','id','connection_id','method','path','params'}: raise ValueError('Invalid command tool envelope.')
         if any(k in payload and (not isinstance(payload[k],str) or len(payload[k])>100) for k in ('id','machine_id','incident_id')): raise ValueError('Invalid command target identity.')
         action=payload.get('action')
         if ai_job:
@@ -179,8 +189,20 @@ def create_app(data_dir=None, testing=False):
                 machine=incident['machine_id'];incident_id=job['incident_id']
         else:
             machine=payload.get('machine_id');incident_id=payload.get('incident_id')
+        from . import proxmox_operations as pxops
         if action=='targets':
-            return {'targets':store.rows('SELECT m.id,m.name FROM machines m JOIN command_policies p ON p.machine_id=m.id WHERE p.enabled=1 AND '+('m.id=?' if ai_job else 'p.external=1'),(machine,) if ai_job else ())}
+            targets=store.rows('SELECT m.id,m.name FROM machines m JOIN command_policies p ON p.machine_id=m.id WHERE p.enabled=1 AND '+('m.id=? AND p.hermes=1' if ai_job else 'p.external=1'),(machine,) if ai_job else ())
+            with store.connect() as c:
+                for target in targets: target['proxmox']=pxops.context(c,target['id'])
+            return {'targets':targets}
+        if action=='proxmox':
+            identifier=pxops.queue(store,vault,machine,payload,ai_job,external)
+            return pxops.view(store,vault,identifier)
+        if action=='proxmox_status':
+            result=pxops.view(store,vault,payload.get('id'))
+            if (ai_job and result['ai_job_id']!=ai_job): abort(403)
+            with store.connect() as c: pxops.policy(c,result['machine_id'],ai_job,external)
+            return result
         if action=='run':
             identifier=queue(store,vault,machine,payload.get('command'),payload.get('id'),incident_id,ai_job,external)
         else:
@@ -271,6 +293,8 @@ def create_app(data_dir=None, testing=False):
         from .hostview import object_detail
         data=object_detail(store,object_id)
         if not data: abort(404)
+        from .proxmox_operations import view as px_view
+        data['proxmox_api_jobs']=[px_view(store,vault,r['id']) for r in store.rows('SELECT id FROM proxmox_api_jobs WHERE machine_id=? ORDER BY created DESC LIMIT 20',(machine_id,))]
         return render_template('host-detail.html',**data)
 
     @app.route('/hosts', methods=['GET', 'POST'])

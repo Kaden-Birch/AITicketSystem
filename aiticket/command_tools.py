@@ -5,13 +5,13 @@ import requests
 from .security import hermes_headers,validate_url
 
 NAME='aiticket_host'
-SCHEMA={'name':NAME,'description':'Remote shell on authorized hosts. targets lists exact machine IDs. run queues one arbitrary command; status returns exit/stdout/stderr; cancel stops local work. Approval policy and OS privileges apply. Unknown outcomes must never be replayed.','parameters':{'type':'object','properties':{'action':{'type':'string','enum':['targets','run','status','cancel']},'machine_id':{'type':'string'},'command':{'type':'string'},'id':{'type':'string','description':'Stable command UUID; reuse only for the exact same run. Required for status/cancel.'},'offset':{'type':'integer','minimum':0,'maximum':65536}},'required':['action'],'additionalProperties':False}}
+SCHEMA={'name':NAME,'description':'Remote shell on authorized hosts. targets lists exact machine IDs. run queues one arbitrary command; status returns exit/stdout/stderr; cancel stops local work. Approval policy and OS privileges apply. proxmox requests any token-permitted API endpoint on a linked connection; proxmox_status inspects the durable request. Unknown outcomes must never be replayed.','parameters':{'type':'object','properties':{'action':{'type':'string','enum':['targets','run','status','cancel','proxmox','proxmox_status']},'connection_id':{'type':'string'},'method':{'type':'string','enum':['GET','POST','PUT','DELETE']},'path':{'type':'string','description':'Relative Proxmox API path, e.g. /nodes/node/qemu/100/status/start. Token controls all API permissions.'},'params':{'type':'object','additionalProperties':True},'machine_id':{'type':'string'},'command':{'type':'string'},'id':{'type':'string','description':'Stable command UUID; reuse only for the exact same run. Required for status/cancel.'},'offset':{'type':'integer','minimum':0,'maximum':65536}},'required':['action'],'additionalProperties':False}}
 
 
 def invoke(server,args,credential=None,job=None,secret=None,ca=None):
     args=dict(args);offset=args.pop('offset',0)
     if type(offset) is not int or not 0<=offset<=65536: raise ValueError('Invalid output offset.')
-    if args.get('action')=='run': args.setdefault('id',str(uuid.uuid4()))
+    if args.get('action') in ('run','proxmox'): args.setdefault('id',str(uuid.uuid4()))
     body=json.dumps(args,separators=(',',':'),sort_keys=True).encode()
     path='/api/hermes/'+job+'/command' if job else '/api/operations/command'
     headers={'Authorization':'Bearer '+credential,'Content-Type':'application/json'} if job else hermes_headers(secret,body,args.get('id',str(uuid.uuid4())))
@@ -27,9 +27,11 @@ def invoke(server,args,credential=None,job=None,secret=None,ca=None):
         time.sleep(1)
     except Exception:
         return json.dumps({'error':'Request failed or delivery is ambiguous. Do not replay the command. Check its UUID/status in the host workspace.','id':args.get('id')})
-    if result.get('result'):
+    if result.get('result') and 'stdout' in result['result']:
         full=result['result'];result['result']={**full,**{k:full[k][offset:offset+2048] for k in ('stdout','stderr')}}
         result['more_output']=any(len(full[k])>offset+2048 for k in ('stdout','stderr'))
+    if result.get('result') and 'body' in result['result']:
+        text=json.dumps(result['result']['body']);result['result']['body']=text[offset:offset+2048];result['more_output']=len(text)>offset+2048
     result.pop('command',None)
     return json.dumps(result)
 

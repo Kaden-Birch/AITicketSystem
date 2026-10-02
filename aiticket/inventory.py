@@ -170,6 +170,8 @@ def import_inventory(store,vault,document):
                     raise ValueError('Finish active AI/recovery work before importing affected machines.')
             for machine in affected:
                 if c.execute("SELECT 1 FROM command_jobs WHERE machine_id=? AND state IN ('dispatched','running','cancelling','unknown')",(machine,)).fetchone(): raise ValueError('Finish or reconcile remote commands before importing affected hosts.')
+                if c.execute("SELECT 1 FROM proxmox_api_jobs WHERE machine_id=? AND state IN ('dispatched','unknown')",(machine,)).fetchone(): raise ValueError('Reconcile Proxmox API operations before inventory import.')
+                c.execute("UPDATE proxmox_api_jobs SET state='cancelled' WHERE machine_id=? AND state='awaiting'",(machine,))
                 c.execute('UPDATE command_policies SET enabled=0,version=version+1 WHERE machine_id=?',(machine,))
                 c.execute("UPDATE command_jobs SET state='cancelled' WHERE machine_id=? AND state IN ('awaiting','pending')",(machine,))
                 if c.execute("SELECT 1 FROM power_jobs WHERE machine_id=? AND state IN ('dispatched','authorized','verifying','unknown')",(machine,)).fetchone():

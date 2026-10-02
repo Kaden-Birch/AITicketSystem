@@ -130,9 +130,10 @@ def test_operational_runner_exposes_only_compact_command_tool(monkeypatch):
             assert kwargs['request_overrides']=={} and kwargs['skip_memory'] and kwargs['skip_background_review']
             self.tools=[{'type':'function','function':{'name':'aiticket_host'}}];self.client=SimpleNamespace(base_url=route['base_url'])
         def run_conversation(self,prompt):
+            assert prompt.startswith('CURRENT ADMINISTRATOR TASK (instruction for this run):\nRun id now')
             assert 'arbitrary shell commands' in prompt and 'Do not replay' in prompt
             return {'completed':True,'final_response':'Compact command results'}
-    job={'execution_mode':'codex','command_tools':True,'model':'gpt-6.1-sol','reasoning':'low','execution_id':'job','credential':'fixture','max_calls':1,'evidence':'User request'}
+    job={'execution_mode':'codex','command_tools':True,'model':'gpt-6.1-sol','reasoning':'low','execution_id':'job','credential':'fixture','max_calls':1,'evidence':json.dumps({'administrator_task':'Run id now','checkpoint':{'note':'historical only'}})}
     with patch('aiticket.hermes_runner.codex_runtime',return_value=route),patch('aiticket.command_tools.register') as register:
         assert execute(Agent,job,'http://192.0.2.10')['state']=='completed'
         register.assert_called_once()

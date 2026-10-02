@@ -162,3 +162,21 @@ One outstanding command per agent is permitted. Existing power/service-recovery 
 ### Hermes deferred-tool compatibility
 
 The bridge temporary profile sets `tools.tool_search.enabled: "off"` so Hermes v0.20.0 exposes the single registered `aiticket_host` schema directly rather than `tool_search`, `tool_describe` and `tool_call`. Exact single-tool runtime validation remains enforced. This does not change your normal Hermes profile or OAuth credentials. After updating the bridge repository, restart the bridge, rerun compatibility and queue a new investigation; failed jobs are never replayed.
+
+## Current tasks and general Proxmox API operations
+
+Update both the main application (pull, rebuild, restart) and the Hermes bridge (pull, restart), then rerun compatibility and queue a new investigation. Schema 21 adds the Proxmox request ledger. No agent update is required for this addition. Existing host/guest links and enrollment credentials remain intact.
+
+Operational jobs explicitly carry the current administrator question as `administrator_task`. Resuming a checkpoint makes its saved question the current task for the newly requested run; historical outputs remain evidence. Manual-ticket triage uses the administrator's original description. Ordinary automated monitoring requests authorize investigation only, not arbitrary changes.
+
+The same compact `aiticket_host` tool now supports `proxmox` and `proxmox_status`. `targets` includes linked resource IDs, cluster namespaces, observed node/state and connection IDs. These remain available when the guest agent is offline. Inventory state is potentially stale: query current Proxmox state before changing a resource and follow migrations by resource identity.
+
+A Proxmox request specifies `connection_id`, `method` (GET, POST, PUT or DELETE), a relative `path` under `/api2/json`, scalar `params`, and a stable UUID `id`. There is no API operation allowlist; the configured connection's actual API token determines access, including operations beyond VM power. The connection must belong to the host's linked namespace. Credentials stay on the application server and are never supplied to Hermes. An inventory-only token will still deny write requests; replace the connection token through Proxmox settings with the permissions you intend to grant.
+
+Host operational permissions also govern Proxmox requests. Approval-required hosts queue exact requests—including reads—for review in **Proxmox API request history** on the host page. Immediate hosts dispatch requests directly. API access does not require a live guest agent or root access inside that guest. Independent MCP sessions can use this API when the host allows independent operations.
+
+Example: ask Hermes to inspect the current state of the linked VM and, if stopped, start it and verify recovery. It can query `/cluster/resources` to confirm node/VM identity, request `/nodes/NODE/qemu/VMID/status/start`, then inspect the returned task UPID and fresh VM state. Substitute the live identity, never guess node or VMID. HTTP success is only API acceptance; task success, guest reachability and application health require separate checks. An approval-required proposal may outlive the AI run; approve in the host page and start a new investigation to verify it.
+
+Proxmox requests persist dispatch before delivery and never automatically replay. Network ambiguity, server errors or oversized responses lock that host's API operations as unknown until independent reconciliation. Cancelling an awaiting request prevents delivery; cancelling or undoing an already accepted Proxmox task is a separate token-authorized API operation. Policy changes, unlinking or migrations invalidate queued request bindings; do not replay the old request. Key rotation re-encrypts payloads; inventory imports disable permission and refuse unresolved dispatched operations.
+
+Local tests use mocked Proxmox responses. No live Proxmox mutation or model request has been performed by these checks.

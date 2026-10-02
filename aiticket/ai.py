@@ -156,6 +156,16 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
                 evidence=json.dumps(document)
                 if len(evidence)>16000:
                     raise ValueError('Recovery draft context exceeds limits.')
+        if codex and bridge.get('command_tools'):
+            document=json.loads(evidence)
+            report=json.loads(incident['report'])
+            task=question.strip() or (report.get('description','') if report.get('manual_ticket') else 'Investigate the incident using current read-only diagnostics. Report findings; do not change systems without an explicit administrator task.')
+            document['administrator_task']=task
+            document['task_origin']='Administrator selected this operational investigation; checkpoint resumption restates its saved question as the current task.'
+            from .proxmox_operations import context as proxmox_context
+            document['linked_proxmox']=proxmox_context(c,incident['machine_id'])
+            evidence=json.dumps(document)
+            if len(evidence)>16000: raise ValueError('Operational task context exceeds limits.')
         c.execute('INSERT INTO ai_jobs(id,incident_id,state,created,expires,model,allowance,max_calls,evidence,credential_digest,credential,endpoint,bridge_secret,next_attempt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                   (job_id, incident_id, 'pending', now, now+3600, cfg['model'], min(cfg['triage_tokens'], cfg['incident_tokens']), min(cfg['max_turns'], 100), evidence, digest(token), vault.encrypt(token), bridge['url'].rstrip('/'), setting(c, 'hermes_secret'), now))
         c.execute('UPDATE ai_jobs SET mode=?,request_id=?,request_fingerprint=?,allowance=? WHERE id=?', (mode, request_id, fingerprint, min(cfg['triage_tokens'], cfg['incident_tokens']) if mode=='triage' else cfg['incident_tokens'], job_id))

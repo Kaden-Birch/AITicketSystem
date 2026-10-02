@@ -1,6 +1,12 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 20
+CURRENT_VERSION = 21
 MIGRATIONS = {
+    21: (
+        "CREATE TABLE proxmox_api_jobs(id TEXT PRIMARY KEY,machine_id TEXT NOT NULL REFERENCES machines(id),ai_job_id TEXT REFERENCES ai_jobs(id),payload TEXT NOT NULL,fingerprint TEXT NOT NULL,policy_version INTEGER NOT NULL,binding TEXT NOT NULL,state TEXT NOT NULL,created REAL NOT NULL,expires REAL NOT NULL,dispatched REAL,result TEXT,completed REAL)",
+        "CREATE TRIGGER proxmox_api_immutable BEFORE UPDATE OF machine_id,ai_job_id,payload,fingerprint,policy_version,binding,created,expires ON proxmox_api_jobs BEGIN SELECT RAISE(ABORT,'Proxmox request identity is immutable'); END",
+        "CREATE TRIGGER proxmox_api_no_delete BEFORE DELETE ON proxmox_api_jobs BEGIN SELECT RAISE(ABORT,'Proxmox request history is immutable'); END",
+        "CREATE UNIQUE INDEX proxmox_api_active ON proxmox_api_jobs(machine_id) WHERE state IN ('dispatched','unknown')",
+    ),
     20: (
         "ALTER TABLE ai_jobs ADD COLUMN command_tools INTEGER NOT NULL DEFAULT 0",
         "CREATE TABLE command_policies(machine_id TEXT PRIMARY KEY REFERENCES machines(id),enabled INTEGER NOT NULL DEFAULT 0,approval TEXT NOT NULL DEFAULT 'required',hermes INTEGER NOT NULL DEFAULT 0,external INTEGER NOT NULL DEFAULT 0,timeout INTEGER NOT NULL DEFAULT 120,output_limit INTEGER NOT NULL DEFAULT 8192,version INTEGER NOT NULL)",

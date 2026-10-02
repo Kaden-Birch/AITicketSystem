@@ -71,6 +71,7 @@ def propose(store,machine_id,operation,reason,now=None):
     if not isinstance(reason,str) or not 1<=len(reason.strip())<=1000: raise ValueError('Explain the power operation (1–1000 characters).')
     with store.connect() as c:
         c.execute('BEGIN IMMEDIATE')
+        if c.execute("SELECT 1 FROM proxmox_api_jobs WHERE machine_id=? AND state IN ('dispatched','unknown')",(machine_id,)).fetchone(): raise ValueError('Reconcile Proxmox API operations before power controls.')
         if c.execute("SELECT 1 FROM command_jobs WHERE machine_id=? AND state IN ('awaiting','pending','dispatched','running','cancelling','unknown')",(machine_id,)).fetchone(): raise ValueError('Complete or reconcile remote commands before power operations.')
         policy,obj,agent=eligible(c,machine_id,operation,now)
         if c.execute("SELECT 1 FROM power_jobs WHERE machine_id=? AND state IN ('awaiting','approved','dispatched','authorized','verifying','unknown')",(machine_id,)).fetchone(): raise ValueError('A power proposal or unresolved execution already exists.')
