@@ -116,6 +116,12 @@ def main():
         if os.environ.get('AITICKET_COMMAND_TOOLS')=='1':
             from tools.registry import registry
             if not {'name','toolset','schema','handler'}<=set(inspect.signature(registry.register).parameters): raise RuntimeError('Unsupported command tool registry interface.')
+            from .command_tools import register
+            from model_tools import get_tool_definitions
+            register({'credential':'compatibility-placeholder','execution_id':'compatibility-placeholder'},os.environ['AITICKET_GATEWAY'])
+            tools=get_tool_definitions(enabled_toolsets=['aiticket'],quiet_mode=True)
+            if len(tools)!=1 or tools[0].get('function',tools[0]).get('name')!='aiticket_host':
+                raise RuntimeError('Hermes must expose exactly aiticket_host; deferred dispatch is unsupported in this profile.')
         print('Restricted constructor interface available; runtime validation still required.')
         return
     input_path, result_path = map(Path, sys.argv[1:])

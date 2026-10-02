@@ -191,3 +191,16 @@ def test_inventory_import_disables_command_authority_and_blocks_unknown(environm
     identifier=str(uuid.uuid4());commands.queue(store,vault,mid,'uptime',identifier);dispatch(store,vault,identifier)
     with store.connect() as c:commands.poll(c,store,vault,'shell-agent',time.time()+400)
     with pytest.raises(ValueError):import_inventory(store,vault,document)
+
+
+def test_bridge_compatibility_child_receives_direct_tool_profile(monkeypatch):
+    from types import SimpleNamespace
+    from aiticket import hermes_bridge
+    monkeypatch.setenv('AITICKET_COMMAND_TOOLS','1')
+    def child(command,**kwargs):
+        config=json.loads((Path(kwargs['env']['HERMES_HOME'])/'config.yaml').read_text())
+        assert kwargs['env']['AITICKET_COMMAND_TOOLS']=='1'
+        assert config['model']['streaming'] is False
+        return SimpleNamespace(returncode=0 if config['tools']['tool_search']['enabled']=='off' else 1)
+    with patch('aiticket.hermes_bridge.subprocess.run',side_effect=child):
+        assert hermes_bridge.check_adapter('/fixture/python','/fixture/hermes','http://192.0.2.10')

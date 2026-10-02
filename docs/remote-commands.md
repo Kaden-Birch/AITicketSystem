@@ -158,3 +158,7 @@ Cancellation kills the local process group, denies further tool requests and fen
 Encryption-key rotation re-encrypts command text while preserving immutable fingerprints. Inventory import does not restore execution permissions: affected policies are disabled, queued commands cancelled, and active/unknown commands must be completed or reconciled first. Ticket archives include command identity/status/result metadata without exporting encrypted credentials.
 
 One outstanding command per agent is permitted. Existing power/service-recovery jobs and shell commands are mutually fenced at proposal admission. Approval-required policies remain available; immediate policy intentionally allows arbitrary changes without per-command confirmation. The permission is as broad as the chosen OS account. Live root, reboot, Proxmox and installed-Hermes operational tests remain deployment validation tasks; automated tests run only harmless local shell fixtures and mocked provider/tool calls.
+
+### Hermes deferred-tool compatibility
+
+The bridge temporary profile sets `tools.tool_search.enabled: "off"` so Hermes v0.20.0 exposes the single registered `aiticket_host` schema directly rather than `tool_search`, `tool_describe` and `tool_call`. Exact single-tool runtime validation remains enforced. This does not change your normal Hermes profile or OAuth credentials. After updating the bridge repository, restart the bridge, rerun compatibility and queue a new investigation; failed jobs are never replayed.

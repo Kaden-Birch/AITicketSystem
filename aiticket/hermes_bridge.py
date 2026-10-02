@@ -17,6 +17,10 @@ from .ai import authenticate
 from .security import Vault, hermes_headers, validate_url
 
 
+# Keep the single scoped tool visible instead of Hermes' deferred dispatcher.
+ISOLATED_CONFIG = json.dumps({'model':{'streaming':False},'tools':{'tool_search':{'enabled':'off'}}})
+
+
 def isolated_environment(source, home, gateway, ca=None):
     env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(home), 'HERMES_HOME': str(home),
            'PYTHONPATH': str(Path(__file__).resolve().parent.parent)+os.pathsep+str(source),
@@ -125,7 +129,7 @@ def child_command(python, argument):
 def check_adapter(python, source, gateway, ca=None):
     with tempfile.TemporaryDirectory() as directory:
         home = Path(directory)
-        (home/'config.yaml').write_text('model:\n  streaming: false\n')
+        (home/'config.yaml').write_text(ISOLATED_CONFIG)
         try:
             result = subprocess.run(child_command(python, '--check'), env=isolated_environment(source, home, gateway, ca), cwd=home, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15, check=False)
             return result.returncode == 0
@@ -151,7 +155,7 @@ def run_child(job, python, source, gateway, ca=None):
         return {'state':'failed','summary':'Stored execution mode no longer matches this bridge; no model call started.'}
     with tempfile.TemporaryDirectory() as directory:
         home = Path(directory)
-        (home/'config.yaml').write_text('model:\n  streaming: false\n')
+        (home/'config.yaml').write_text(ISOLATED_CONFIG)
         input_path, result_path = home/'input.json', home/'result.json'
         input_path.write_text(json.dumps(job))
         os.chmod(input_path, 0o600)
