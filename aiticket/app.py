@@ -445,6 +445,15 @@ def create_app(data_dir=None, testing=False):
     @login_required
     def settings():
         if request.method == 'POST':
+            if request.form.get('section') == 'monitoring':
+                interval=int(request.form.get('agent_interval','30'))
+                if not 20<=interval<=300: raise ValueError('Agent reporting interval must be 20–300 seconds.')
+                store.save('agent_interval',interval)
+                with store.connect() as c:
+                    c.execute("UPDATE checks SET interval=?,next_run=0 WHERE kind IN ('agent','agent_metric')",(interval,))
+                    store.audit(c,'monitoring.agent_interval','agents',{'seconds':interval})
+                flash('Agent reporting interval saved; updated agents apply it on their next heartbeat.')
+                return redirect(url_for('settings'))
             if request.form.get('section') == 'discord':
                 updates = {}
                 secret = request.form.get('webhook', '').strip()
@@ -469,7 +478,7 @@ def create_app(data_dir=None, testing=False):
                 store.save_many({'ai_config': cfg}, actor='user')
             flash('Settings saved. AI activation is managed on the Hermes page.')
             return redirect(url_for('settings'))
-        return render_template('settings.html', ai=store.setting('ai_config', AI_DEFAULTS), discord_configured=bool(store.setting('discord_secret')), minimum=store.setting('discord_minimum', 'medium'), recovery=store.setting('discord_recovery', True), ai_enabled=store.setting('hermes_config', {}).get('enabled', False))
+        return render_template('settings.html', agent_interval=store.setting('agent_interval',30),ai=store.setting('ai_config', AI_DEFAULTS), discord_configured=bool(store.setting('discord_secret')), minimum=store.setting('discord_minimum', 'medium'), recovery=store.setting('discord_recovery', True), ai_enabled=store.setting('hermes_config', {}).get('enabled', False))
 
 
     @app.route('/administration', methods=['GET', 'POST'])
@@ -691,7 +700,7 @@ def create_app(data_dir=None, testing=False):
                 c.execute('UPDATE agents SET credential_digest=?,revoked=0,action_credential_digest=NULL WHERE id=?', (digest(credential), agent_id))
             else:
                 c.execute('INSERT INTO agents(id,machine_id,credential_digest) VALUES(?,?,?)', (agent_id, row['machine_id'], digest(credential)))
-                c.execute('INSERT INTO checks(id,machine_id,name,kind,config,interval) VALUES(?,?,?,?,?,?)', (uid(), row['machine_id'], 'Agent heartbeat', 'agent', json.dumps({'agent_id': agent_id, 'max_age': 180}), 60))
+                c.execute('INSERT INTO checks(id,machine_id,name,kind,config,interval) VALUES(?,?,?,?,?,?)', (uid(), row['machine_id'], 'Agent heartbeat', 'agent', json.dumps({'agent_id': agent_id, 'max_age': 180}), store.setting('agent_interval',30)))
             c.execute('UPDATE enrollments SET used=? WHERE digest=?', (time.time(), row['digest']))
             store.audit(c, 'agent.reenrolled' if existing else 'agent.enrolled', agent_id, {'machine_id': row['machine_id']}, actor='agent')
         return {'agent_id': agent_id, 'credential': credential}
@@ -746,7 +755,7 @@ def create_app(data_dir=None, testing=False):
                 from .diagnostics import poll
                 from .actions import poll as action_poll
                 from .commands import poll as command_poll
-                return {'commands':command_poll(c,store,vault,row['id'],time.time()),'status': 'duplicate', 'jobs': poll(c,row['id'],time.time()), 'actions': action_poll(c,store,row['id'],time.time()) or power_poll(c,store,row['id'],time.time())}
+                return {'poll_interval_seconds':store.setting('agent_interval',30),'commands':command_poll(c,store,vault,row['id'],time.time()),'status': 'duplicate', 'jobs': poll(c,row['id'],time.time()), 'actions': action_poll(c,store,row['id'],time.time()) or power_poll(c,store,row['id'],time.time())}
             now = time.time()
             c.execute('UPDATE agents SET host_info=? WHERE id=?',(json.dumps(host_info),row['id']))
             c.execute('INSERT INTO agent_events VALUES(?,?,?)', (row['id'], event, now))
@@ -758,7 +767,7 @@ def create_app(data_dir=None, testing=False):
             actions=action_poll(c,store,row['id'],now) or power_poll(c,store,row['id'],now)
             from .commands import poll as command_poll
             commands=command_poll(c,store,vault,row['id'],now)
-        return {'status': 'accepted', 'jobs': jobs, 'actions': actions,'commands':commands}
+        return {'poll_interval_seconds':store.setting('agent_interval',30),'status': 'accepted', 'jobs': jobs, 'actions': actions,'commands':commands}
 
     @app.route('/proxmox', methods=['GET','POST'])
     @login_required
@@ -879,7 +888,7 @@ def create_app(data_dir=None, testing=False):
             config={'agent_id':agents[0]['id'],'metric':f['metric'],'fail_above':fail,'recover_below':recover,'sustain_seconds':duration}
             with store.connect() as c:
                 check_id=uid()
-                c.execute('INSERT INTO checks(id,machine_id,name,kind,config,interval,fail_after,recover_after) VALUES(?,?,?,?,?,30,1,2)',(check_id,agents[0]['machine_id'],f['metric'],'agent_metric',json.dumps(config)))
+                c.execute('INSERT INTO checks(id,machine_id,name,kind,config,interval,fail_after,recover_after) VALUES(?,?,?,?,?,?,1,2)',(check_id,agents[0]['machine_id'],f['metric'],'agent_metric',json.dumps(config),store.setting('agent_interval',30)))
                 store.audit(c,'resource_rule.created',check_id,{'metric':f['metric']})
             return redirect(url_for('resource_rules'))
         return render_template('resources.html',metrics=METRICS,agents=store.rows('SELECT a.id,m.name,a.capabilities FROM agents a JOIN machines m ON m.id=a.machine_id WHERE revoked=0'),rules=store.rows("SELECT c.name,c.config,m.name AS machine FROM checks c JOIN machines m ON m.id=c.machine_id WHERE kind='agent_metric'"))

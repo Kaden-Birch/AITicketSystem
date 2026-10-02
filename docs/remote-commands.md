@@ -194,3 +194,19 @@ Operational Hermes can call `resolve` with a brief repair summary once its reque
 Verified recovery sets the ticket to **Resolved**, records its closed timestamp, retains history and queues one recovery event. Discord messages include a brief recovery description. AI repair explanations are labeled unverified separately from observed healthy checks; root cause is not inferred from an AI claim. Administrator manual resolution also queues a notification labeled as administrator resolution. The existing global/machine/group Discord notification policy still applies: configure the webhook, enable notifications and recovery messages, select an appropriate severity threshold, and check maintenance/silence settings.
 
 If application health matters, configure an HTTP/TCP/service monitor for it. A healthy VM and agent heartbeat alone cannot establish that the application is functioning.
+
+## Agent reporting and live pages
+
+**Settings → Agent reporting** now selects an interval from 20 to 300 seconds (default 30). The main app returns this interval on accepted and duplicate heartbeats. Updated agents sample metrics and poll queued jobs at that cadence; network failures still use bounded backoff. Saving also updates agent heartbeat/metric monitoring checks. Proxmox discovery retains its separate refresh schedule.
+
+Update/rebuild the main application, then update the agent on each monitored host to apply the reporting setting:
+
+```sh
+# On the monitored host, such as cit-01 (not the main application VM):
+cd ~/aiticket-agent-source
+git pull --ff-only origin main
+sudo install -m 0644 agent/agent.py /opt/aiticket-agent/agent.py
+sudo systemctl restart aiticket-agent
+```
+
+Dashboard, host workspaces, incident pages, Proxmox inventory and history/queue/audit/Hermes views refresh displayed information every five seconds without navigation or a full browser reload. Metric values change when new agent samples or Proxmox refreshes arrive, not every UI poll. New AI results, timeline entries, command results and ticket status appear automatically. Unsaved/active forms and expanded disclosures are preserved. Hidden tabs pause polling; connection failures retry and expired sessions stop polling. Polling never queues AI or executes commands. The screen organization remains unchanged.

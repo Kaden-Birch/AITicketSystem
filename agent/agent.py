@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-VERSION = '0.4.0'
+VERSION = '0.5.0'
 
 
 def endpoint(value,allow_http=False):
@@ -223,7 +223,8 @@ def main():
             start(state,path,response.get('commands',[]),write_state,lambda job:send(base,'/api/agent/command-permission',{'id':job['id'],'dispatch_token':job['dispatch_token']},state.get('ca'),state['credential']).get('allowed') is True,lambda:policy_config(args.policy))
             process_jobs(state,path,response.get('jobs',[]),policy)
             process_actions(state,path,response.get('actions',[]),policy,lambda payload:send(base,'/api/agent/action-authorize',payload,state.get('ca'),state.get('action_credential','')),policy_loader=lambda:load_policy(args.policy))
-            delay = 30
+            requested=response.get("poll_interval_seconds",30)
+            delay=requested if type(requested) is int and 20<=requested<=300 else 30
         except Exception as exc:
             print('Heartbeat unavailable: ' + type(exc).__name__, flush=True)
             delay = min(delay * 2, 300)

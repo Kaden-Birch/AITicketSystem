@@ -91,3 +91,5 @@ Milestone 20 adds [general remote commands](docs/remote-commands.md): arbitrary 
 Operational investigations preserve the current administrator task and linked Proxmox guest context. General token-authorized Proxmox API requests work without a live guest agent; see [remote command and Proxmox operations setup](docs/remote-commands.md).
 
 Automatic AI investigations include eligible monitoring and manual tickets when enabled. AI can request verified resolution; fresh monitoring controls closure and recovery notifications include a brief summary.
+
+Agent reporting is configurable down to 20 seconds in Settings. Dashboard, host and incident information updates automatically every five seconds while preserving unfinished forms.
