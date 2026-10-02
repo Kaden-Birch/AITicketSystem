@@ -43,7 +43,7 @@ def test_unassigned_node_dashboard_guests_and_late_agent_link(signed_in):
     response=client.post('/hosts/'+mid+'/proxmox-link',data={'csrf':csrf,'object_id':guest['id'],'expected':'running','confirm':'yes'})
     assert response.status_code==302
     assert store.rows('SELECT machine_id,credential_digest FROM agents WHERE id=?',('previous-agent',))[0]=={'machine_id':mid,'credential_digest':'unchanged-credential-digest'}
-    assert b'Proxmox view of this host' in client.get('/hosts/'+mid).data
+    assert b'Proxmox snapshot' in client.get('/hosts/'+mid).data
     assert store.rows('SELECT machine_id FROM incidents WHERE id=?',(iid,))[0]['machine_id']==mid
     assert store.rows('SELECT machine_id FROM proxmox_objects WHERE id=?',(guest['id'],))[0]['machine_id']==mid
     assert client.post('/hosts/'+mid+'/proxmox-link',data={'csrf':csrf,'object_id':node['id'],'expected':'online','confirm':'yes'}).status_code==400

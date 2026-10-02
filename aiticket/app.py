@@ -127,7 +127,16 @@ def create_app(data_dir=None, testing=False):
         data.update(command_request_id=uid(),command_policy=next(iter(store.rows('SELECT * FROM command_policies WHERE machine_id=?',(machine_id,))),None),command_jobs=[command_view(store,vault,r['id']) for r in store.rows('SELECT id FROM command_jobs WHERE machine_id=? ORDER BY created DESC LIMIT 20',(machine_id,))])
         from .proxmox_operations import view as px_view
         data['proxmox_api_jobs']=[px_view(store,vault,r['id']) for r in store.rows('SELECT id FROM proxmox_api_jobs WHERE machine_id=? ORDER BY created DESC LIMIT 20',(machine_id,))]
+        from .metric_history import charts
+        data['history']=charts(store,data['host'],request.args.get('window','6h'))
         return render_template('host-detail.html',**data)
+
+    @app.get('/hosts/<machine_id>/checks/new')
+    @login_required
+    def host_add_check(machine_id):
+        machines=store.rows('SELECT id,name FROM machines WHERE id=?',(machine_id,))
+        if not machines: abort(404)
+        return render_template('host-add-check.html',machines=machines)
 
     @app.route('/hosts/<machine_id>/settings',methods=['GET','POST'])
     @login_required
@@ -348,6 +357,8 @@ def create_app(data_dir=None, testing=False):
         if not data: abort(404)
         from .proxmox_operations import view as px_view
         data['proxmox_api_jobs']=[px_view(store,vault,r['id']) for r in store.rows('SELECT id FROM proxmox_api_jobs WHERE machine_id=? ORDER BY created DESC LIMIT 20',(machine_id,))]
+        from .metric_history import charts
+        data['history']=charts(store,data['host'],request.args.get('window','6h'))
         return render_template('host-detail.html',**data)
 
     @app.route('/hosts', methods=['GET', 'POST'])
@@ -415,7 +426,7 @@ def create_app(data_dir=None, testing=False):
             check_id = uid()
             c.execute('INSERT INTO checks(id,machine_id,name,kind,config,interval,fail_after,recover_after,severity) VALUES(?,?,?,?,?,?,?,?,?)', (check_id, machine, name, kind, json.dumps(cfg), interval, fail, recover, severity))
             store.audit(c, 'check.created', check_id, {'machine_id': machine, 'kind': kind})
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('host_detail',machine_id=machine))
 
     @app.post('/checks/<check_id>/maintenance')
     @login_required
@@ -823,6 +834,8 @@ def create_app(data_dir=None, testing=False):
             c.execute('INSERT INTO agent_events VALUES(?,?,?)', (row['id'], event, now))
             c.execute('DELETE FROM agent_events WHERE at<?', (now - 604800,))
             c.execute('UPDATE agents SET last_seen=?,address=?,version=?,telemetry=?,capabilities=?,sampled_at=? WHERE id=?', (now, request.remote_addr, str(payload.get('version', ''))[:32], json.dumps(telemetry), json.dumps(capabilities),sampled_at,row['id']))
+            from .metric_history import record
+            record(c,row['machine_id'],'agent',sampled_at or now,telemetry)
             from .diagnostics import poll
             jobs=poll(c,row['id'],now)
             from .actions import poll as action_poll

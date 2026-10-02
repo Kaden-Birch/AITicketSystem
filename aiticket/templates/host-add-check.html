@@ -1,0 +1,1 @@
+{% extends 'base.html' %}{% block content %}<p><a href='/hosts/{{ machines[0].id }}'>← {{ machines[0].name }}</a></p><h1>Add check · {{ machines[0].name }}</h1>{% include 'check-form.html' %}{% endblock %}

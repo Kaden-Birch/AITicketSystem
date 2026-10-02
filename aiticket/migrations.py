@@ -1,6 +1,10 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 24
+CURRENT_VERSION = 25
 MIGRATIONS = {
+    25: (
+        "CREATE TABLE metric_samples(entity_id TEXT NOT NULL,source TEXT NOT NULL,at REAL NOT NULL,metrics TEXT NOT NULL,PRIMARY KEY(entity_id,source,at))",
+        "CREATE INDEX metric_samples_at ON metric_samples(at)",
+    ),
     24: (
         "ALTER TABLE command_jobs ADD COLUMN requires_approval INTEGER NOT NULL DEFAULT 1",
         "UPDATE command_jobs SET requires_approval=0 WHERE machine_id IN (SELECT machine_id FROM command_policies WHERE approval='immediate')",

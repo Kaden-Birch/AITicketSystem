@@ -1,4 +1,4 @@
-324 passed in 30.12s
+326 passed in 30.23s
 
 HTTP opt-in tests cover cookie configuration, URL restrictions, persisted agent enrollment, nonredirecting credential delivery, continued HTTPS verification and isolated Hermes configuration.
 Local Python 3.14.6; temporary databases, fake Hermes adapters and mocked external providers/subprocesses.
@@ -39,3 +39,5 @@ Unified host access: recognized diagnostic classification and mutating syntax re
 Process/SMB/ping milestone: agent-bound process failures open and recover incidents, one-second ping configuration and exact argv, mounted-SMB local-directory rejection, bounded CIFS child timeout, host expandable check rendering, inventory export and invalid ICMP targets. No live Proxmox, AI or Discord calls; live service recovery and SMB outage validation remain to be performed on the deployment.
 
 Agent heartbeat regression: full runtime tests verify two successive heartbeat deliveries despite missing monitoring module and optional check HTTP 404/500. No deployment credentials or live services used.
+
+Host performance workspace: source-separated agent/Proxmox history, seven-day retention, bounded graph buckets and missing-data gaps, authenticated host-specific check creation and empty-history rendering. Full suite 326 passed; final route/template checks 13 passed. Dark-mode workspace and scoped Add check flow visually reviewed with synthetic fixture data. No live model, Discord or host actions performed.

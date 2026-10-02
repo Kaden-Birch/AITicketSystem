@@ -74,6 +74,7 @@ def prune(store, now=None):
         previous = c.execute("SELECT value FROM settings WHERE key='retention_last_run'").fetchone()
         if previous and now - json.loads(previous[0]) < 3600:
             return
+        c.execute('DELETE FROM metric_samples WHERE at<?',(now-604800,))
         days = c.execute("SELECT value FROM settings WHERE key='retention_days'").fetchone()
         cutoff = now - (json.loads(days[0]) if days else 90) * 86400
         # Preserve all evidence attached to incidents, immutable timelines and audit.

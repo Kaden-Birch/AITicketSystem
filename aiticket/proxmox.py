@@ -101,6 +101,9 @@ def discover(store, vault, connection_id, lease_token=None):
                 c.execute('INSERT INTO proxmox_objects(id,cluster_id,kind,object_key,generation,name,node,status,template,present,last_seen,machine_id,check_id) VALUES(?,?,?,?,?,?,?,?,?,1,?,NULL,NULL)',
                           (uid(),connection['cluster_id'],item['kind'],item['key'],generation,item['name'],item['node'],item['status'],item['template'],now))
             c.execute('UPDATE proxmox_objects SET metrics=? WHERE cluster_id=? AND kind=? AND object_key=? AND present=1',(json.dumps(item['metrics']),connection['cluster_id'],item['kind'],item['key']))
+            from .metric_history import record
+            obj=c.execute('SELECT id FROM proxmox_objects WHERE cluster_id=? AND kind=? AND object_key=? AND present=1',(connection['cluster_id'],item['kind'],item['key'])).fetchone()
+            record(c,obj['id'],'proxmox',now,item['metrics'])
         # Absence in a permission-filtered response is not proof of deletion. An
         # administrator explicitly retires old objects before reusing their IDs.
         c.execute('UPDATE proxmox_connections SET last_discovery=? WHERE id=?',(now,connection_id))

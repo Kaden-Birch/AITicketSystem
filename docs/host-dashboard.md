@@ -65,3 +65,11 @@ Keep `/var/lib/aiticket-agent/identity.json` and its execution ledgers; reenroll
 Automated tests use mocked power endpoints/subprocesses. No real host/guest power operation has been run by development tests; live permission/runtime validation remains necessary before enabling controls.
 
 For editing existing hosts, linking previously enrolled agents, viewing unassigned Proxmox resources and opening manual tickets, see [host editing and tickets](host-editing-tickets.md).
+
+## Host performance workspace
+
+Each host now has current CPU, memory, storage and uptime cards, with retained history charts for all supported telemetry (load averages, swap, inodes and memory pressure where supplied). Select **1h / 6h / 24h / 7d**. History starts accumulating after the main application update and is retained for seven days. Missing samples leave gaps; lines show bucket averages and captions show actual minimum/maximum samples. Proxmox allocation and agent filesystem values remain distinct.
+
+System details are in a compact sidebar. Checks expand to show evidence; open tickets and historical tickets are below. **Add check** at the top opens a form already scoped to this host. Configure permissions, host details, associations, manual power and check enable/disable through **Host settings**. Operational power controls remain available on the host page; command history is collapsed until needed.
+
+Only update/rebuild the main application for this workspace (schema 25). No agent or Hermes update is required. Existing data and check settings are retained. Graphs refresh using the existing five-second live page updates; collection speed still depends on the agent reporting and Proxmox discovery intervals.

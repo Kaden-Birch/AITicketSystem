@@ -53,3 +53,5 @@ Schema 22 records AI resolution requests. Successful current investigations can 
 Schema 23 adds durable server-owned work sessions, explicit ticket handling modes and deduplicated intervention requests. Agent-host permissions are unchanged. Public notification URLs are independent of IP-based agent/Hermes transport.
 
 Schema 24 records immutable per-command approval requirements. Unified host settings apply read-only, guarded and full access consistently to shell and general Proxmox requests. Recognized diagnostics bypass approval in read-only/guarded modes; full access bypasses classification and per-command approval. Successful AI completion can release ownership without revoking already preapproved work; explicit cancellation/takeover still fences it.
+
+Host performance history uses schema 25: source-separated agent/machine and Proxmox/object metric samples, indexed by timestamp and retained for seven days. Host charts use at most 120 time buckets per metric with explicit gaps and interval averages; raw extrema are shown separately. History starts with post-upgrade telemetry; previous snapshots are not fabricated into history.
