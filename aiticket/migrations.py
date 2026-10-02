@@ -1,6 +1,14 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 19
+CURRENT_VERSION = 20
 MIGRATIONS = {
+    20: (
+        "ALTER TABLE ai_jobs ADD COLUMN command_tools INTEGER NOT NULL DEFAULT 0",
+        "CREATE TABLE command_policies(machine_id TEXT PRIMARY KEY REFERENCES machines(id),enabled INTEGER NOT NULL DEFAULT 0,approval TEXT NOT NULL DEFAULT 'required',hermes INTEGER NOT NULL DEFAULT 0,external INTEGER NOT NULL DEFAULT 0,timeout INTEGER NOT NULL DEFAULT 120,output_limit INTEGER NOT NULL DEFAULT 8192,version INTEGER NOT NULL)",
+        "CREATE TABLE command_jobs(id TEXT PRIMARY KEY,machine_id TEXT NOT NULL REFERENCES machines(id),agent_id TEXT NOT NULL REFERENCES agents(id),incident_id TEXT REFERENCES incidents(id),ai_job_id TEXT REFERENCES ai_jobs(id),command TEXT NOT NULL,fingerprint TEXT NOT NULL,policy_version INTEGER NOT NULL,timeout INTEGER NOT NULL,output_limit INTEGER NOT NULL,state TEXT NOT NULL,created REAL NOT NULL,expires REAL NOT NULL,dispatch_token TEXT,dispatched REAL,result TEXT,completed REAL)",
+        "CREATE UNIQUE INDEX command_active_agent ON command_jobs(agent_id) WHERE state IN ('awaiting','pending','dispatched','running','cancelling','unknown')",
+        "CREATE TRIGGER command_immutable BEFORE UPDATE OF machine_id,agent_id,incident_id,ai_job_id,command,fingerprint,policy_version,timeout,output_limit,created,expires ON command_jobs BEGIN SELECT RAISE(ABORT,'Command identity is immutable'); END",
+        "CREATE TRIGGER command_no_delete BEFORE DELETE ON command_jobs BEGIN SELECT RAISE(ABORT,'Command ledger is immutable'); END",
+    ),
     19: (
         "ALTER TABLE ai_jobs ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'gateway'",
         "ALTER TABLE ai_jobs ADD COLUMN reasoning_effort TEXT NOT NULL DEFAULT 'low'",

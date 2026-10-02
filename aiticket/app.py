@@ -45,7 +45,7 @@ def create_app(data_dir=None, testing=False):
 
     @app.before_request
     def guard():
-        if request.method == 'POST' and not request.path.startswith(('/api/agent/', '/api/hermes/')):
+        if request.method == 'POST' and not request.path.startswith(('/api/agent/', '/api/hermes/','/api/operations/')):
             if not hmac.compare_digest(session.get('csrf', ''), request.form.get('csrf', '')) or not session.get('csrf'):
                 abort(403)
 
@@ -121,7 +121,89 @@ def create_app(data_dir=None, testing=False):
         from .hostview import detail
         data=detail(store,machine_id)
         if not data: abort(404)
+        from .commands import view as command_view
+        data.update(command_request_id=uid(),command_policy=next(iter(store.rows('SELECT * FROM command_policies WHERE machine_id=?',(machine_id,))),None),command_jobs=[command_view(store,vault,r['id']) for r in store.rows('SELECT id FROM command_jobs WHERE machine_id=? ORDER BY created DESC LIMIT 20',(machine_id,))])
         return render_template('host-detail.html',**data)
+
+    @app.post('/hosts/<machine_id>/command-policy')
+    @login_required
+    def command_policy(machine_id):
+        from .commands import configure
+        if request.form.get('confirm')!='yes': raise ValueError('Confirm arbitrary remote command permissions for this host.')
+        configure(store,machine_id,request.form)
+        return redirect(url_for('host_detail',machine_id=machine_id))
+
+    @app.post('/hosts/<machine_id>/command')
+    @login_required
+    def manual_command(machine_id):
+        from .commands import queue
+        queue(store,vault,machine_id,request.form.get('command'),request.form.get('request_id'),request.form.get('incident_id') or None)
+        return redirect(url_for('host_detail',machine_id=machine_id))
+
+    @app.post('/commands/<identifier>/decide')
+    @login_required
+    def command_decision(identifier):
+        from .commands import decide
+        if request.form.get('confirm')!='yes': raise ValueError('Confirm the exact command or independently verified unknown outcome.')
+        decide(store,identifier,request.form.get('operation'),request.form.get('fingerprint'))
+        machine=store.rows('SELECT machine_id FROM command_jobs WHERE id=?',(identifier,))[0]['machine_id']
+        return redirect(url_for('host_detail',machine_id=machine))
+
+    def command_agent():
+        bearer=request.headers.get('Authorization','')
+        rows=store.rows('SELECT id FROM agents WHERE credential_digest=? AND revoked=0',(digest(bearer[7:]) if bearer.startswith('Bearer ') else '',))
+        if not rows: abort(401)
+        return rows[0]['id']
+
+    @app.post('/api/agent/command-permission')
+    def command_permission():
+        from .commands import permission
+        return permission(store,command_agent(),request.get_json() or {})
+
+    @app.post('/api/agent/command-result')
+    def command_result():
+        from .commands import complete
+        return complete(store,command_agent(),request.get_json() or {})
+
+    def command_tool_action(payload,ai_job=None,external=False):
+        from .commands import queue,view,decide
+        if not isinstance(payload,dict) or set(payload)-{'action','machine_id','incident_id','command','id'}: raise ValueError('Invalid command tool envelope.')
+        if any(k in payload and (not isinstance(payload[k],str) or len(payload[k])>100) for k in ('id','machine_id','incident_id')): raise ValueError('Invalid command target identity.')
+        action=payload.get('action')
+        if ai_job:
+            with store.connect() as c:
+                from .commands import ai_allowed
+                job=ai_allowed(c,ai_job)
+                if not job: abort(403)
+                incident=store.rows('SELECT machine_id FROM incidents WHERE id=?',(job['incident_id'],))[0]
+                machine=incident['machine_id'];incident_id=job['incident_id']
+        else:
+            machine=payload.get('machine_id');incident_id=payload.get('incident_id')
+        if action=='targets':
+            return {'targets':store.rows('SELECT m.id,m.name FROM machines m JOIN command_policies p ON p.machine_id=m.id WHERE p.enabled=1 AND '+('m.id=?' if ai_job else 'p.external=1'),(machine,) if ai_job else ())}
+        if action=='run':
+            identifier=queue(store,vault,machine,payload.get('command'),payload.get('id'),incident_id,ai_job,external)
+        else:
+            identifier=payload.get('id')
+            rows=store.rows('SELECT machine_id,ai_job_id FROM command_jobs WHERE id=?',(identifier,))
+            if not rows or (ai_job and rows[0]['ai_job_id']!=ai_job): abort(403)
+            machine=rows[0]['machine_id']
+            if external and not store.rows('SELECT 1 FROM command_policies WHERE machine_id=? AND external=1',(machine,)): abort(403)
+            if action=='cancel': decide(store,identifier,'cancel')
+            elif action!='status': raise ValueError('Unknown command tool action.')
+        return view(store,vault,identifier)
+
+    @app.post('/api/hermes/<job_id>/command')
+    def ai_command_tool(job_id):
+        execution_auth(job_id)
+        return command_tool_action(request.get_json() or {},ai_job=job_id)
+
+    @app.post('/api/operations/command')
+    def external_command_tool():
+        from .hermes_bridge import authenticate
+        secret=store.setting('hermes_secret')
+        if not secret or not authenticate(vault.decrypt(secret),request.get_data(),request.headers): abort(401)
+        return command_tool_action(request.get_json() or {},external=True)
 
     @app.post('/hosts/<machine_id>/edit')
     @login_required
@@ -600,10 +682,11 @@ def create_app(data_dir=None, testing=False):
         if not isinstance(host_info,dict) or set(host_info)-{'hostname','os','kernel','architecture'} or any(not isinstance(v,str) or len(v)>200 for v in host_info.values()):
             abort(400)
         capabilities=payload.get('capabilities',{})
-        if not isinstance(capabilities,dict) or set(capabilities)-{'operations','services','actions','action_services','power_operations'} or any(not isinstance(capabilities.get(k,[]),list) for k in ('operations','services')):
+        if not isinstance(capabilities,dict) or set(capabilities)-{'operations','services','actions','action_services','power_operations','shell_commands'} or any(not isinstance(capabilities.get(k,[]),list) for k in ('operations','services')):
             abort(400)
         if len(capabilities.get('operations',[]))>3 or any(x not in ('process_summary','service_status','service_logs') for x in capabilities.get('operations',[])) or len(capabilities.get('services',[]))>20 or any(not isinstance(x,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',x) for x in capabilities.get('services',[])):
             abort(400)
+        if type(capabilities.get('shell_commands',False)) is not bool: abort(400)
         power_operations=capabilities.get('power_operations',[])
         if not isinstance(power_operations,list) or len(power_operations)>2 or any(op not in ('host_restart','host_shutdown') for op in power_operations):
             abort(400)
@@ -622,7 +705,8 @@ def create_app(data_dir=None, testing=False):
             if c.execute('SELECT 1 FROM agent_events WHERE agent_id=? AND event_id=?', (row['id'], event)).fetchone():
                 from .diagnostics import poll
                 from .actions import poll as action_poll
-                return {'status': 'duplicate', 'jobs': poll(c,row['id'],time.time()), 'actions': action_poll(c,store,row['id'],time.time()) or power_poll(c,store,row['id'],time.time())}
+                from .commands import poll as command_poll
+                return {'commands':command_poll(c,store,vault,row['id'],time.time()),'status': 'duplicate', 'jobs': poll(c,row['id'],time.time()), 'actions': action_poll(c,store,row['id'],time.time()) or power_poll(c,store,row['id'],time.time())}
             now = time.time()
             c.execute('UPDATE agents SET host_info=? WHERE id=?',(json.dumps(host_info),row['id']))
             c.execute('INSERT INTO agent_events VALUES(?,?,?)', (row['id'], event, now))
@@ -632,7 +716,9 @@ def create_app(data_dir=None, testing=False):
             jobs=poll(c,row['id'],now)
             from .actions import poll as action_poll
             actions=action_poll(c,store,row['id'],now) or power_poll(c,store,row['id'],now)
-        return {'status': 'accepted', 'jobs': jobs, 'actions': actions}
+            from .commands import poll as command_poll
+            commands=command_poll(c,store,vault,row['id'],now)
+        return {'status': 'accepted', 'jobs': jobs, 'actions': actions,'commands':commands}
 
     @app.route('/proxmox', methods=['GET','POST'])
     @login_required
@@ -832,6 +918,8 @@ def create_app(data_dir=None, testing=False):
                 mode=f.get('execution_mode','gateway')
                 if mode not in ('gateway','codex'): raise ValueError('Unknown AI execution mode.')
                 bridge['execution_mode']=mode
+                bridge['command_tools']=f.get('command_tools')=='yes'
+                if bridge['command_tools'] and mode!='codex': raise ValueError('Operational command tools require Codex mode.')
                 if mode=='codex':
                     from .codex_mode import options
                     bridge.update(options({'reasoning':f.get('reasoning','low'),**{k:int(f.get(k,v)) for k,v in [('incident_runs',3),('daily_runs',10),('monthly_runs',100),('timeout_seconds',90)]}}))
@@ -859,7 +947,7 @@ def create_app(data_dir=None, testing=False):
                     result = bridge_request(vault, {'id': uid(), 'endpoint': bridge['url'], 'bridge_secret': secret}, 'GET', '/v1/capabilities', ca=bridge.get('ca'))
                 except Exception:
                     raise ValueError('Bridge check failed. Review reachability, TLS, authentication and installed compatibility.')
-                if result.get('version') != 1 or result.get('tools') != [] or result.get('model_gateway') is not (bridge.get('execution_mode','gateway')=='gateway') or result.get('execution_mode','gateway')!=bridge.get('execution_mode','gateway') or result.get('compatible') is not True:
+                if result.get('version') != 1 or result.get('tools') != (['aiticket_host'] if bridge.get('command_tools') else []) or result.get('model_gateway') is not (bridge.get('execution_mode','gateway')=='gateway') or result.get('execution_mode','gateway')!=bridge.get('execution_mode','gateway') or result.get('compatible') is not True:
                     raise ValueError('Bridge reports an incompatible or unrestricted Hermes adapter.')
                 store.save_many({'hermes_validation': {'at': time.time(), 'url': bridge['url'], 'execution_mode':bridge.get('execution_mode','gateway'), 'workspace_modes': [m for m in ('advice', 'exploration','recovery_proposal') if m in result.get('workspace_modes', [])]}}, actor='user')
                 flash('Signed bridge compatibility check passed. No model request was made.')

@@ -159,6 +159,9 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
         c.execute('INSERT INTO ai_jobs(id,incident_id,state,created,expires,model,allowance,max_calls,evidence,credential_digest,credential,endpoint,bridge_secret,next_attempt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                   (job_id, incident_id, 'pending', now, now+3600, cfg['model'], min(cfg['triage_tokens'], cfg['incident_tokens']), min(cfg['max_turns'], 100), evidence, digest(token), vault.encrypt(token), bridge['url'].rstrip('/'), setting(c, 'hermes_secret'), now))
         c.execute('UPDATE ai_jobs SET mode=?,request_id=?,request_fingerprint=?,allowance=? WHERE id=?', (mode, request_id, fingerprint, min(cfg['triage_tokens'], cfg['incident_tokens']) if mode=='triage' else cfg['incident_tokens'], job_id))
+        if bridge.get('command_tools'):
+            if not codex: raise ValueError('Command tools currently require Codex mode.')
+            c.execute('UPDATE ai_jobs SET command_tools=1 WHERE id=?',(job_id,))
         if codex:
             c.execute("UPDATE ai_jobs SET execution_mode='codex',reasoning_effort=?,run_timeout=?,allowance=0,max_calls=1 WHERE id=?",(codex['reasoning'],codex['timeout_seconds'],job_id))
         generation = ownership['generation']+1
@@ -414,7 +417,9 @@ def tick(store, vault, now=None):
         if was_pending:
             body = json.dumps({'version': 1, 'execution_id': job['id'], 'model': job['model'], 'evidence': job['evidence'], 'credential': vault.decrypt(job['credential']), 'max_calls': job['max_calls'], 'expires': job['expires']}, separators=(',', ':'), sort_keys=True).encode()
             if job['execution_mode']=='codex':
-                payload=json.loads(body);payload.update(execution_mode='codex',reasoning=job['reasoning_effort'],timeout_seconds=job['run_timeout'])
+                payload=json.loads(body)
+                if job['command_tools']: payload['command_tools']=True
+                payload.update(execution_mode='codex',reasoning=job['reasoning_effort'],timeout_seconds=job['run_timeout'])
                 body=json.dumps(payload,separators=(',',':'),sort_keys=True).encode()
             document = bridge_request(vault, job, 'POST', '/v1/executions', body, bridge.get('ca'))
         else:

@@ -1,4 +1,4 @@
-234 passed in 22.81s
+246 passed in 24.99s
 
 HTTP opt-in tests cover cookie configuration, URL restrictions, persisted agent enrollment, nonredirecting credential delivery, continued HTTPS verification and isolated Hermes configuration.
 Local Python 3.14.6; temporary databases, fake Hermes adapters and mocked external providers/subprocesses.
@@ -15,3 +15,5 @@ Codex subscription mode: transactional queue/run limits, cancellation counting, 
 Host editing/manual ticket milestone: dependency-cycle rejection, retained enrollment credential and ticket identity during late Proxmox linking, managed node dependencies, unassigned dashboard metrics and node guest lists, manual ticket creation/independent closure, CSRF and invalid-target rejection, disabled-source admission/export exclusion, and explicit Codex requests with automatic-triage exclusion. Host editor and preselected manual ticket form visually reviewed with local fixture data. No live agent, Proxmox or model action executed.
 
 Codex stream compatibility: the native Responses adapter receives no Chat Completions stream override; gateway mode retains non-streaming requests. The fake Codex transport asserts stream-key exclusion while checking fixed model/reasoning and tool isolation. No live retry executed.
+
+General remote command milestone: authenticated per-host arbitrary shell queue, exact-command approval/immediate execution, immutable UUID identity and no dispatch replay, agent restart/unknown reconciliation, cancellation, nonzero exit handling, combined output/time bounds, ticket-bound operational tool isolation, independent MCP/HMAC access, command key rotation and inventory import fencing verified. Harmless local shell fixtures executed; no live privileged, Proxmox, Hermes-tool or model operations executed. Host command controls visually checked locally. Installed Hermes tool registration and root execution require deployment validation.

@@ -97,3 +97,5 @@ Automated tests use fake authentication resolvers and agents; development has ma
 ### Codex stream-flag compatibility error
 
 Update the bridge source and restart its service if a run reports “Codex Responses stream flag is only allowed in fallback streaming requests.” Codex mode omits the Chat Completions `stream` request override and lets Hermes manage its native Responses transport. API gateway mode retains its non-streaming override. Keep the exact model ID lowercase: `gpt-6.1-sol`. Failed runs still count against admission limits; explicitly raise the trial limit before queueing a new execution. A restart request written in a ticket remains read-only AI evidence, not power-operation authorization; use the host power broker for an actual restart.
+
+For operational investigations and independent Hermes command access, see [general remote commands](remote-commands.md). That explicit opt-in adds one scoped command tool and up to 12 model iterations; the read-only default described above remains available.

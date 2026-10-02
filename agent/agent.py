@@ -174,6 +174,8 @@ def main():
     base = endpoint(state['server'],allow_http=allow_http)
     from diagnostics import load_policy,capabilities
     policy=load_policy(args.policy)
+    from commands import recover,drain,start,policy_config
+    recover(state);write_state(path,state)
     running = True
     def stop(*_):
         nonlocal running
@@ -184,6 +186,13 @@ def main():
     while running:
         try:
             policy=load_policy(args.policy)
+            drain(state,path,write_state)
+            while state.get('command_results'):
+                try:
+                    send(base,'/api/agent/command-result',state['command_results'][0],state.get('ca'),state['credential'])
+                except urllib.error.HTTPError as exc:
+                    if exc.code not in (400,409): raise
+                state['command_results'].pop(0);write_state(path,state)
             if state.get('action_result'):
                 send(base,'/api/agent/action-result',state['action_result'],state.get('ca'),state.get('action_credential',''))
                 state.pop('action_result',None)
@@ -200,6 +209,7 @@ def main():
             pending = state.get('pending')
             if not pending:
                 advertised=capabilities(policy)
+                advertised['shell_commands']=policy_config(args.policy).get('enabled') is True
                 if not state.get('action_credential'):
                     advertised.pop('power_operations',None)
                     advertised.pop('actions',None)
@@ -210,6 +220,7 @@ def main():
             response=send(base, '/api/agent/heartbeat', pending, state.get('ca'), state['credential'])
             state.pop('pending', None)
             write_state(path, state)
+            start(state,path,response.get('commands',[]),write_state,lambda job:send(base,'/api/agent/command-permission',{'id':job['id'],'dispatch_token':job['dispatch_token']},state.get('ca'),state['credential']).get('allowed') is True,lambda:policy_config(args.policy))
             process_jobs(state,path,response.get('jobs',[]),policy)
             process_actions(state,path,response.get('actions',[]),policy,lambda payload:send(base,'/api/agent/action-authorize',payload,state.get('ca'),state.get('action_credential','')),policy_loader=lambda:load_policy(args.policy))
             delay = 30

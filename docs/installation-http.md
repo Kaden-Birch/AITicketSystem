@@ -72,6 +72,7 @@ sudo install -d -m 0755 /opt/aiticket-agent
 sudo install -m 0644 agent/agent.py /opt/aiticket-agent/agent.py
 sudo install -m 0644 agent/diagnostics.py /opt/aiticket-agent/diagnostics.py
 sudo install -m 0644 agent/actions.py /opt/aiticket-agent/actions.py
+sudo install -m 0644 agent/commands.py /opt/aiticket-agent/commands.py
 sudo install -d -o aiticket-agent -g aiticket-agent -m 0700 /var/lib/aiticket-agent
 sudo install -m 0644 agent/aiticket-agent.service /etc/systemd/system/aiticket-agent.service
 ```
@@ -127,3 +128,5 @@ For metric host workspaces, Proxmox guest status, optional manual power controls
 ## Hermes with a Codex account
 
 To use your Codex subscription without an API key, follow [Hermes Codex setup](hermes-codex.md). The bridge-to-application connection can use HTTP with the same explicit transport opt-in. Codex itself connects to its HTTPS provider endpoint.
+
+General command execution is an explicit opt-in. Follow [remote command setup](remote-commands.md) for agent OS permissions, host policy and operational/independent Hermes tools.

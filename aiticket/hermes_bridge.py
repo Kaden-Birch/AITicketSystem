@@ -22,6 +22,7 @@ def isolated_environment(source, home, gateway, ca=None):
            'PYTHONPATH': str(Path(__file__).resolve().parent.parent)+os.pathsep+str(source),
            'AITICKET_HERMES_SOURCE': str(source), 'AITICKET_GATEWAY': gateway,
            'PYTHONUNBUFFERED': '1', 'HERMES_SINGLE_QUERY_SESSION': '1'}
+    if os.environ.get('AITICKET_COMMAND_TOOLS')=='1': env['AITICKET_COMMAND_TOOLS']='1'
     if os.environ.get('AITICKET_EXECUTION_MODE')=='codex':
         env.update(AITICKET_EXECUTION_MODE='codex',AITICKET_CODEX_HOME=os.environ.get('AITICKET_CODEX_HOME',''))
     if os.environ.get('AITICKET_ALLOW_INSECURE_HTTP')=='1':
@@ -70,7 +71,7 @@ class Ledger:
 
     def accept(self, job):
         import hashlib
-        if not isinstance(job, dict) or set(job) != ({'version','execution_id','model','evidence','credential','max_calls','expires'} | ({'execution_mode','reasoning','timeout_seconds'} if job.get('execution_mode')=='codex' else set())) or job['version'] != 1:
+        if not isinstance(job, dict) or set(job) != ({'version','execution_id','model','evidence','credential','max_calls','expires'} | ({'execution_mode','reasoning','timeout_seconds'} if job.get('execution_mode')=='codex' else set()) | ({'command_tools'} if job.get('command_tools') is True else set())) or job['version'] != 1:
             raise ValueError('Invalid execution envelope.')
         if job.get('execution_mode')=='codex' and (job.get('reasoning') not in ('low','medium','high') or type(job.get('timeout_seconds')) is not int or not 15<=job['timeout_seconds']<=180 or job.get('max_calls')!=1):
             raise ValueError('Invalid Codex subscription run controls.')
@@ -144,6 +145,8 @@ def execution_permission(job,gateway,ca=None):
 
 
 def run_child(job, python, source, gateway, ca=None):
+    if job.get('command_tools') and os.environ.get('AITICKET_COMMAND_TOOLS')!='1':
+        return {'state':'failed','summary':'Command tools are not enabled on this bridge.'}
     if job.get('execution_mode','gateway')!=os.environ.get('AITICKET_EXECUTION_MODE','gateway'):
         return {'state':'failed','summary':'Stored execution mode no longer matches this bridge; no model call started.'}
     with tempfile.TemporaryDirectory() as directory:
@@ -181,7 +184,7 @@ def run_child(job, python, source, gateway, ca=None):
         return result
 
 
-def create_bridge(ledger, secret, compatible=False, execution_mode='gateway'):
+def create_bridge(ledger, secret, compatible=False, execution_mode='gateway',command_tools=False):
     app = Flask(__name__)
     app.config['MAX_CONTENT_LENGTH'] = 65536
 
@@ -199,7 +202,7 @@ def create_bridge(ledger, secret, compatible=False, execution_mode='gateway'):
 
     @app.get('/v1/capabilities')
     def capabilities():
-        return signed({'version': 1, 'compatible': compatible, 'tools': [], 'model_gateway': execution_mode=='gateway', 'execution_mode':execution_mode, 'workspace_modes': ['advice', 'exploration','recovery_proposal']})
+        return signed({'version': 1, 'compatible': compatible, 'tools': ['aiticket_host'] if command_tools else [], 'model_gateway': execution_mode=='gateway', 'execution_mode':execution_mode, 'workspace_modes': ['advice', 'exploration','recovery_proposal']})
 
     @app.post('/v1/executions')
     def accept():
@@ -209,6 +212,7 @@ def create_bridge(ledger, secret, compatible=False, execution_mode='gateway'):
             job=request.get_json()
             if not isinstance(job,dict) or job.get('execution_mode','gateway')!=execution_mode:
                 raise ValueError('Execution mode does not match this bridge.')
+            if bool(job.get('command_tools'))!=command_tools: raise ValueError('Command tool capability does not match this bridge.')
             return signed(ledger.accept(job))
         except ValueError:
             abort(400)
@@ -241,6 +245,7 @@ def main():
     parser.add_argument('--gateway', required=True, help='Application IP URL; HTTP requires AITICKET_ALLOW_INSECURE_HTTP=1')
     parser.add_argument('--ca')
     parser.add_argument('--execution-mode',choices=['gateway','codex'],default='gateway')
+    parser.add_argument('--command-tools',action='store_true',help='Enable the operational host tool (Codex only)')
     parser.add_argument('--codex-home',help='Dedicated Hermes OAuth profile; Codex mode only')
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8090)
@@ -252,6 +257,10 @@ def main():
         os.environ.update(AITICKET_EXECUTION_MODE='codex',AITICKET_CODEX_HOME=args.codex_home)
     else:
         os.environ.pop('AITICKET_EXECUTION_MODE',None);os.environ.pop('AITICKET_CODEX_HOME',None)
+    if args.command_tools:
+        if args.execution_mode!='codex': raise SystemExit('Command tools require Codex mode.')
+        os.environ['AITICKET_COMMAND_TOOLS']='1'
+    else: os.environ.pop('AITICKET_COMMAND_TOOLS',None)
     secret = Path(args.secret_file).read_text().strip()
     if len(secret)<16:
         raise SystemExit('Use a bridge secret of at least 16 characters.')
@@ -268,7 +277,7 @@ def main():
         worker.start()
     from waitress import serve
     try:
-        serve(create_bridge(ledger, secret, compatible,args.execution_mode), host=args.host, port=args.port, threads=4)
+        serve(create_bridge(ledger, secret, compatible,args.execution_mode,args.command_tools), host=args.host, port=args.port, threads=4)
     finally:
         stop.set()
         if compatible:

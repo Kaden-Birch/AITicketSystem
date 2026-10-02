@@ -2,7 +2,7 @@
 
 Self-hosted monitoring with useful incidents even when AI and the internet are unavailable.
 
-**Status: monitoring plus a restricted AI integration milestone; the full product is not complete.** AI defaults to disabled pending installed-Hermes/provider validation. API mode enforces per-call token and configured-price allowances through its budget gateway. Optional [Hermes Codex subscription mode](docs/hermes-codex.md) uses a dedicated OAuth login and separate run/time limits, without an API key or API spending meter. Recovery defaults to disabled; approval-required controls support allowlisted service recovery and separately enabled manual host/guest power operations.
+**Status: monitoring plus configurable AI operations; the full product is not complete.** AI defaults to disabled pending installed-Hermes/provider validation. API mode enforces per-call token and configured-price allowances through its budget gateway. Optional [Hermes Codex subscription mode](docs/hermes-codex.md) uses a dedicated OAuth login and separate run/time limits, without an API key or API spending meter. General host commands and operational Hermes tools default to disabled and require local/host permission. Recovery defaults to disabled; approval-required controls support allowlisted service recovery and separately enabled manual host/guest power operations.
 
 Included: a metric dashboard with clickable host workspaces, Proxmox guest status, ticket history, authenticated UI, stable machine inventory, HTTP/TCP and read-only Proxmox checks, configurable failure/recovery thresholds, parent suppression, temporary maintenance, deterministic reports, manual notes/resolution, durable Discord delivery, filtered incident history, immutable configuration audit, transactional schema upgrades, and DHCP-safe Linux agent enrollment/telemetry.
 
@@ -85,3 +85,5 @@ Milestone 17 adds [host dashboards and manual power controls](docs/host-dashboar
 Milestone 18 adds [Hermes Codex subscription mode](docs/hermes-codex.md), schema 19, exact model/reasoning snapshots, transactional run limits, dedicated OAuth isolation and cancellation supervision. Live installed-Hermes/login/model validation remains pending.
 
 Milestone 19 adds [host editing, Proxmox visibility and manual tickets](docs/host-editing-tickets.md): retained machine identity, late association with agent hosts, unassigned resource dashboard cards and node guest views, and user-reported machine-tagged tickets with explicit AI requests and independent resolution.
+
+Milestone 20 adds [general remote commands](docs/remote-commands.md): arbitrary shell execution through outbound agents, per-host immediate/approval policies, isolated Codex command tools and independent Hermes MCP access, bounded results, cancellation, immutable identities and non-replaying dispatch. All execution access defaults disabled pending explicit local/GUI configuration.

@@ -59,6 +59,7 @@ def propose(store, incident_id, agent_id, service_id, diagnostic_id, rationale, 
         raise ValueError('Supply rationale, impact, risk and alternatives (1–1000 characters each).')
     with store.connect() as c:
         c.execute('BEGIN IMMEDIATE')
+        if c.execute("SELECT 1 FROM command_jobs j JOIN agents a ON a.id=j.agent_id WHERE a.id=? AND j.state IN ('awaiting','pending','dispatched','running','cancelling','unknown')",(agent_id,)).fetchone(): raise ValueError('Complete or reconcile remote commands before service recovery.')
         draft_data=None
         if draft_job_id:
             previous=c.execute('SELECT proposal_id FROM draft_adoptions WHERE job_id=?',(draft_job_id,)).fetchone()

@@ -109,6 +109,11 @@ def rotate_key(store, old_vault, destination):
             c.execute('UPDATE ai_jobs SET credential=?,bridge_secret=? WHERE id=?', (new_vault.encrypt(old_vault.decrypt(row['credential'])), new_vault.encrypt(old_vault.decrypt(row['bridge_secret'])), row['id']))
         for row in c.execute('SELECT machine_id,token_secret FROM power_policies WHERE token_secret IS NOT NULL').fetchall():
             c.execute('UPDATE power_policies SET token_secret=? WHERE machine_id=?',(new_vault.encrypt(old_vault.decrypt(row['token_secret'])),row['machine_id']))
+        trigger=c.execute("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='command_immutable'").fetchone()[0]
+        c.execute('DROP TRIGGER command_immutable')
+        for row in c.execute('SELECT id,command FROM command_jobs').fetchall():
+            c.execute('UPDATE command_jobs SET command=? WHERE id=?',(new_vault.encrypt(old_vault.decrypt(row['command'])),row['id']))
+        c.execute(trigger)
         store.audit(c, 'encryption.rotated', 'vault', actor='console')
     return new_vault
 
@@ -137,6 +142,7 @@ def archive_incident(store,incident_id,restore=False):
             'sources':[dict(r) for r in c.execute('SELECT * FROM incident_sources WHERE incident_id=?',(incident_id,))],
             'observations':[dict(r) for r in c.execute('SELECT o.* FROM observations o JOIN incident_observations i ON i.observation_id=o.id WHERE i.incident_id=? ORDER BY o.at',(incident_id,))],
             'timeline':[dict(r) for r in c.execute('SELECT * FROM timeline WHERE incident_id=? ORDER BY at',(incident_id,))],
+            'commands':[dict(r) for r in c.execute('SELECT id,machine_id,agent_id,ai_job_id,fingerprint,state,created,result,completed FROM command_jobs WHERE incident_id=?',(incident_id,))],
             'diagnostics':[dict(r) for r in c.execute('SELECT id,agent_id,operation,parameters,state,created,result,completed FROM diagnostic_jobs WHERE incident_id=?',(incident_id,))],
             'ai_messages':[dict(r) for r in c.execute('SELECT * FROM ai_messages WHERE incident_id=? ORDER BY created',(incident_id,))],
             'proposals':[dict(r) for r in c.execute('SELECT id,version,parent_id,payload,payload_hash,state,created,result,completed,verification FROM action_proposals WHERE incident_id=?',(incident_id,))],
