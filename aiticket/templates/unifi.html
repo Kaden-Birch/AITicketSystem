@@ -4,14 +4,13 @@
 {% for connection in connections + [none] %}
 <section class="card" data-live-key="unifi-{{ connection.id if connection else 'new' }}">
 <h2>{{ connection.name if connection else 'Add connection' }}</h2>
-{% if connection %}<p><a href="/hosts/{{ connection.machine_id }}">Host workspace</a> · <a href="/hosts/{{ connection.machine_id }}/settings">Host settings</a> · API access is always read-only.</p>{% endif %}
+{% if connection %}<p><a href="/hosts/{{ connection.machine_id }}">Monitoring workspace</a> · API access is always read-only.</p>{% endif %}
 <details {% if not connection %}open{% endif %}><summary>{{ 'Connection settings' if connection else 'Configure Network or NAS' }}</summary>
 <form method="post" action="/unifi">
 <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ connection.id if connection else '' }}">
 <label>Name<input name="name" required value="{{ connection.name if connection else '' }}"></label>
 <label>Application<select name="kind"><option value="network">UniFi Network</option><option value="drive" {% if connection and connection.kind=='drive' %}selected{% endif %}>UniFi Drive / UNAS (experimental)</option></select></label>
-<label>Associated host<select name="machine_id" required>{% for machine in machines %}<option value="{{ machine.id }}" {% if connection and connection.machine_id==machine.id %}selected{% endif %}>{{ machine.name }}</option>{% endfor %}</select></label>
-<p>Add the router or NAS under Hosts &amp; checks first. The integration check and its tickets appear on that host.</p>
+<p>This standalone connection creates its own monitoring record and tickets. No existing host is required.</p>
 <label>Console address<input name="url" type="url" required placeholder="https://10.128.2.1" value="{{ connection.url if connection else '' }}"></label>
 <label>API key<input name="secret" type="password" autocomplete="new-password" {% if not connection %}required{% endif %}></label><small>Leave blank to retain the existing encrypted key.</small>
 <label>Network site ID (leave blank initially to discover sites)<input name="site" value="{{ connection.site if connection else '' }}"></label>
@@ -23,10 +22,11 @@
 <label>Trusted CA file on application server<input name="ca" value="{{ connection.ca or '' if connection else '' }}"></label>
 <label><input type="checkbox" name="insecure_tls" value="yes" {% if connection and connection.insecure_tls %}checked{% endif %}>Allow self-signed certificate without verification for this connection</label>
 <label><input type="checkbox" name="ai_context" value="yes" {% if connection and connection.ai_context %}checked{% endif %}>Include this Network site's read-only observations in other hosts' AI investigations</label>
-<p>Its own host's tickets always receive available telemetry. Shared Network context is optional and bounded; the AI receives no API key and cannot refresh or change UniFi through its tools.</p>
+<p>This connection's tickets always receive available telemetry. Shared Network context is optional and bounded; the AI receives no API key and cannot refresh or change UniFi through its tools.</p>
 <button>Save read-only connection</button></form></details>
 {% if connection %}
 <form method="post" action="/unifi"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ connection.id }}"><input type="hidden" name="operation" value="refresh"><button>Test / refresh telemetry</button></form>
+<details><summary>Connection tickets</summary>{% for ticket in connection.tickets %}<p><a href="/incidents/{{ ticket.id }}">{{ ticket.status }} · {{ ticket.first_seen|timestamp }} · {{ ticket.id }}</a></p>{% else %}<p>No tickets yet.</p>{% endfor %}</details>
 {% if connection.snapshot %}
 <p>Last collection: {{ connection.snapshot.sampled_at|timestamp }} · {{ connection.kind }}{% if connection.snapshot.experimental %} · Experimental interface{% endif %}</p>
 {% for warning in connection.snapshot.get('warnings',[]) %}<p>{{ warning }}</p>{% endfor %}

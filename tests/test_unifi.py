@@ -33,7 +33,7 @@ def test_read_boundary_and_redaction(environment,monkeypatch):
     assert len(calls)==3 and all(c[1]['allow_redirects'] is False for c in calls)
     assert all(c[1]['headers']['X-API-KEY']=='private-key' for c in calls)
     assert 'private-key' not in json.dumps(result) and 'password' not in json.dumps(result)
-    with store.connect() as c: assert 'private-key' not in json.dumps(unifi.ai_context(c,'host'))
+    with store.connect() as c: assert 'private-key' not in json.dumps(unifi.ai_context(c,row['machine_id']))
 
 
 def test_partial_drive_and_storage_alert(environment,monkeypatch):
@@ -123,6 +123,49 @@ def test_collected_ui_and_ai_size_budget(signed_in,monkeypatch):
     snapshot={'sampled_at':time.time(),'readings':{'clients':{'items':[{'id':'x'*200}]*100}},'errors':{}}
     with store.connect() as c:
         c.execute('UPDATE unifi_connections SET snapshot=?',(json.dumps(snapshot),))
-        context=unifi.ai_context(c,'host')
+        context=unifi.ai_context(c,row['machine_id'])
         assert len(json.dumps(context))<5000
         assert 'Omitted' in context[0]['snapshot']['errors']['clients']
+
+
+def test_standalone_setup_without_any_hosts(signed_in):
+    client,store,vault,csrf=signed_in
+    assert store.rows('SELECT id FROM machines')==[]
+    response=client.post('/unifi',data={'csrf':csrf,'name':'Home Network','kind':'network','url':'https://10.0.0.1','secret':'private-key'})
+    assert response.status_code==302
+    row=store.rows('SELECT * FROM unifi_connections')[0]
+    machine=store.rows('SELECT * FROM machines')[0]
+    assert machine['id']==row['machine_id']=='unifi:'+row['id']
+    assert machine['name']=='UniFi Home Network'
+    page=client.get('/unifi').data
+    assert b'Associated host' not in page and b'name="machine_id"' not in page
+    response=client.post('/unifi',data={'csrf':csrf,'id':row['id'],'name':'Renamed','kind':'network','url':'https://10.0.0.1','secret':'','machine_id':'unrelated-host'})
+    assert response.status_code==302
+    assert store.rows('SELECT machine_id FROM unifi_connections')[0]['machine_id']==machine['id']
+    assert store.rows('SELECT name FROM machines')[0]['name']=='UniFi Renamed'
+
+
+def test_migration_detaches_existing_connection_preserving_history(environment):
+    from aiticket.db import Store
+    from aiticket.engine import observe
+    _,store,vault=environment
+    row=configured(store,vault)
+    observe(store,row['check_id'],False,{'reason':'test'},now=1)
+    observe(store,row['check_id'],False,{'reason':'test'},now=2)
+    observe(store,row['check_id'],False,{'reason':'test'},now=3)
+    incident=store.rows('SELECT * FROM incidents')[0]
+    secret=row['secret']
+    # Reconstruct the immediately preceding schema's required host association.
+    with store.connect() as c:
+        c.execute('UPDATE unifi_connections SET machine_id=?',('host',))
+        c.execute('UPDATE checks SET machine_id=? WHERE id=?',('host',row['check_id']))
+        c.execute('UPDATE incidents SET machine_id=?',('host',))
+        c.execute('DELETE FROM machines WHERE id=?',(row['machine_id'],))
+        c.execute('UPDATE schema_version SET version=26')
+    migrated=Store(store.path)
+    connection=migrated.rows('SELECT * FROM unifi_connections')[0]
+    assert connection['secret']==secret and connection['check_id']==row['check_id']
+    assert connection['machine_id']==row['machine_id']
+    assert migrated.rows('SELECT id,machine_id FROM incidents')[0]=={'id':incident['id'],'machine_id':row['machine_id']}
+    assert len(migrated.rows('SELECT * FROM observations'))==3
+    assert migrated.rows('SELECT name FROM machines WHERE id=?',('host',))[0]['name']=='NAS'

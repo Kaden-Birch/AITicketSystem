@@ -928,8 +928,10 @@ def create_app(data_dir=None, testing=False):
                 flash('UniFi read-only connection saved; monitoring is scheduled.')
             return redirect(url_for('unifi_page'))
         rows=store.rows('SELECT u.id,u.name,u.kind,u.url,u.ca,u.insecure_tls,u.site,u.machine_id,u.ai_context,u.check_id,u.snapshot,c.interval,c.severity,c.fail_after,c.recover_after FROM unifi_connections u JOIN checks c ON c.id=u.check_id ORDER BY u.name')
-        for row in rows: row['snapshot']=json.loads(row['snapshot']) if row['snapshot'] else None
-        return render_template('unifi.html',connections=rows,machines=store.rows('SELECT id,name FROM machines ORDER BY name'))
+        for row in rows:
+            row['snapshot']=json.loads(row['snapshot']) if row['snapshot'] else None
+            row['tickets']=store.rows('SELECT id,status,first_seen FROM incidents WHERE check_id=? ORDER BY first_seen DESC LIMIT 20',(row['check_id'],))
+        return render_template('unifi.html',connections=rows)
 
     @app.route('/proxmox', methods=['GET','POST'])
     @login_required

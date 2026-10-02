@@ -124,13 +124,12 @@ def save(store,vault,form):
     identifier=form.get('id') or uid()
     old=store.rows('SELECT * FROM unifi_connections WHERE id=?',(identifier,))
     old=old[0] if old else None
-    if old and form.get('machine_id')!=old['machine_id']: raise ValueError('An existing connection keeps its host association to preserve ticket history.')
     kind=form.get('kind','network')
     if kind not in ('network','drive'): raise ValueError('Choose Network or Drive.')
     url=validate_url(form.get('url','').rstrip('/')); parts=urlsplit(url)
     if parts.path or parts.query: raise ValueError('Enter only the console address, without an API path or query.')
-    name=form.get('name','').strip()[:100]; machine=form.get('machine_id'); site=form.get('site','').strip()
-    if not name or not store.rows('SELECT id FROM machines WHERE id=?',(machine,)): raise ValueError('Choose a name and an existing host.')
+    name=form.get('name','').strip()[:100]; machine='unifi:'+identifier; site=form.get('site','').strip()
+    if not name: raise ValueError('Enter a connection name.')
     if site and not re.fullmatch('[A-Za-z0-9-]{1,100}',site): raise ValueError('Invalid site ID.')
     secret=form.get('secret','').strip()
     if secret and (len(secret)>1000 or '\n' in secret or '\r' in secret): raise ValueError('Invalid API key.')
@@ -145,6 +144,7 @@ def save(store,vault,form):
     check=old['check_id'] if old else uid()
     with store.connect() as c:
         c.execute('BEGIN IMMEDIATE')
+        c.execute('INSERT INTO machines(id,name,created) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name',(machine,'UniFi '+name,time.time()))
         c.execute('INSERT INTO unifi_connections(id,name,kind,url,secret,ca,insecure_tls,site,machine_id,ai_context,check_id) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,kind=excluded.kind,url=excluded.url,secret=excluded.secret,ca=excluded.ca,insecure_tls=excluded.insecure_tls,site=excluded.site,machine_id=excluded.machine_id,ai_context=excluded.ai_context,snapshot=NULL',(identifier,name,kind,url,vault.encrypt(secret) if secret else old['secret'],form.get('ca','').strip() or None,int(form.get('insecure_tls')=='yes'),site,machine,int(form.get('ai_context')=='yes'),check))
         c.execute('INSERT INTO checks(id,machine_id,name,kind,config,interval) VALUES(?,?,?,\'unifi\',?,?) ON CONFLICT(id) DO UPDATE SET machine_id=excluded.machine_id,name=excluded.name,interval=excluded.interval,next_run=0,lease_token=NULL,lease_until=NULL,health=\'unknown\',failures=0,successes=0',(check,machine,'UniFi '+name,json.dumps({'connection_id':identifier}),interval))
         c.execute('UPDATE checks SET severity=?,fail_after=?,recover_after=? WHERE id=?',(severity,fail,recover,check))

@@ -1,6 +1,16 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 26
+CURRENT_VERSION = 27
 MIGRATIONS = {
+    27: (
+        "UPDATE ai_jobs SET state='cancelled',completed=strftime('%s','now'),lease_token=NULL,lease_until=NULL WHERE incident_id IN (SELECT id FROM incidents WHERE check_id IN (SELECT check_id FROM unifi_connections)) AND state IN ('pending','dispatching','running','unknown')",
+        "UPDATE incident_control SET owner=CASE WHEN owner='ai' THEN 'available' ELSE owner END,generation=generation+1 WHERE incident_id IN (SELECT id FROM incidents WHERE check_id IN (SELECT check_id FROM unifi_connections))",
+        "UPDATE command_jobs SET state=CASE WHEN state IN ('awaiting','pending') THEN 'cancelled' ELSE 'cancelling' END WHERE incident_id IN (SELECT id FROM incidents WHERE check_id IN (SELECT check_id FROM unifi_connections)) AND state IN ('awaiting','pending','dispatched','running')",
+        "UPDATE proxmox_api_jobs SET state='cancelled' WHERE ai_job_id IN (SELECT id FROM ai_jobs WHERE incident_id IN (SELECT id FROM incidents WHERE check_id IN (SELECT check_id FROM unifi_connections))) AND state='awaiting'",
+        "INSERT INTO machines(id,name,created) SELECT 'unifi:' || id,'UniFi ' || name,strftime('%s','now') FROM unifi_connections",
+        "UPDATE checks SET machine_id=(SELECT 'unifi:' || id FROM unifi_connections WHERE check_id=checks.id),lease_token=NULL,lease_until=NULL,next_run=0 WHERE id IN (SELECT check_id FROM unifi_connections)",
+        "UPDATE incidents SET machine_id=(SELECT 'unifi:' || id FROM unifi_connections WHERE check_id=incidents.check_id) WHERE check_id IN (SELECT check_id FROM unifi_connections)",
+        "UPDATE unifi_connections SET machine_id='unifi:' || id",
+    ),
     26: (
         "CREATE TABLE unifi_connections(id TEXT PRIMARY KEY,name TEXT NOT NULL,kind TEXT NOT NULL,url TEXT NOT NULL,secret TEXT NOT NULL,ca TEXT,insecure_tls INTEGER NOT NULL DEFAULT 0,site TEXT NOT NULL DEFAULT '',machine_id TEXT NOT NULL REFERENCES machines(id),ai_context INTEGER NOT NULL DEFAULT 0,check_id TEXT NOT NULL,snapshot TEXT)",
     ),
