@@ -1,4 +1,4 @@
-352 passed in 32.17s
+355 passed in 32.74s
 
 HTTP opt-in tests cover cookie configuration, URL restrictions, persisted agent enrollment, nonredirecting credential delivery, continued HTTPS verification and isolated Hermes configuration.
 Local Python 3.14.6; temporary databases, fake Hermes adapters and mocked external providers/subprocesses.
@@ -55,3 +55,5 @@ UniFi read-only integration: seven fixture tests cover fixed GET endpoint bounda
 Standalone UniFi setup: creation without any preexisting host, rejected/ignored caller host association, retained record identity during rename, and schema-26 connection migration with encrypted keys, check/ticket IDs and observation history preserved verified. UniFi investigations bound to the old host are cancelled during migration.
 
 Live form duplication regression: actual JavaScript key function checked against independently parsed forms with an id-named input, across 100 comparisons; stable string keys, distinct connection keys, explicit element IDs and blank new-connection IDs verified. Reading the id attribute avoids HTMLFormElement named-control shadowing.
+
+Network Devices milestone: appliance/NAS detail pages and SVG histories, retained extra numeric telemetry with credential-field removal, port identifiers/link/network information, isolated device metric series, discovery identity retention, independent device availability incidents, duplicate cached-observation suppression, source-separated host histories, host-list exclusion and old workspace redirects verified with fixtures. Existing consoles remain read-only. No live UniFi change, shell action or AI request executed.

@@ -1,10 +1,10 @@
 {% extends 'base.html' %}{% block content %}
-<h1>UniFi · Read-only monitoring</h1>
+<h1>UniFi connection settings</h1><a class="button" href="/network-devices">Network Devices</a>
 <p>Network and NAS telemetry, with no configuration or action tools. Drive support is experimental. Endpoint failures indicate missing visibility, not proof that a device or share is down.</p>
 {% for connection in connections + [none] %}
 <section class="card" data-live-key="unifi-{{ connection.id if connection else 'new' }}">
 <h2>{{ connection.name if connection else 'Add connection' }}</h2>
-{% if connection %}<p><a href="/hosts/{{ connection.machine_id }}">Monitoring workspace</a> · API access is always read-only.</p>{% endif %}
+{% if connection %}<p><a href="/network-devices/{{ connection.id }}">Monitoring workspace</a> · API access is always read-only.</p>{% endif %}
 <details {% if not connection %}open{% endif %}><summary>{{ 'Connection settings' if connection else 'Configure Network or NAS' }}</summary>
 <form method="post" action="/unifi">
 <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ connection.id if connection else '' }}">

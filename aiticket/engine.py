@@ -25,7 +25,7 @@ def observe(store, check_id, healthy, evidence, now=None, lease_token=None):
         check = c.execute('SELECT * FROM checks WHERE id=?', (check_id,)).fetchone()
         if not check or not check['enabled'] or (lease_token and check['lease_token'] != lease_token):
             return
-        if check['kind']=='agent_metric' and healthy is not None:
+        if check['kind'] in ('agent_metric','unifi_device') and healthy is not None:
             previous=c.execute('SELECT evidence FROM observations WHERE check_id=? ORDER BY at DESC LIMIT 1',(check_id,)).fetchone()
             if previous and json.loads(previous[0]).get('sampled_at')==evidence.get('sampled_at'):
                 c.execute('UPDATE checks SET lease_until=NULL,lease_token=NULL,next_run=? WHERE id=?',(now+check['interval'],check_id))

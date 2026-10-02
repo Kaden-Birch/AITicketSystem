@@ -161,6 +161,7 @@ def test_migration_detaches_existing_connection_preserving_history(environment):
         c.execute('UPDATE checks SET machine_id=? WHERE id=?',('host',row['check_id']))
         c.execute('UPDATE incidents SET machine_id=?',('host',))
         c.execute('DELETE FROM machines WHERE id=?',(row['machine_id'],))
+        c.execute('DROP TABLE unifi_devices')
         c.execute('UPDATE schema_version SET version=26')
     migrated=Store(store.path)
     connection=migrated.rows('SELECT * FROM unifi_connections')[0]
@@ -169,3 +170,59 @@ def test_migration_detaches_existing_connection_preserving_history(environment):
     assert migrated.rows('SELECT id,machine_id FROM incidents')[0]=={'id':incident['id'],'machine_id':row['machine_id']}
     assert len(migrated.rows('SELECT * FROM observations'))==3
     assert migrated.rows('SELECT name FROM machines WHERE id=?',('host',))[0]['name']=='NAS'
+
+
+def test_device_inventory_metrics_and_deduplicated_tickets(signed_in,monkeypatch):
+    from aiticket.engine import observe
+    from aiticket.hostview import overview
+    client,store,vault,csrf=signed_in
+    row=configured(store,vault,'network')
+    with store.connect() as c:c.execute("UPDATE unifi_connections SET site='site1'")
+    def get(self,path,params=None):
+        if path.endswith('/devices'):return {'data':[{'id':'switch1','name':'Switch','model':'USW','state':'OFFLINE','ipAddress':'10.0.0.5'}]}
+        if path.endswith('/devices/switch1'):return {'id':'switch1','name':'Switch','state':'OFFLINE','interfaces':{'ports':[{'idx':3,'speedMbps':1000,'state':'UP','nativeNetworkId':'net1'}]}}
+        if path.endswith('/statistics'):return {'cpuUtilizationPct':25,'memoryUtilizationPct':50,'uptimeSec':120}
+        return {'data':[]}
+    monkeypatch.setattr(unifi.Client,'get',get)
+    for i in range(3):
+        unifi.refresh(store,vault,row['id'])
+        device=store.rows('SELECT * FROM unifi_devices')[0]
+        healthy,evidence=unifi.device_probe(store,{'connection_id':row['id'],'device_id':'switch1'})
+        assert healthy is False
+        observe(store,device['check_id'],healthy,evidence)
+        observe(store,device['check_id'],healthy,evidence)
+        assert store.rows('SELECT failures FROM checks WHERE id=?',(device['check_id'],))[0]['failures']==i+1
+    assert len(store.rows('SELECT * FROM incidents WHERE machine_id=?',(device['machine_id'],)))==1
+    assert not any(x['id']==device['machine_id'] or x['id']==row['machine_id'] for x in overview(store))
+    listing=client.get('/network-devices').data
+    assert b'Switch' in listing
+    page=client.get('/network-devices/'+row['id']+'/devices/switch1')
+    assert page.status_code==200 and b'1000' in page.data and b'net1' in page.data and b'<svg' in page.data
+    assert client.get('/hosts/'+device['machine_id']).status_code==302
+    assert b'Switch' not in client.get('/hosts').data
+    with store.connect() as c:
+        context=unifi.ai_context(c,device['machine_id'])
+        assert context[0]['snapshot']['readings']['device']['id']=='switch1'
+        assert context[0]['snapshot']['sampled_at']==device['last_seen']
+
+
+def test_nas_readable_metrics_and_history(signed_in,monkeypatch):
+    client,store,vault,csrf=signed_in
+    row=configured(store,vault)
+    def get(self,path,params=None):
+        if path.endswith('/storage'):return {'pools':[{'number':1,'status':'fullyOperational','capacity':1000000000000,'usage':500000000000,'raidGroups':[{'currentLevel':'raid5'}]}],'disks':[{'slotId':'1','model':'disk','state':'optimal','temperature':47,'powerOnHours':123,'healthScore':5,'badSectorCount':0,'uncorrectableSectorCount':0}]}
+        if path.endswith('/device-info'):return {'name':'UNAS','model':'UNASPRO','cpu':{'currentload':.078,'temperature':78},'memory':{'total':100,'available':40},'networkInterfaces':[{'interfaceName':'eth1','connected':True,'linkSpeed':'10 GbE'}]}
+        return {'receiveKBPS':27,'transmitKBPS':8}
+    monkeypatch.setattr(unifi.Client,'get',get)
+    unifi.refresh(store,vault,row['id'])
+    page=client.get('/network-devices/'+row['id'])
+    assert page.status_code==200
+    for text in (b'Storage pools',b'raid5',b'47',b'CPU usage',b'Memory usage',b'Pool 1 usage',b'10 GbE',b'<svg'):assert text in page.data
+    hist=unifi.history(store,row['machine_id'],'1h')
+    assert hist['count']==1
+    assert any(c['latest']==7.8 for c in hist['charts'])
+    assert unifi.clean({'interfaces':{'ports':[{'idx':3,'speedMbps':1000,'nativeNetworkId':'net1','password':'secret'}]}})['interfaces']['ports'][0]=={'idx':3,'speedMbps':1000,'nativeNetworkId':'net1'}
+
+
+def test_extra_numeric_telemetry_retained_without_credentials():
+    assert unifi.clean({'newStatistics':{'packetLossPct':2.5,'numericSecret':123,'description':'unknown text'},'apiKey':'private'})=={'newStatistics':{'packetLossPct':2.5}}

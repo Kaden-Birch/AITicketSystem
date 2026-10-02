@@ -6,6 +6,9 @@ from .security import validate_url
 
 
 def probe(kind, config, vault, store=None):
+    if kind == 'unifi_device':
+        from .unifi import device_probe
+        return device_probe(store,config)
     if kind == 'unifi':
         from .unifi import probe as unifi_probe
         return unifi_probe(store,vault,config)

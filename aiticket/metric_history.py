@@ -28,11 +28,17 @@ def charts(store,host,window='6h',now=None):
     window=window if window in WINDOWS else '6h';start=now-WINDOWS[window]
     source='agent' if host.get('agent') else 'proxmox'
     entity=host['id'] if source=='agent' else host['object']['id'] if host.get('object') else None
+    return series(store,entity,source,window,now)
+
+
+def series(store,entity,source,window='6h',now=None,definitions=None):
+    now=time.time() if now is None else now
+    window=window if window in WINDOWS else '6h';start=now-WINDOWS[window]
     rows=store.rows('SELECT at,metrics FROM metric_samples WHERE entity_id=? AND source=? AND at>=? AND at<=? ORDER BY at',(entity,source,start,now)) if entity else []
     buckets=[[] for _ in range(120)]
     for row in rows:buckets[min(119,int((row['at']-start)/WINDOWS[window]*120))].append(json.loads(row['metrics']))
     result=[]
-    for key,label,unit,fixed in METRICS:
+    for key,label,unit,fixed in (definitions if definitions is not None else METRICS):
         available=[r[key] for b in buckets for r in b if key in r]
         if not available:continue
         ceiling=fixed or max(1,max(available)*1.1)

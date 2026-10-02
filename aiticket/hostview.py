@@ -40,7 +40,7 @@ def sample(agent,obj,now):
 def overview(store,now=None):
     now=time.time() if now is None else now
     with store.connect() as c:
-        machines=[dict(r) for r in c.execute('SELECT * FROM machines ORDER BY name')]
+        machines=[dict(r) for r in c.execute("SELECT * FROM machines WHERE id NOT LIKE 'unifi:%' AND id NOT LIKE 'unifi-device:%' ORDER BY name")]
         agents={r['machine_id']:dict(r) for r in c.execute('SELECT * FROM agents')}
         objects={}
         for r in c.execute("SELECT * FROM proxmox_objects WHERE machine_id IS NOT NULL AND present=1 ORDER BY CASE kind WHEN 'node' THEN 0 WHEN 'qemu' THEN 1 WHEN 'lxc' THEN 2 ELSE 3 END"):

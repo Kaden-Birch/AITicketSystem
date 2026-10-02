@@ -97,3 +97,5 @@ Agent reporting is configurable down to 20 seconds in Settings. Dashboard, host 
 Ticket workspace, dark appearance, work sessions and blocker notifications: [guide](docs/ticket-workspace.md).
 
 [UniFi Network and experimental UNAS monitoring](docs/unifi.md) adds read-only telemetry, host checks and optional AI network context. No UniFi action or configuration tools are exposed.
+
+Network Devices separates UniFi appliances from Hosts, with readable telemetry, seven-day metric history and device-specific availability tickets.

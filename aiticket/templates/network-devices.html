@@ -1,0 +1,6 @@
+{% extends 'base.html' %}{% block content %}
+<div class="host-heading"><h1>Network Devices</h1><a class="button" href="/unifi">Connection settings / Add connection</a></div>
+<p>UniFi appliances and discovered devices · Read-only monitoring · Observations update automatically.</p>
+<div class="metric-grid">{% for c in connections %}<article class="metric"><h2><a href="/network-devices/{{ c.id }}">{{ c.name }}</a></h2><p>{{ 'NAS' if c.kind=='drive' else 'Network console' }}</p><small>Collected {{ c.snapshot.sampled_at|timestamp if c.snapshot else 'Never' }}</small></article>{% endfor %}</div>
+<h2>Discovered network devices</h2><table><thead><tr><th>Device</th><th>Model</th><th>Address</th><th>State</th><th>Collected</th></tr></thead><tbody>{% for d in devices %}<tr><td><a href="/network-devices/{{ d.connection_id }}/devices/{{ d.device_id }}">{{ d.device.name or d.device_id }}</a><small>{{ d.connection_name }}</small></td><td>{{ d.device.model or '—' }}</td><td>{{ d.device.ipAddress or '—' }}</td><td>{{ d.device.state or 'Unknown' }}</td><td>{{ d.last_seen|timestamp }}</td></tr>{% else %}<tr><td colspan="5">Add a connection, select its site and refresh to discover devices.</td></tr>{% endfor %}</tbody></table>
+{% endblock %}

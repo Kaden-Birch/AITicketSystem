@@ -1,6 +1,9 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 27
+CURRENT_VERSION = 28
 MIGRATIONS = {
+    28: (
+        "CREATE TABLE unifi_devices(connection_id TEXT NOT NULL REFERENCES unifi_connections(id),device_id TEXT NOT NULL,machine_id TEXT NOT NULL UNIQUE REFERENCES machines(id),check_id TEXT NOT NULL,data TEXT NOT NULL,last_seen REAL NOT NULL,PRIMARY KEY(connection_id,device_id))",
+    ),
     27: (
         "UPDATE ai_jobs SET state='cancelled',completed=strftime('%s','now'),lease_token=NULL,lease_until=NULL WHERE incident_id IN (SELECT id FROM incidents WHERE check_id IN (SELECT check_id FROM unifi_connections)) AND state IN ('pending','dispatching','running','unknown')",
         "UPDATE incident_control SET owner=CASE WHEN owner='ai' THEN 'available' ELSE owner END,generation=generation+1 WHERE incident_id IN (SELECT id FROM incidents WHERE check_id IN (SELECT check_id FROM unifi_connections))",
