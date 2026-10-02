@@ -4,6 +4,7 @@ import json
 import math
 import re
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import os
 import secrets
 import time
@@ -61,7 +62,7 @@ def create_app(data_dir=None, testing=False):
 
     @app.template_filter('timestamp')
     def timestamp(value):
-        return datetime.fromtimestamp(value, timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC') if value else 'Never'
+        return datetime.fromtimestamp(value, ZoneInfo(store.setting('display_timezone','America/Edmonton'))).strftime('%Y-%m-%d %H:%M:%S %Z') if value else 'Never'
 
     @app.context_processor
     def context():
@@ -472,11 +473,11 @@ def create_app(data_dir=None, testing=False):
         rows = store.rows('SELECT * FROM incidents WHERE id=?', (incident_id,))
         if not rows:
             abort(404)
-        from .ai import meter
+        from .ai import meter,automatic_status
         from .handoff import view
         from .worklog import view as work_view
         from .hostview import detail
-        return render_template('incident.html', machine_detail=detail(store,rows[0]['machine_id']),work=work_view(store,incident_id),recovery_drafts=[{**d,'data':json.loads(d['payload'])} for d in store.rows('SELECT d.*,a.proposal_id FROM recovery_drafts d LEFT JOIN draft_adoptions a ON a.job_id=d.job_id WHERE d.incident_id=? ORDER BY d.created DESC LIMIT 100',(incident_id,))], merge_candidates=store.rows("SELECT id,severity,first_seen FROM incidents WHERE machine_id=? AND id<>? AND closed IS NULL AND status<>'Resolved'",(rows[0]['machine_id'],incident_id)), ownership=view(store, incident_id), handoff_request_id=uid(), proposals=[{**p,'data':json.loads(p['payload'])} for p in store.rows('SELECT * FROM action_proposals WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,))], action_agents=[{**a,'action_services':json.loads(a['capabilities']).get('action_services',{})} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))], automatic_ai_config=store.setting('hermes_config',{}),workspace_request_id=uid(), workspace_messages=store.rows('SELECT m.*,j.state,j.mode FROM ai_messages m JOIN ai_jobs j ON j.id=m.job_id WHERE m.incident_id=? ORDER BY m.created DESC LIMIT 100', (incident_id,)), workspace_sources=store.rows('SELECT s.check_id,c.name FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=?',(incident_id,)), ai_jobs=store.rows('SELECT id,state,mode,execution_mode,model,reasoning_effort,created,summary,error,resolution_summary FROM ai_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100', (incident_id,)), ai_meter=meter(store, incident_id), incident=rows[0], report=json.loads(rows[0]['report']), timeline=store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at', (incident_id,)), links=store.rows('SELECT * FROM incident_links WHERE left_id=? OR right_id=?',(incident_id,incident_id)), diagnostic_jobs=store.rows('SELECT * FROM diagnostic_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,)), diagnostic_agents=[{**a,'caps':json.loads(a['capabilities'])} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))])
+        return render_template('incident.html',automatic_status=automatic_status(store,rows[0]), machine_detail=detail(store,rows[0]['machine_id']),work=work_view(store,incident_id),recovery_drafts=[{**d,'data':json.loads(d['payload'])} for d in store.rows('SELECT d.*,a.proposal_id FROM recovery_drafts d LEFT JOIN draft_adoptions a ON a.job_id=d.job_id WHERE d.incident_id=? ORDER BY d.created DESC LIMIT 100',(incident_id,))], merge_candidates=store.rows("SELECT id,severity,first_seen FROM incidents WHERE machine_id=? AND id<>? AND closed IS NULL AND status<>'Resolved'",(rows[0]['machine_id'],incident_id)), ownership=view(store, incident_id), handoff_request_id=uid(), proposals=[{**p,'data':json.loads(p['payload'])} for p in store.rows('SELECT * FROM action_proposals WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,))], action_agents=[{**a,'action_services':json.loads(a['capabilities']).get('action_services',{})} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))], automatic_ai_config=store.setting('hermes_config',{}),workspace_request_id=uid(), workspace_messages=store.rows('SELECT m.*,j.state,j.mode FROM ai_messages m JOIN ai_jobs j ON j.id=m.job_id WHERE m.incident_id=? ORDER BY m.created DESC LIMIT 100', (incident_id,)), workspace_sources=store.rows('SELECT s.check_id,c.name FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=?',(incident_id,)), ai_jobs=store.rows('SELECT id,state,mode,execution_mode,model,reasoning_effort,created,summary,error,resolution_summary FROM ai_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100', (incident_id,)), ai_meter=meter(store, incident_id), incident=rows[0], report=json.loads(rows[0]['report']), timeline=store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at', (incident_id,)), links=store.rows('SELECT * FROM incident_links WHERE left_id=? OR right_id=?',(incident_id,incident_id)), diagnostic_jobs=store.rows('SELECT * FROM diagnostic_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,)), diagnostic_agents=[{**a,'caps':json.loads(a['capabilities'])} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))])
 
     @app.post('/incidents/<incident_id>/archive')
     @login_required
@@ -542,6 +543,13 @@ def create_app(data_dir=None, testing=False):
     @login_required
     def settings():
         if request.method == 'POST':
+            if request.form.get('section') == 'appearance':
+                zone=request.form.get('display_timezone','America/Edmonton').strip()
+                try: ZoneInfo(zone)
+                except (ZoneInfoNotFoundError,ValueError): raise ValueError('Enter a valid IANA timezone such as America/Edmonton.')
+                store.save('display_timezone',zone)
+                flash('Display timezone saved.')
+                return redirect(url_for('settings'))
             if request.form.get('section') == 'monitoring':
                 interval=int(request.form.get('agent_interval','30'))
                 if not 20<=interval<=300: raise ValueError('Agent reporting interval must be 20–300 seconds.')
@@ -576,7 +584,7 @@ def create_app(data_dir=None, testing=False):
                 store.save_many({'ai_config': cfg}, actor='user')
             flash('Settings saved. AI activation is managed on the Hermes page.')
             return redirect(url_for('settings'))
-        return render_template('settings.html', public_url=store.setting('public_url',''),blockers=store.setting('discord_blockers',True),agent_interval=store.setting('agent_interval',30),ai=store.setting('ai_config', AI_DEFAULTS), discord_configured=bool(store.setting('discord_secret')), minimum=store.setting('discord_minimum', 'medium'), recovery=store.setting('discord_recovery', True), ai_enabled=store.setting('hermes_config', {}).get('enabled', False))
+        return render_template('settings.html',display_timezone=store.setting('display_timezone','America/Edmonton'), public_url=store.setting('public_url',''),blockers=store.setting('discord_blockers',True),agent_interval=store.setting('agent_interval',30),ai=store.setting('ai_config', AI_DEFAULTS), discord_configured=bool(store.setting('discord_secret')), minimum=store.setting('discord_minimum', 'medium'), recovery=store.setting('discord_recovery', True), ai_enabled=store.setting('hermes_config', {}).get('enabled', False))
 
 
     @app.route('/administration', methods=['GET', 'POST'])

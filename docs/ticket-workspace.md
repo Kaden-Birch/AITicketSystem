@@ -108,3 +108,15 @@ requests, public URL validation and Discord links/stale blocker suppression.
 Browser checks cover dark appearance, creation, machine selection, ticket layout,
 live timers, blocker appearance and preservation of an unsent note. No real model,
 Proxmox mutation or Discord delivery is performed by these tests.
+
+### Automatic AI eligibility and work-log resolution
+
+The ticket now displays automatic AI admission status directly: disabled AI, disabled automatic triage, severity below the configured minimum, human handling, recorded admission blocker, or existing execution state. Automatic triage still queues once per ticket and retains configured limits. Defaults are **Medium** for a new check and **High** for automatic AI; to include Medium failures, choose **Hermes & usage → Minimum incident severity → Medium**, retain automatic triage enabled, then save/recheck/enable as required by that page. Existing executions are not silently retried.
+
+Resolved tickets cannot restart work timers. The previous timer reconciliation bug could add repeated zero-second Hermes sessions after independent monitoring recovery while the AI execution was still running. Those post-resolution bookkeeping rows are excluded from the visible work log and totals; underlying records are preserved. Real sessions and recovery summaries remain visible.
+
+### Display timezone
+
+All rendered timestamps now default to **America/Edmonton**: Mountain time with automatic MDT/MST daylight-saving adjustment. Change the IANA timezone under **Settings → Display timezone** if needed. Stored timestamps, Unix evidence timestamps and AI accounting periods remain UTC. For example, `2026-10-02 17:32:19 UTC` displays as `2026-10-02 11:32:19 MDT`.
+
+Only the main application needs updating/rebuilding for these changes.

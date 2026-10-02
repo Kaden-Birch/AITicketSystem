@@ -486,3 +486,23 @@ def run(store, vault, stop):
         except Exception:
             logging.getLogger(__name__).exception('AI orchestration paused; durable jobs retained')
         stop.wait(5)
+
+
+def automatic_status(store,incident):
+    """Explain automatic admission without changing configuration or submitting work."""
+    resolved=incident['closed'] is not None or incident['status']=='Resolved'
+    jobs=store.rows('SELECT id,state,error FROM ai_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 1',(incident['id'],))
+    if jobs:
+        job=jobs[0]
+        return ('Ticket resolved. Latest AI execution ' if resolved else 'AI execution ')+job['state']+' · '+job['id']+('. '+job['error'] if job['error'] else '')+'. Automatic triage queues once per ticket; use Continue investigation for another session.'
+    bridge=store.setting('hermes_config',BRIDGE_DEFAULTS)
+    if resolved: return 'No AI execution recorded for this ticket. It is resolved, so no automatic investigation will start now. Current ticket severity: '+incident['severity'].capitalize()+'; configured AI minimum: '+bridge.get('minimum','high').capitalize()+'.'
+    if not bridge.get('enabled'): return 'Automatic AI not queued: AI is disabled. Enable it under Hermes & usage.'
+    if not bridge.get('automatic'): return 'Automatic AI not queued: automatic triage is disabled under Hermes & usage.'
+    minimum=bridge.get('minimum','high')
+    if SEVERITIES.index(incident['severity'])<SEVERITIES.index(minimum): return 'Automatic AI not queued: this ticket is '+incident['severity'].capitalize()+', below the '+minimum.capitalize()+' minimum under Hermes & usage.'
+    control=store.rows('SELECT owner,handling_mode FROM incident_control WHERE incident_id=?',(incident['id'],))
+    if control and (control[0]['owner']=='user' or control[0]['handling_mode']!='automatic'): return 'Automatic AI not queued: ticket handling is paused or under human control.'
+    blocked=store.rows("SELECT text FROM timeline WHERE incident_id=? AND kind='ai_auto_blocked' ORDER BY at DESC LIMIT 1",(incident['id'],))
+    if blocked: return 'Automatic AI admission blocked: '+blocked[0]['text']
+    return 'Eligible for automatic AI; waiting for the dispatcher. Queueing still requires available run limits and a compatible bridge.'

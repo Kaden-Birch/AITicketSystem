@@ -26,6 +26,7 @@ def end(c,incident,actor,outcome,now,summary=''):
 
 
 def start(c,incident,actor,now,job=None):
+    if not c.execute("SELECT 1 FROM incidents WHERE id=? AND closed IS NULL AND status!='Resolved'",(incident,)).fetchone(): return
     c.execute('INSERT OR IGNORE INTO work_sessions(id,incident_id,job_id,actor,started) VALUES(?,?,?,?,?)',(uid(),incident,job,actor,now))
 
 
@@ -50,6 +51,9 @@ def block(c,store,incident,job,reason,now):
 
 def update_job(c,store,job,state,now,summary=''):
     incident=job['incident_id']
+    if not c.execute("SELECT 1 FROM incidents WHERE id=? AND closed IS NULL AND status!='Resolved'",(incident,)).fetchone():
+        end(c,incident,'hermes','Resolved',now,summary)
+        return
     blocked=c.execute('SELECT 1 FROM ticket_blockers WHERE incident_id=? AND cleared IS NULL',(incident,)).fetchone()
     if state=='running' and not blocked: start(c,incident,'hermes',now,job['id'])
     elif state in ('completed','failed','cancelled','expired','unknown'):
@@ -68,7 +72,7 @@ def tick(store,now=None):
             elif session['job_id']:
                 job=c.execute('SELECT * FROM ai_jobs WHERE id=?',(session['job_id'],)).fetchone()
                 update_job(c,store,dict(job),job['state'],now,job['resolution_summary'] or job['summary'] or '')
-        for job in c.execute("SELECT * FROM ai_jobs WHERE state='running'").fetchall():
+        for job in c.execute("SELECT j.* FROM ai_jobs j JOIN incidents i ON i.id=j.incident_id WHERE j.state='running' AND i.closed IS NULL AND i.status!='Resolved'").fetchall():
             awaiting=c.execute("SELECT id FROM command_jobs WHERE ai_job_id=? AND state='awaiting' UNION ALL SELECT id FROM proxmox_api_jobs WHERE ai_job_id=? AND state='awaiting'",(job['id'],job['id'])).fetchone()
             if awaiting: block(c,store,job['incident_id'],job['id'],'Approval needed: review the queued operation in the machine command history.',now)
             elif c.execute("SELECT 1 FROM ticket_blockers WHERE job_id=? AND cleared IS NULL AND reason=?",(job['id'],'Approval needed: review the queued operation in the machine command history.')).fetchone(): clear(c,job['incident_id'],now)
@@ -79,7 +83,7 @@ def tick(store,now=None):
 
 def view(store,incident):
     now=time.time()
-    sessions=store.rows('SELECT * FROM work_sessions WHERE incident_id=? ORDER BY started DESC LIMIT 200',(incident,))
+    sessions=store.rows('SELECT w.* FROM work_sessions w JOIN incidents i ON i.id=w.incident_id WHERE w.incident_id=? AND NOT (w.actor="hermes" AND i.closed IS NOT NULL AND w.started>i.closed) ORDER BY w.started DESC LIMIT 200',(incident,))
     for s in sessions: s['seconds']=max(0,int((s['ended'] or now)-s['started']))
-    totals=store.rows('SELECT actor,sum(COALESCE(ended,?)-started) seconds FROM work_sessions WHERE incident_id=? GROUP BY actor',(now,incident))
+    totals=store.rows('SELECT w.actor,sum(COALESCE(w.ended,?)-w.started) seconds FROM work_sessions w JOIN incidents i ON i.id=w.incident_id WHERE w.incident_id=? AND NOT (w.actor="hermes" AND i.closed IS NOT NULL AND w.started>i.closed) GROUP BY w.actor',(now,incident))
     return {'sessions':sessions,'totals':{s['actor']:int(s['seconds']) for s in totals},'blocker':next(iter(store.rows('SELECT * FROM ticket_blockers WHERE incident_id=? AND cleared IS NULL',(incident,))),None),'server_now':now}
