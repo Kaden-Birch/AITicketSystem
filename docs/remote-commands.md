@@ -29,6 +29,7 @@ git pull --ff-only origin main
 sudo systemctl stop aiticket-agent
 sudo install -m 0644 agent/agent.py /opt/aiticket-agent/agent.py
 sudo install -m 0644 agent/diagnostics.py /opt/aiticket-agent/diagnostics.py
+sudo install -m 0644 agent/monitoring.py /opt/aiticket-agent/monitoring.py
 sudo install -m 0644 agent/actions.py /opt/aiticket-agent/actions.py
 sudo install -m 0644 agent/commands.py /opt/aiticket-agent/commands.py
 ```
@@ -224,3 +225,34 @@ Operational ticket context and `targets` include the tagged machine even if shel
 ## Resumed investigation request history
 
 A current authorized AI execution can use `status` and `proxmox_status` to read requests from earlier runs on the same ticket and machine. It cannot inspect other tickets or use this read access to cancel an earlier run’s commands. Approvals remain administrator actions in the host workspace. A missing shell UUID returns `not_recorded`; failed transport during a status lookup returns `lookup_failed` with a safe exception type, rather than claiming command delivery was unknown. Update both the main app and Hermes bridge, then resume the existing ticket.
+
+## Process, SMB and ping monitoring
+
+In **Hosts → Add check**, select the machine and one of:
+
+- **Process / systemd service:** enter an exact Linux process name (the `/proc/PID/comm` name, usually limited to 15 characters), or a systemd unit such as `immich.service`. A service must report active; a process must have a matching name.
+- **Mounted SMB share:** enter the directory used by the application, for example `/mnt/photos`. The agent checks that the covering mount is CIFS/SMB3 and that directory listing and filesystem information succeed. An unmounted directory fails, even if the directory still exists. This verifies access from the application host rather than only a server's TCP port. It does not prove writes, every file, or application health; cached reads may still succeed during a transient disconnect. Combine with application health checks where available.
+- **Ping:** enter a reachable IP or hostname. The main server sends one ICMP echo per attempt, with a one-second reply timeout. Interval can be **1–86400 seconds**; actual timing can be longer when probes timeout or other checks occupy the worker. ICMP being blocked produces a failure even if the host is otherwise healthy.
+
+Set consecutive failures and recovery successes. Host pages display green **Up**, yellow **Retrying** before the failure threshold, red **Down** after it, or gray **Awaiting result / Disabled**. Click a check to expand its timestamps, evidence and thresholds. These entries update with the existing five-second live page refresh.
+
+Process and SMB checks need an enrolled agent. Their minimum configured interval is 20 seconds and execution follows the agent reporting cadence (set **Settings → Agent reporting interval** to 20 seconds for the fastest cadence). Checks do not require shell command access: they perform fixed read-only inspections. Restarting services is a separate AI command and uses the saved host access mode and the agent's OS permissions.
+
+Failures create normal incidents. To invoke recovery automatically, enable AI and **Automatically queue one triage per eligible active incident**, and ensure the check severity meets the configured AI minimum. In **Full access**, the AI can investigate and restart the relevant service without another command approval. Read-only mode cannot restart; guarded mode requests approval for a restart. Recovery is confirmed by subsequent checks; an AI statement alone does not close the incident. SMB failures require diagnosing the mount/dependency; blindly restarting an application may not fix storage access.
+
+### Upgrade monitored agents
+
+Update and rebuild the main application first (`sudo git -C /opt/aiticket pull --ff-only origin main`, then `sudo docker compose up -d --build` in `/opt/aiticket`). The Docker image installs `iputils-ping`; non-Docker main installations need that package too.
+
+On **each monitored host**, not the main application VM:
+
+```sh
+cd ~/aiticket-agent-source
+git pull --ff-only origin main
+sudo systemctl stop aiticket-agent
+sudo install -m 0644 agent/agent.py agent/monitoring.py /opt/aiticket-agent/
+sudo systemctl start aiticket-agent
+sudo systemctl status aiticket-agent --no-pager
+```
+
+Agent version is `0.6.0`. Existing credentials and local permissions are retained. Hermes does not need an update for these checks.

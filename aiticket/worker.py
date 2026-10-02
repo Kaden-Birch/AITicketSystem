@@ -116,4 +116,4 @@ def run(store, vault, stop):
         except Exception:
             log.exception('Worker failed; persisted leases will recover')
             busy = False
-        stop.wait(0.2 if busy else 2)
+        stop.wait(0.2)

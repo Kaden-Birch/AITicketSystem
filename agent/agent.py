@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-VERSION = '0.5.0'
+VERSION = '0.6.0'
 
 
 def endpoint(value,allow_http=False):
@@ -186,6 +186,13 @@ def main():
     while running:
         try:
             policy=load_policy(args.policy)
+            from monitoring import evaluate
+            checks_reply=send(base,'/api/agent/checks',{'results':state.get('monitor_results',[])},state.get('ca'),state['credential'])
+            state['monitor_results']=[evaluate(check) for check in checks_reply.get('checks',[])[:20]]
+            write_state(path,state)
+            if state['monitor_results']:
+                send(base,'/api/agent/checks',{'results':state['monitor_results']},state.get('ca'),state['credential'])
+                state['monitor_results']=[];write_state(path,state)
             drain(state,path,write_state)
             while state.get('command_results'):
                 try:

@@ -54,6 +54,7 @@ sha256sum -c SHA256SUMS
 sudo systemctl stop aiticket-agent
 sudo install -o root -g root -m 0755 agent/agent.py /opt/aiticket-agent/agent.py
 sudo install -o root -g root -m 0644 agent/diagnostics.py /opt/aiticket-agent/diagnostics.py
+sudo install -o root -g root -m 0644 agent/monitoring.py /opt/aiticket-agent/monitoring.py
 sudo install -o root -g root -m 0644 agent/actions.py /opt/aiticket-agent/actions.py
 sudo systemctl start aiticket-agent
 sudo systemctl status aiticket-agent --no-pager

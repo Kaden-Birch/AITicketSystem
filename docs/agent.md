@@ -13,6 +13,7 @@ sudo useradd --system --home /var/lib/aiticket-agent --shell /usr/sbin/nologin a
 sudo install -d -m 0755 /opt/aiticket-agent
 sudo install -m 0644 agent/agent.py /opt/aiticket-agent/agent.py
 sudo install -m 0644 agent/diagnostics.py /opt/aiticket-agent/diagnostics.py
+sudo install -m 0644 agent/monitoring.py /opt/aiticket-agent/monitoring.py
 sudo install -m 0644 agent/actions.py /opt/aiticket-agent/actions.py
 sudo install -d -o aiticket-agent -g aiticket-agent -m 0700 /var/lib/aiticket-agent
 sudo install -m 0644 agent/aiticket-agent.service /etc/systemd/system/aiticket-agent.service

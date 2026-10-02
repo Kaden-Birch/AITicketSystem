@@ -150,7 +150,7 @@ def claim(store, table, now=None, lease=60):
     with store.connect() as c:
         c.execute('BEGIN IMMEDIATE')
         if table == 'checks':
-            row = c.execute('SELECT * FROM checks WHERE enabled=1 AND next_run<=? AND (lease_until IS NULL OR lease_until<=?) ORDER BY next_run LIMIT 1', (now, now)).fetchone()
+            row = c.execute('SELECT * FROM checks WHERE enabled=1 AND kind NOT IN ("process","smb") AND next_run<=? AND (lease_until IS NULL OR lease_until<=?) ORDER BY next_run LIMIT 1', (now, now)).fetchone()
         else:
             c.execute("UPDATE deliveries SET state='expired',lease_until=NULL WHERE expires<=? AND state IN ('pending','leased')", (now,))
             row = c.execute("SELECT * FROM deliveries WHERE ((state='pending' AND next_attempt<=?) OR (state='leased' AND lease_until<=?)) AND expires>? ORDER BY created LIMIT 1", (now, now, now)).fetchone()

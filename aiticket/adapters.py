@@ -12,6 +12,10 @@ def probe(kind, config, vault, store=None):
     if kind == 'proxmox_linked':
         from .proxmox import linked_probe
         return linked_probe(store,vault,config)
+    if kind == 'ping':
+        import subprocess
+        result=subprocess.run(['ping','-n','-c','1','-W','1',config['host']],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=2)
+        return result.returncode==0, {'target':config['host'],'reason':'ICMP reply received' if result.returncode==0 else 'No ICMP reply within one second'}
     if kind == 'tcp':
         with socket.create_connection((config['host'], int(config['port'])), timeout=5):
             return True, {'reason': 'TCP connection established'}

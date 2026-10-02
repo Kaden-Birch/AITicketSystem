@@ -379,6 +379,21 @@ def create_app(data_dir=None, testing=False):
             cfg = {'url': validate_url(f.get('url', '')), 'status': int(f.get('expected_status', 200))}
             if not 100 <= cfg['status'] <= 599:
                 raise ValueError('Invalid HTTP status.')
+        elif kind in ('process','smb'):
+            target=f.get('target','').strip()
+            if kind=='process':
+                if not re.fullmatch(r'[A-Za-z0-9_.@-]{1,100}',target) or target.startswith('-'):
+                    raise ValueError('Enter a process name or systemd .service unit.')
+            elif not target.startswith('/') or len(target)>512 or '\n' in target:
+                raise ValueError('Enter the absolute mounted SMB directory on the monitored host.')
+            if not store.rows('SELECT id FROM agents WHERE machine_id=? AND revoked=0',(machine,)):
+                raise ValueError('Enroll an agent on this host first.')
+            cfg={'target':target}
+        elif kind == 'ping':
+            target=f.get('host','').strip()
+            if not target or target.startswith('-') or len(target)>253 or not re.fullmatch(r'[A-Za-z0-9_.:-]+',target):
+                raise ValueError('Enter a valid ping IP or hostname.')
+            cfg={'host':target}
         elif kind == 'tcp':
             cfg = {'host': f.get('host', '').strip(), 'port': int(f.get('port', 0))}
             if not cfg['host'] or len(cfg['host']) > 253 or not 1 <= cfg['port'] <= 65535:
@@ -391,7 +406,7 @@ def create_app(data_dir=None, testing=False):
             raise ValueError('Unsupported check type.')
         interval, fail, recover = int(f.get('interval', 60)), int(f.get('fail_after', 3)), int(f.get('recover_after', 2))
         severity = f.get('severity', 'medium')
-        if not 10 <= interval <= 86400 or not 1 <= fail <= 100 or not 1 <= recover <= 100 or severity not in SEVERITIES:
+        if not (1 if kind=='ping' else 20 if kind in ('process','smb') else 10) <= interval <= 86400 or not 1 <= fail <= 100 or not 1 <= recover <= 100 or severity not in SEVERITIES:
             raise ValueError('Invalid interval, thresholds or severity.')
         name = f.get('name', '').strip()
         if not 1 <= len(name) <= 100:
@@ -815,6 +830,29 @@ def create_app(data_dir=None, testing=False):
             from .commands import poll as command_poll
             commands=command_poll(c,store,vault,row['id'],now)
         return {'poll_interval_seconds':store.setting('agent_interval',30),'status': 'accepted', 'jobs': jobs, 'actions': actions,'commands':commands}
+
+    @app.post('/api/agent/checks')
+    def agent_checks():
+        bearer=request.headers.get('Authorization','')
+        rows=store.rows('SELECT * FROM agents WHERE credential_digest=? AND revoked=0',(digest(bearer[7:]) if bearer.startswith('Bearer ') else '',))
+        if not rows: abort(401)
+        machine=rows[0]['machine_id']
+        payload=request.get_json() or {}
+        results=payload.get('results',[])
+        if not isinstance(results,list) or len(results)>20: abort(400)
+        from .engine import observe
+        for result in results:
+            if not isinstance(result,dict) or type(result.get('healthy')) is not bool: abort(400)
+            checks=store.rows("SELECT * FROM checks WHERE id=? AND machine_id=? AND enabled=1 AND kind IN ('process','smb')",(result.get('id'),machine))
+            if not checks: continue
+            check=checks[0]
+            sampled=result.get('sampled_at')
+            if type(sampled) not in (int,float) or not math.isfinite(sampled) or not 0<=time.time()-sampled<=180: continue
+            previous=store.rows('SELECT evidence FROM observations WHERE check_id=? ORDER BY at DESC LIMIT 1',(check['id'],))
+            if previous and json.loads(previous[0]['evidence']).get('sampled_at',0)>=sampled: continue
+            if result.get('config')!=json.loads(check['config']) or check['next_run']>time.time(): continue
+            observe(store,check['id'],result['healthy'],{'target':result['config']['target'],'reason':'Agent check passed' if result['healthy'] else 'Agent check failed','sampled_at':sampled})
+        return {'checks':[{'id':r['id'],'kind':r['kind'],'config':json.loads(r['config'])} for r in store.rows("SELECT * FROM checks WHERE machine_id=? AND enabled=1 AND kind IN ('process','smb') AND next_run<=? LIMIT 20",(machine,time.time()))]}
 
     @app.route('/proxmox', methods=['GET','POST'])
     @login_required
