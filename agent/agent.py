@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-VERSION = '0.3.1'
+VERSION = '0.4.0'
 
 
 def endpoint(value,allow_http=False):
@@ -59,11 +59,11 @@ def telemetry(state=None):
     memory = {}
     for line in Path('/proc/meminfo').read_text().splitlines():
         key, value = line.split(':', 1)
-        if key in ('MemTotal', 'MemAvailable'):
+        if key in ('MemTotal', 'MemAvailable','SwapTotal','SwapFree'):
             memory[key] = int(value.strip().split()[0]) * 1024
     disk = os.statvfs('/')
     result = {'inode_free':disk.f_favail,'inode_total':disk.f_files,'uptime_seconds': float(Path('/proc/uptime').read_text().split()[0]),
-            'load_1': os.getloadavg()[0], 'memory_total_bytes': memory['MemTotal'],
+            'load_1': os.getloadavg()[0], 'load_5':os.getloadavg()[1],'load_15':os.getloadavg()[2], 'cpu_cores':os.cpu_count() or 1, 'swap_total_bytes':memory.get('SwapTotal',0),'swap_free_bytes':memory.get('SwapFree',0), 'memory_total_bytes': memory['MemTotal'],
             'memory_available_bytes': memory['MemAvailable'],
             'disk_free_bytes': disk.f_bavail * disk.f_frsize, 'disk_total_bytes': disk.f_blocks * disk.f_frsize}
     if state is not None:
@@ -79,6 +79,16 @@ def telemetry(state=None):
             if line.startswith('full '):
                 result['memory_pressure_percent']=float(dict(field.split('=') for field in line.split()[1:])['avg10'])
     return result
+
+
+def host_info():
+    import platform
+    os_name='Linux'
+    path=Path('/etc/os-release')
+    if path.exists():
+        values=dict(line.split('=',1) for line in path.read_text().splitlines() if '=' in line)
+        os_name=values.get('PRETTY_NAME','Linux').strip('"')
+    return {'hostname':platform.node()[:200],'os':os_name[:200],'kernel':platform.release()[:200],'architecture':platform.machine()[:80]}
 
 
 def process_jobs(state,path,jobs,policy):
@@ -191,9 +201,10 @@ def main():
             if not pending:
                 advertised=capabilities(policy)
                 if not state.get('action_credential'):
+                    advertised.pop('power_operations',None)
                     advertised.pop('actions',None)
                     advertised.pop('action_services',None)
-                pending = {'event_id': str(uuid.uuid4()), 'version': VERSION, 'telemetry': telemetry(state), 'sampled_at':time.time(), 'capabilities':advertised}
+                pending = {'event_id': str(uuid.uuid4()), 'version': VERSION, 'telemetry': telemetry(state), 'sampled_at':time.time(), 'capabilities':advertised,'host_info':host_info()}
                 state['pending'] = pending
                 write_state(path, state)
             response=send(base, '/api/agent/heartbeat', pending, state.get('ca'), state['credential'])

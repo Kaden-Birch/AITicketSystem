@@ -1,6 +1,17 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 16
+CURRENT_VERSION = 18
 MIGRATIONS = {
+    18: (
+        "CREATE TABLE power_policies(machine_id TEXT PRIMARY KEY REFERENCES machines(id),backend TEXT NOT NULL,object_id TEXT REFERENCES proxmox_objects(id),connection_id TEXT REFERENCES proxmox_connections(id),token_id TEXT,token_secret TEXT,enabled INTEGER NOT NULL DEFAULT 0,validated INTEGER NOT NULL DEFAULT 0,version INTEGER NOT NULL)",
+        "CREATE TABLE power_jobs(id TEXT PRIMARY KEY,machine_id TEXT NOT NULL REFERENCES machines(id),agent_id TEXT REFERENCES agents(id),payload TEXT NOT NULL,payload_hash TEXT NOT NULL,state TEXT NOT NULL,created REAL NOT NULL,expires REAL NOT NULL,policy_version INTEGER NOT NULL,dispatch_token TEXT,dispatched REAL,task TEXT,result TEXT,completed REAL)",
+        "CREATE UNIQUE INDEX power_lock ON power_jobs(machine_id) WHERE state IN ('awaiting','approved','dispatched','authorized','verifying','unknown')",
+        "CREATE TRIGGER power_immutable BEFORE UPDATE OF machine_id,agent_id,payload,payload_hash,created,expires,policy_version ON power_jobs BEGIN SELECT RAISE(ABORT,'Power proposal is immutable'); END",
+        "CREATE TRIGGER power_no_delete BEFORE DELETE ON power_jobs BEGIN SELECT RAISE(ABORT,'Power ledger is immutable'); END",
+    ),
+    17: (
+        "ALTER TABLE proxmox_objects ADD COLUMN metrics TEXT NOT NULL DEFAULT '{}'",
+        "ALTER TABLE agents ADD COLUMN host_info TEXT NOT NULL DEFAULT '{}'",
+    ),
     16: (
         'CREATE TABLE recovery_drafts(job_id TEXT PRIMARY KEY REFERENCES ai_jobs(id),incident_id TEXT NOT NULL REFERENCES incidents(id),payload TEXT NOT NULL,created REAL NOT NULL)',
         'CREATE TABLE draft_adoptions(job_id TEXT PRIMARY KEY REFERENCES recovery_drafts(job_id),proposal_id TEXT NOT NULL UNIQUE REFERENCES action_proposals(id))',

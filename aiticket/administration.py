@@ -107,6 +107,8 @@ def rotate_key(store, old_vault, destination):
                 c.execute('UPDATE checks SET config=? WHERE id=?', (json.dumps(config), row['id']))
         for row in c.execute('SELECT id,credential,bridge_secret FROM ai_jobs').fetchall():
             c.execute('UPDATE ai_jobs SET credential=?,bridge_secret=? WHERE id=?', (new_vault.encrypt(old_vault.decrypt(row['credential'])), new_vault.encrypt(old_vault.decrypt(row['bridge_secret'])), row['id']))
+        for row in c.execute('SELECT machine_id,token_secret FROM power_policies WHERE token_secret IS NOT NULL').fetchall():
+            c.execute('UPDATE power_policies SET token_secret=? WHERE machine_id=?',(new_vault.encrypt(old_vault.decrypt(row['token_secret'])),row['machine_id']))
         store.audit(c, 'encryption.rotated', 'vault', actor='console')
     return new_vault
 

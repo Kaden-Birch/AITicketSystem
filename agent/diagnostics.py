@@ -22,7 +22,10 @@ def load_policy(path):
     recovery=policy.get('recovery',{})
     if not isinstance(recovery,dict) or not isinstance(recovery.get('services',[]),list) or any(s not in services for s in recovery.get('services',[])):
         raise ValueError('Invalid recovery service allowlist')
-    return {'services':services,'logs':policy.get('logs') is True,'recovery':{'enabled':recovery.get('enabled') is True,'validated':recovery.get('validated') is True,'services':recovery.get('services',[])}}
+    power=policy.get('power',{})
+    if not isinstance(power,dict) or not isinstance(power.get('operations',[]),list) or len(power.get('operations',[]))>2 or any(op not in ('host_restart','host_shutdown') for op in power.get('operations',[])):
+        raise ValueError('Invalid local power allowlist')
+    return {'power':{'enabled':power.get('enabled') is True,'validated':power.get('validated') is True,'operations':power.get('operations',[])},'services':services,'logs':policy.get('logs') is True,'recovery':{'enabled':recovery.get('enabled') is True,'validated':recovery.get('validated') is True,'services':recovery.get('services',[])}}
 
 
 def capabilities(policy):
@@ -30,6 +33,9 @@ def capabilities(policy):
     cfg=policy.get('recovery',{})
     if cfg.get('enabled') and cfg.get('validated'):
         result.update(actions=['service_restart'],action_services={s:policy['services'][s] for s in cfg['services']})
+    power=policy.get('power',{})
+    if power.get('enabled') and power.get('validated'):
+        result['power_operations']=power.get('operations',[])
     return result
 
 

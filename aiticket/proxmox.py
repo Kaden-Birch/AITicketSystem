@@ -1,6 +1,7 @@
 """Read-only Proxmox inventory, with explicit administrator cluster namespaces."""
 import json
 import time
+import math
 import requests
 from .db import uid
 
@@ -71,7 +72,7 @@ def normalize(resources):
             raise ValueError('Invalid or duplicate resource identity')
         seen.add((kind, key))
         result.append({'kind':kind, 'key':key, 'name':str(item.get('name') or item.get('storage') or item.get('node') or key)[:200],
-                       'node':str(item.get('node',''))[:200], 'status':str(item.get('status','unknown'))[:32], 'template':bool(item.get('template',False))})
+                       'node':str(item.get('node',''))[:200], 'status':str(item.get('status','unknown'))[:32], 'template':bool(item.get('template',False)), 'metrics':{k:v for k,v in item.items() if k in ('cpu','maxcpu','mem','maxmem','disk','maxdisk','uptime') and type(v) in (int,float) and math.isfinite(v) and 0<=v<=1e18 and (k!='cpu' or v<=1)}})
     return result
 
 
@@ -99,6 +100,7 @@ def discover(store, vault, connection_id, lease_token=None):
                                        (connection['cluster_id'],item['kind'],item['key'])).fetchone()[0]
                 c.execute('INSERT INTO proxmox_objects(id,cluster_id,kind,object_key,generation,name,node,status,template,present,last_seen,machine_id,check_id) VALUES(?,?,?,?,?,?,?,?,?,1,?,NULL,NULL)',
                           (uid(),connection['cluster_id'],item['kind'],item['key'],generation,item['name'],item['node'],item['status'],item['template'],now))
+            c.execute('UPDATE proxmox_objects SET metrics=? WHERE cluster_id=? AND kind=? AND object_key=? AND present=1',(json.dumps(item['metrics']),connection['cluster_id'],item['kind'],item['key']))
         # Absence in a permission-filtered response is not proof of deletion. An
         # administrator explicitly retires old objects before reusing their IDs.
         c.execute('UPDATE proxmox_connections SET last_discovery=? WHERE id=?',(now,connection_id))
@@ -164,6 +166,10 @@ def unlink(store,object_id,retire=False):
         obj=c.execute('SELECT * FROM proxmox_objects WHERE id=?',(object_id,)).fetchone()
         if not obj:
             raise ValueError('Unknown resource')
+        if obj['machine_id'] and c.execute("SELECT 1 FROM power_jobs WHERE machine_id=? AND state IN ('dispatched','authorized','verifying','unknown')",(obj['machine_id'],)).fetchone():
+            raise ValueError('Reconcile the existing power execution before unlinking this resource.')
+        if obj['machine_id']:
+            c.execute("UPDATE power_jobs SET state='cancelled' WHERE machine_id=? AND state IN ('awaiting','approved')",(obj['machine_id'],))
         if obj['kind']=='node' and obj['machine_id']:
             guests=c.execute("SELECT machine_id FROM proxmox_objects WHERE cluster_id=? AND kind IN ('qemu','lxc') AND node=? AND machine_id IS NOT NULL",(obj['cluster_id'],obj['node'])).fetchall()
             for guest in guests:

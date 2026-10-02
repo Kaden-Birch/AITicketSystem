@@ -27,6 +27,8 @@ def proof(c, incident_id, agent_id, service_id, unit, diagnostic_id, now):
 
 
 def eligible(c, incident_id, agent_id, service_id, now, require_enabled=True):
+    if c.execute("SELECT 1 FROM power_jobs p JOIN agents a ON a.machine_id=p.machine_id WHERE a.id=? AND p.state IN ('approved','dispatched','authorized','verifying','unknown')",(agent_id,)).fetchone():
+        raise ValueError('Host power operation is outstanding; reconcile it before service recovery.')
     cfg=policy(c)
     if require_enabled and (not cfg.get('enabled') or not cfg.get('validated')):
         raise ValueError('Recovery execution is disabled or unvalidated.')

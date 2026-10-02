@@ -167,6 +167,11 @@ def import_inventory(store,vault,document):
                 placeholders=','.join('?' for _ in affected)
                 if c.execute("SELECT 1 FROM incidents i JOIN ai_jobs j ON j.incident_id=i.id WHERE i.machine_id IN ("+placeholders+") AND j.state IN ('pending','dispatching','running','unknown')",tuple(affected)).fetchone() or c.execute("SELECT 1 FROM agents a JOIN action_proposals p ON p.agent_id=a.id WHERE a.machine_id IN ("+placeholders+") AND p.state IN ('dispatched','authorized','verifying','unknown')",tuple(affected)).fetchone():
                     raise ValueError('Finish active AI/recovery work before importing affected machines.')
+            for machine in affected:
+                if c.execute("SELECT 1 FROM power_jobs WHERE machine_id=? AND state IN ('dispatched','authorized','verifying','unknown')",(machine,)).fetchone():
+                    raise ValueError('Reconcile host power execution before importing.')
+                c.execute('UPDATE power_policies SET enabled=0,validated=0,version=version+1 WHERE machine_id=?',(machine,))
+                c.execute("UPDATE power_jobs SET state='cancelled' WHERE machine_id=? AND state IN ('awaiting','approved')",(machine,))
             for name,rows in tables.items():
                 for original in rows:
                     row=dict(original)

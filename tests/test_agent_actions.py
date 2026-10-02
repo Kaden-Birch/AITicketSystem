@@ -69,3 +69,18 @@ def test_crash_and_changed_authorized_parameters_never_execute(tmp_path,monkeypa
     state={}
     runner.process_actions(state,tmp_path/'identity2.json',[job()],policy(),lambda payload:{'status':'authorized','proposal_hash':payload['proposal_hash'],'operation':'service_restart','parameters':{'unit':'changed.service'}})
     assert state['action_result']['status']=='unknown'
+
+
+def test_host_power_requires_local_permission_and_fixed_argv():
+    request={'operation':'host_shutdown','parameters':{},'expires':time.time()+60}
+    allowed={'power':{'enabled':True,'validated':True,'operations':['host_shutdown']}}
+    with patch.object(module.subprocess,'run',return_value=SimpleNamespace(returncode=0)) as command:
+        with pytest.raises(ValueError): module.execute(request,{'power':{}})
+        with pytest.raises(ValueError): module.execute({**request,'parameters':{'command':'reboot'}},allowed)
+        command.assert_not_called()
+        assert module.execute(request,allowed)['status']=='completed'
+        assert command.call_args.args[0]==['/usr/bin/systemctl','--no-ask-password','poweroff']
+        assert command.call_args.kwargs['shell'] is False
+    with patch.object(module.subprocess,'run',side_effect=subprocess.TimeoutExpired('systemctl',10)) as command:
+        assert module.execute(request,allowed)['status']=='unknown'
+        assert command.call_count==1

@@ -15,6 +15,8 @@ def tick(store, vault):
     prune(store)
     from .actions import tick as action_tick
     action_tick(store)
+    from .power import tick as power_tick
+    powered=power_tick(store,vault)
     notifications(store)
     from .proxmox import scheduled_refresh
     refreshed=scheduled_refresh(store,vault)
@@ -31,7 +33,7 @@ def tick(store, vault):
     delivery = claim(store, 'deliveries')
     if delivery:
         deliver(store, vault, delivery)
-    return bool(job or delivery or refreshed)
+    return bool(job or delivery or refreshed or powered)
 
 
 def deliver(store, vault, job):

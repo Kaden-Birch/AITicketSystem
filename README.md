@@ -2,9 +2,9 @@
 
 Self-hosted monitoring with useful incidents even when AI and the internet are unavailable.
 
-**Status: monitoring plus a restricted AI integration milestone; the full product is not complete.** AI defaults to disabled pending installed-Hermes/provider validation. The application now enforces per-call token and configured-price allowances through its budget gateway. Recovery defaults to disabled; an approval-required broker supports one explicitly allowlisted application service restart.
+**Status: monitoring plus a restricted AI integration milestone; the full product is not complete.** AI defaults to disabled pending installed-Hermes/provider validation. The application now enforces per-call token and configured-price allowances through its budget gateway. Recovery defaults to disabled; approval-required controls support allowlisted service recovery and separately enabled manual host/guest power operations.
 
-Included: authenticated UI, stable machine inventory, HTTP/TCP and read-only Proxmox checks, configurable failure/recovery thresholds, parent suppression, temporary maintenance, deterministic reports, manual notes/resolution, durable Discord delivery, filtered incident history, immutable configuration audit, transactional schema upgrades, and DHCP-safe Linux agent enrollment/telemetry.
+Included: a metric dashboard with clickable host workspaces, Proxmox guest status, ticket history, authenticated UI, stable machine inventory, HTTP/TCP and read-only Proxmox checks, configurable failure/recovery thresholds, parent suppression, temporary maintenance, deterministic reports, manual notes/resolution, durable Discord delivery, filtered incident history, immutable configuration audit, transactional schema upgrades, and DHCP-safe Linux agent enrollment/telemetry.
 
 ## Local development
 
@@ -79,3 +79,5 @@ Milestone 14 adds notification groups, per-machine/group overrides and visible e
 Milestone 15 adds atomic full inventory configuration transfer, reviewed check activation, immutable incident archive downloads, archive history filters and login/security auditing. Imported credentials and execution authority remain unavailable until locally restored and reviewed.
 
 Milestone 16 adds budgeted AI preparation of recovery proposal text, immutable unverified drafts and reviewed conversion into the existing exact-approval broker. Update and recheck the Hermes companion/adapter before using this mode.
+
+Milestone 17 adds [host dashboards and manual power controls](docs/host-dashboard.md): fresh/stale CPU, RAM, storage and uptime views, extra Linux metrics, node guest inventory, linked alert history, separate power credentials and exact-target approvals. Power defaults disabled; Proxmox node/storage shutdown remains protected. Live power permission/runtime validation remains deferred.

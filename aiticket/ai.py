@@ -112,6 +112,9 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
             raise ValueError('Recovery targets are valid only for proposal drafting.')
         if automatic and (not bridge.get('automatic') or SEVERITIES.index(incident['severity']) < SEVERITIES.index(bridge['minimum'])):
             return None
+        if c.execute("SELECT 1 FROM power_jobs WHERE machine_id=? AND state IN ('approved','dispatched','authorized','verifying','unknown')",(incident['machine_id'],)).fetchone():
+            if automatic: return None
+            raise ValueError('Host power execution is outstanding; independently reconcile it before AI.')
         if c.execute("SELECT 1 FROM action_proposals WHERE incident_id=? AND state IN ('approved','dispatched','authorized','verifying','unknown')", (incident_id,)).fetchone():
             if automatic: return None
             raise ValueError('Recovery approval/execution is outstanding; cancel it or verify the outcome before starting AI.')

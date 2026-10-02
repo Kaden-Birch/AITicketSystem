@@ -110,9 +110,51 @@ def create_app(data_dir=None, testing=False):
     @app.get('/')
     @login_required
     def dashboard():
-        return render_template('dashboard.html', checks=store.rows('SELECT checks.*,machines.name AS machine FROM checks JOIN machines ON machines.id=machine_id ORDER BY machines.name'),
+        from .hostview import overview
+        return render_template('dashboard.html', hosts=overview(store), checks=store.rows('SELECT checks.*,machines.name AS machine FROM checks JOIN machines ON machines.id=machine_id ORDER BY machines.name'),
                                incidents=store.rows('SELECT incidents.*,machines.name AS machine FROM incidents JOIN machines ON machines.id=machine_id WHERE incidents.archived_at IS NULL ORDER BY first_seen DESC LIMIT 100'),
                                jobs=store.rows('SELECT state,count(*) AS count FROM deliveries GROUP BY state'), ai_enabled=store.setting('hermes_config', {}).get('enabled', False))
+
+    @app.get('/hosts/<machine_id>')
+    @login_required
+    def host_detail(machine_id):
+        from .hostview import detail
+        data=detail(store,machine_id)
+        if not data: abort(404)
+        return render_template('host-detail.html',**data)
+
+    @app.post('/hosts/<machine_id>/power-policy')
+    @login_required
+    def power_policy(machine_id):
+        from .power import configure
+        f=request.form
+        configure(store,vault,machine_id,f.get('backend'),f.get('connection_id'),f.get('token_id',''),f.get('token_secret',''),enabled=f.get('enabled')=='yes',validated=f.get('validated')=='yes',confirm=f.get('confirm')=='yes')
+        return redirect(url_for('host_detail',machine_id=machine_id))
+
+    @app.post('/hosts/<machine_id>/power')
+    @login_required
+    def request_power(machine_id):
+        from .power import propose
+        propose(store,machine_id,request.form.get('operation'),request.form.get('reason',''))
+        return redirect(url_for('host_detail',machine_id=machine_id))
+
+    @app.post('/power/<job_id>/decide')
+    @login_required
+    def decide_power(job_id):
+        from .power import decide
+        if request.form.get('confirm')!='yes':
+            raise ValueError('Confirm the exact power operation or independently checked unknown outcome.')
+        decide(store,job_id,request.form.get('payload_hash'),request.form.get('decision'))
+        rows=store.rows('SELECT machine_id FROM power_jobs WHERE id=?',(job_id,))
+        return redirect(url_for('host_detail',machine_id=rows[0]['machine_id']))
+
+    @app.get('/proxmox/resources/<object_id>')
+    @login_required
+    def resource_detail(object_id):
+        from .hostview import object_detail
+        data=object_detail(store,object_id)
+        if not data: abort(404)
+        return render_template('host-detail.html',**data)
 
     @app.route('/hosts', methods=['GET', 'POST'])
     @login_required
@@ -496,6 +538,7 @@ def create_app(data_dir=None, testing=False):
 
     @app.post('/api/agent/heartbeat')
     def heartbeat():
+        from .power import poll as power_poll
         bearer = request.headers.get('Authorization', '')
         if not bearer.startswith('Bearer '):
             abort(401)
@@ -507,18 +550,24 @@ def create_app(data_dir=None, testing=False):
             abort(400)
         # Only numeric, bounded telemetry is accepted; no logs or arbitrary text.
         telemetry = payload.get('telemetry', {})
-        allowed = {'uptime_seconds', 'load_1', 'memory_available_bytes', 'memory_total_bytes', 'disk_free_bytes', 'disk_total_bytes', 'inode_free', 'inode_total', 'cpu_percent', 'memory_pressure_percent'}
+        allowed = {'uptime_seconds', 'load_1', 'memory_available_bytes', 'memory_total_bytes', 'disk_free_bytes', 'disk_total_bytes', 'inode_free', 'inode_total', 'cpu_percent', 'memory_pressure_percent','load_5','load_15','cpu_cores','swap_total_bytes','swap_free_bytes'}
         if not isinstance(telemetry, dict) or set(telemetry) - allowed or any(type(v) not in (float, int) or (not math.isfinite(v) or not 0 <= v <= 1e18) for v in telemetry.values()):
             abort(400)
         if any(telemetry.get(key,0)>100 for key in ('cpu_percent','memory_pressure_percent')):
             abort(400)
-        for free,total in (('memory_available_bytes','memory_total_bytes'),('disk_free_bytes','disk_total_bytes'),('inode_free','inode_total')):
+        for free,total in (('memory_available_bytes','memory_total_bytes'),('disk_free_bytes','disk_total_bytes'),('inode_free','inode_total'),('swap_free_bytes','swap_total_bytes')):
             if free in telemetry and total in telemetry and telemetry[free]>telemetry[total]:
                 abort(400)
+        host_info=payload.get('host_info',{})
+        if not isinstance(host_info,dict) or set(host_info)-{'hostname','os','kernel','architecture'} or any(not isinstance(v,str) or len(v)>200 for v in host_info.values()):
+            abort(400)
         capabilities=payload.get('capabilities',{})
-        if not isinstance(capabilities,dict) or set(capabilities)-{'operations','services','actions','action_services'} or any(not isinstance(capabilities.get(k,[]),list) for k in ('operations','services')):
+        if not isinstance(capabilities,dict) or set(capabilities)-{'operations','services','actions','action_services','power_operations'} or any(not isinstance(capabilities.get(k,[]),list) for k in ('operations','services')):
             abort(400)
         if len(capabilities.get('operations',[]))>3 or any(x not in ('process_summary','service_status','service_logs') for x in capabilities.get('operations',[])) or len(capabilities.get('services',[]))>20 or any(not isinstance(x,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',x) for x in capabilities.get('services',[])):
+            abort(400)
+        power_operations=capabilities.get('power_operations',[])
+        if not isinstance(power_operations,list) or len(power_operations)>2 or any(op not in ('host_restart','host_shutdown') for op in power_operations):
             abort(400)
         actions=capabilities.get('actions',[])
         action_services=capabilities.get('action_services',{})
@@ -535,15 +584,16 @@ def create_app(data_dir=None, testing=False):
             if c.execute('SELECT 1 FROM agent_events WHERE agent_id=? AND event_id=?', (row['id'], event)).fetchone():
                 from .diagnostics import poll
                 from .actions import poll as action_poll
-                return {'status': 'duplicate', 'jobs': poll(c,row['id'],time.time()), 'actions': action_poll(c,store,row['id'],time.time())}
+                return {'status': 'duplicate', 'jobs': poll(c,row['id'],time.time()), 'actions': action_poll(c,store,row['id'],time.time()) or power_poll(c,store,row['id'],time.time())}
             now = time.time()
+            c.execute('UPDATE agents SET host_info=? WHERE id=?',(json.dumps(host_info),row['id']))
             c.execute('INSERT INTO agent_events VALUES(?,?,?)', (row['id'], event, now))
             c.execute('DELETE FROM agent_events WHERE at<?', (now - 604800,))
             c.execute('UPDATE agents SET last_seen=?,address=?,version=?,telemetry=?,capabilities=?,sampled_at=? WHERE id=?', (now, request.remote_addr, str(payload.get('version', ''))[:32], json.dumps(telemetry), json.dumps(capabilities),sampled_at,row['id']))
             from .diagnostics import poll
             jobs=poll(c,row['id'],now)
             from .actions import poll as action_poll
-            actions=action_poll(c,store,row['id'],now)
+            actions=action_poll(c,store,row['id'],now) or power_poll(c,store,row['id'],now)
         return {'status': 'accepted', 'jobs': jobs, 'actions': actions}
 
     @app.route('/proxmox', methods=['GET','POST'])
@@ -876,12 +926,20 @@ def create_app(data_dir=None, testing=False):
         from .actions import authorize
         payload=request.get_json()
         if not isinstance(payload,dict): raise ValueError('Invalid action envelope.')
-        return authorize(store,action_agent(),payload)
+        agent_id=action_agent()
+        if store.rows('SELECT id FROM power_jobs WHERE id=?',(payload.get('id'),)):
+            from .power import authorize as power_authorize
+            return power_authorize(store,agent_id,payload)
+        return authorize(store,agent_id,payload)
 
     @app.post('/api/agent/action-result')
     def action_result():
         from .actions import complete
-        return {'status':complete(store,action_agent(),request.get_json())}
+        agent_id=action_agent();payload=request.get_json()
+        if isinstance(payload,dict) and store.rows('SELECT id FROM power_jobs WHERE id=?',(payload.get('id'),)):
+            from .power import complete as power_complete
+            return {'status':power_complete(store,agent_id,payload)}
+        return {'status':complete(store,agent_id,payload)}
 
     @app.post('/incidents/<incident_id>/handoff')
     @login_required

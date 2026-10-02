@@ -255,3 +255,5 @@ sudo docker compose up -d
 Startup applies transactional database migrations. If an upgrade fails, older code may reject a newer database: rollback requires the corresponding pre-upgrade database and key, not just a Git checkout. Keep the same Compose directory/project name so existing named volumes remain attached. Do not initialize again or delete volumes.
 
 For an agent upgrade, stop its service, replace all three matching Python files and the service unit using the installation commands, then run `sudo systemctl daemon-reload` and `sudo systemctl start aiticket-agent`. Keep its identity file and execution ledgers. No reenrollment is needed for a normal upgrade.
+
+For metric host workspaces, Proxmox guest status, optional manual power controls and the matching agent upgrade, see [the host dashboard guide](host-dashboard.md).

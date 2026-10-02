@@ -70,3 +70,5 @@ sudo systemctl start aiticket-agent
 The credential is stored in the existing mode-0600 identity file. Monitoring credential revocation or re-enrollment invalidates application-side action authority; issue a new separate credential afterward. Recovery execution identities remain in the durable ledger and are never evicted automatically.
 
 The agent runs unprivileged and installs no privilege grant. An administrator must separately configure and validate narrowly scoped operating-system permission for the exact service. Do not grant broad root, sudo or unrestricted service-management access. The supplied systemd hardening remains in place. No actual service restart has been performed during development.
+
+For metric host workspaces, Proxmox guest status, optional manual power controls and the matching agent upgrade, see [the host dashboard guide](host-dashboard.md).

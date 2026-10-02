@@ -121,3 +121,5 @@ Your reverse proxy may forward HTTPS requests to `http://192.0.2.10:8080`. Direc
 For HTTP communication with the Hermes companion, set `AITICKET_ALLOW_INSECURE_HTTP=1` in both the main app and companion service environment, restart them, and configure the companion's `--gateway` as `http://192.0.2.10:8080`. Set its HTTP address in **Hermes & usage**, leave CA paths empty for HTTP endpoints, rerun compatibility validation and follow the existing provider/budget activation workflow. The updated companion passes the transport opt-in into its isolated adapter. Signing and budget admission remain enforced. External providers/Discord can continue using their normal HTTPS URLs.
 
 To return to HTTPS-only application mode, set `AITICKET_ALLOW_INSECURE_HTTP=0`, choose the desired bind address, recreate the application container and switch agents back to verified HTTPS endpoints with `allow_http:false`. Initial installation does not enable AI or recovery in either mode.
+
+For metric host workspaces, Proxmox guest status, optional manual power controls and the matching agent upgrade, see [the host dashboard guide](host-dashboard.md).
