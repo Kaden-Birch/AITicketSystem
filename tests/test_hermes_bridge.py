@@ -133,3 +133,41 @@ def test_adapter_static_check_rejects_missing_interface(tmp_path,monkeypatch):
     (tmp_path/'.env').write_text('DO_NOT_LOAD=fixture')
     with pytest.raises(RuntimeError,match='.env'):
         installed_agent()
+
+
+class LegacyAgent:
+    reviews=0
+    def __init__(self,base_url=None,api_key=None,model='',max_iterations=90,enabled_toolsets=None,skip_context_files=False,skip_memory=False,load_soul_identity=False,request_overrides=None,quiet_mode=False,save_trajectories=False):
+        self.tools=[]
+        self.client=SimpleNamespace(base_url=base_url)
+        assert enabled_toolsets==[] and skip_context_files and skip_memory
+        assert not load_soul_identity and not save_trajectories
+    def _spawn_background_review(self,messages_snapshot,review_memory=False,review_skills=False,focus=None):
+        LegacyAgent.reviews+=1
+        raise AssertionError('Background review must never run')
+    def run_conversation(self,prompt):
+        self._spawn_background_review([],review_memory=True,review_skills=True)
+        return {'completed':True,'final_response':'Restricted legacy result'}
+
+
+def test_legacy_adapter_suppresses_review_without_patching_original(tmp_path,monkeypatch):
+    import sys
+    from aiticket.hermes_runner import installed_agent
+    monkeypatch.setenv('AITICKET_HERMES_SOURCE',str(tmp_path))
+    monkeypatch.setitem(sys.modules,'run_agent',SimpleNamespace(AIAgent=LegacyAgent))
+    original=LegacyAgent._spawn_background_review
+    restricted=installed_agent()
+    assert execute(restricted,envelope(),'https://192.0.2.10')['state']=='completed'
+    assert LegacyAgent.reviews==0 and LegacyAgent._spawn_background_review is original
+    with pytest.raises(RuntimeError,match='suppression'):
+        restricted(skip_background_review=False)
+
+
+def test_legacy_adapter_rejects_unknown_review_hook(tmp_path,monkeypatch):
+    import sys
+    from aiticket.hermes_runner import installed_agent
+    monkeypatch.setenv('AITICKET_HERMES_SOURCE',str(tmp_path))
+    class Unsupported(LegacyAgent):
+        def _spawn_background_review(self,other): pass
+    monkeypatch.setitem(sys.modules,'run_agent',SimpleNamespace(AIAgent=Unsupported))
+    with pytest.raises(RuntimeError,match='suppression interface'): installed_agent()

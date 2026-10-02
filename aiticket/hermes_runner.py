@@ -16,9 +16,26 @@ def installed_agent():
     if (source / '.env').exists():
         raise RuntimeError('Use a dedicated Hermes source installation without a project .env.')
     from run_agent import AIAgent
-    if not REQUIRED <= set(inspect.signature(AIAgent).parameters):
+    parameters=set(inspect.signature(AIAgent).parameters)
+    if not REQUIRED - {'skip_background_review'} <= parameters:
         raise RuntimeError('Installed Hermes lacks the restricted adapter interface.')
-    return AIAgent
+    if 'skip_background_review' in parameters:
+        return AIAgent
+    hook=getattr(AIAgent,'_spawn_background_review',None)
+    if not callable(hook) or list(inspect.signature(hook).parameters)!=['self','messages_snapshot','review_memory','review_skills','focus']:
+        raise RuntimeError('Installed Hermes lacks a supported background review suppression interface.')
+
+    class RestrictedLegacyAgent(AIAgent):
+        # Only this isolated integration instance is changed; no upstream patch.
+        def __init__(self, **kwargs):
+            if kwargs.pop('skip_background_review',None) is not True:
+                raise RuntimeError('Background review suppression is required.')
+            super().__init__(**kwargs)
+
+        def _spawn_background_review(self,messages_snapshot,review_memory=False,review_skills=False,focus=None):
+            return None
+
+    return RestrictedLegacyAgent
 
 
 def execute(agent_class, job, gateway):
