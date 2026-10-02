@@ -120,7 +120,8 @@ def observe(store, check_id, healthy, evidence, now=None, lease_token=None):
             store.timeline(c,iid,'severity_changed','Additional source evidence raised severity to '+severity+'.',now=now)
             enqueue(c,iid,'severity-'+severity,now,store)
         if recovered:
-            summary='Recovered: '+', '.join(r['check']+' is healthy' for r in sources)+'.'
+            repair=c.execute("SELECT resolution_summary FROM ai_jobs WHERE incident_id=? AND resolution_summary IS NOT NULL AND state IN ('running','completed') ORDER BY created DESC LIMIT 1",(iid,)).fetchone()
+            summary=(repair['resolution_summary'][:700]+ ' Recovery confirmed by fresh monitoring.') if repair else 'Recovered: '+', '.join(r['check']+' is healthy' for r in sources)+'.'
             resolve_verified(c,store,iid,summary,now)
 
 
@@ -134,6 +135,7 @@ def enqueue(c, incident_id, event, now, store):
     minimum=policy['minimum']
     if SEVERITIES.index(severity) < SEVERITIES.index(minimum):
         return
+    if event.startswith('blocker:') and not store.setting('discord_blockers',True): return
     if event == 'recovery' and not policy['recovery']:
         return
     c.execute('INSERT OR IGNORE INTO deliveries VALUES(?,?,?, ?,0,?,NULL,NULL,NULL,?,?)',
@@ -165,6 +167,10 @@ def claim(store, table, now=None, lease=60):
 def resolve_verified(c,store,incident_id,summary,now):
     row=c.execute('SELECT report,closed FROM incidents WHERE id=?',(incident_id,)).fetchone()
     if not row or row['closed'] is not None: return
+    from .worklog import end,clear
+    end(c,incident_id,'hermes','Resolved',now,summary)
+    end(c,incident_id,'user','Resolved',now,summary)
+    clear(c,incident_id,now)
     report=json.loads(row['report']);report['recovery_summary']=summary[:1000]
     report['recovered_at']=now;report['observed']='healthy'
     c.execute("UPDATE incidents SET status='Resolved',closed=?,last_seen=?,report=? WHERE id=?",(now,now,json.dumps(report),incident_id))
@@ -186,5 +192,5 @@ def resolution_tick(store,now=None):
             if not checks or any(r['health']!='healthy' or r['latest_health']!='healthy' or r['observed_at'] is None or r['observed_at']<job['created'] or now-r['observed_at']>max(180,r['interval']*3) for r in checks): continue
             sources=c.execute('SELECT c.enabled,s.report FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=?',(job['incident_id'],)).fetchall()
             if any(not r['enabled'] or json.loads(r['report']).get('observed')!='healthy' or now-json.loads(r['report']).get('observed_at',0)>180 for r in sources): continue
-            summary='Recovered: '+', '.join(r['name']+' is healthy' for r in checks)+'. AI repair summary (unverified explanation): '+job['resolution_summary']
+            summary=job['resolution_summary'][:700]+' Recovery confirmed by fresh monitoring.'
             resolve_verified(c,store,job['incident_id'],summary,now)

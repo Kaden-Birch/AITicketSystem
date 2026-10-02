@@ -1,6 +1,14 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 22
+CURRENT_VERSION = 23
 MIGRATIONS = {
+    23: (
+        "ALTER TABLE incident_control ADD COLUMN handling_mode TEXT NOT NULL DEFAULT 'automatic'",
+        "UPDATE incident_control SET handling_mode='human' WHERE owner='user'",
+        "CREATE TABLE work_sessions(id TEXT PRIMARY KEY,incident_id TEXT NOT NULL REFERENCES incidents(id),job_id TEXT REFERENCES ai_jobs(id),actor TEXT NOT NULL,started REAL NOT NULL,ended REAL,outcome TEXT NOT NULL DEFAULT 'working',summary TEXT NOT NULL DEFAULT '')",
+        "CREATE UNIQUE INDEX work_active ON work_sessions(incident_id,actor) WHERE ended IS NULL",
+        "CREATE TABLE ticket_blockers(id TEXT PRIMARY KEY,incident_id TEXT NOT NULL REFERENCES incidents(id),job_id TEXT REFERENCES ai_jobs(id),reason TEXT NOT NULL,created REAL NOT NULL,cleared REAL)",
+        "CREATE UNIQUE INDEX blocker_active ON ticket_blockers(incident_id) WHERE cleared IS NULL",
+    ),
     22: ("ALTER TABLE ai_jobs ADD COLUMN resolution_summary TEXT",),
     21: (
         "CREATE TABLE proxmox_api_jobs(id TEXT PRIMARY KEY,machine_id TEXT NOT NULL REFERENCES machines(id),ai_job_id TEXT REFERENCES ai_jobs(id),payload TEXT NOT NULL,fingerprint TEXT NOT NULL,policy_version INTEGER NOT NULL,binding TEXT NOT NULL,state TEXT NOT NULL,created REAL NOT NULL,expires REAL NOT NULL,dispatched REAL,result TEXT,completed REAL)",

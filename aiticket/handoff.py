@@ -8,7 +8,7 @@ ACTIVE = ('pending', 'dispatching', 'running', 'unknown')
 
 
 def control(c, incident_id):
-    c.execute("INSERT OR IGNORE INTO incident_control VALUES(?,'available',0,NULL,?)", (incident_id, time.time()))
+    c.execute("INSERT OR IGNORE INTO incident_control(incident_id,owner,generation,checkpoint_id,updated) VALUES(?,'available',0,NULL,?)", (incident_id, time.time()))
     return c.execute('SELECT * FROM incident_control WHERE incident_id=?', (incident_id,)).fetchone()
 
 
@@ -47,7 +47,9 @@ def take_control(c, store, incident_id, expected_generation=None):
     c.execute('INSERT INTO handoff_checkpoints VALUES(?,?,?,?,?)', (checkpoint_id, incident_id, job['id'] if job else None, now, json.dumps(snapshot)))
     for active in c.execute("SELECT id FROM ai_jobs WHERE incident_id=? AND state IN ('pending','dispatching','running','unknown')", (incident_id,)).fetchall():
         c.execute("UPDATE ai_jobs SET state='cancelled',completed=?,lease_until=NULL,lease_token=NULL WHERE id=?", (now, active['id']))
-    c.execute("UPDATE incident_control SET owner='user',generation=generation+1,checkpoint_id=?,updated=? WHERE incident_id=?", (checkpoint_id, now, incident_id))
+    from .worklog import end
+    end(c, incident_id, 'hermes', 'Paused', now)
+    c.execute("UPDATE incident_control SET owner='user',handling_mode='human',generation=generation+1,checkpoint_id=?,updated=? WHERE incident_id=?", (checkpoint_id, now, incident_id))
     store.timeline(c, incident_id, 'handoff_user', 'User took control. Further AI calls denied; in-flight usage remains held. Checkpoint '+checkpoint_id, actor='user')
     store.audit(c, 'handoff.user', incident_id, {'checkpoint_id':checkpoint_id})
     return checkpoint_id

@@ -93,3 +93,5 @@ Operational investigations preserve the current administrator task and linked Pr
 Automatic AI investigations include eligible monitoring and manual tickets when enabled. AI can request verified resolution; fresh monitoring controls closure and recovery notifications include a brief summary.
 
 Agent reporting is configurable down to 20 seconds in Settings. Dashboard, host and incident information updates automatically every five seconds while preserving unfinished forms.
+
+Ticket workspace, dark appearance, work sessions and blocker notifications: [guide](docs/ticket-workspace.md).

@@ -13,6 +13,8 @@ def tick(store, vault):
     from .policies import notifications
     from .administration import prune
     prune(store)
+    from .worklog import tick as work_tick
+    work_tick(store)
     from .actions import tick as action_tick
     action_tick(store)
     from .power import tick as power_tick
@@ -57,6 +59,8 @@ def deliver(store, vault, job):
     if not policy['enabled'] or SEVERITIES.index(incident['severity'])<SEVERITIES.index(policy['minimum']) or (job['event_key'].endswith(':recovery') and not policy['recovery']):
         outcome(store,job,'superseded',None)
         return
+    if ':blocker:' in job['event_key'] and not store.setting('discord_blockers',True):
+        outcome(store,job,'superseded',None);return
     if ':reminder:' in job['event_key'] and not policy['reminder_seconds']:
         outcome(store,job,'superseded',None)
         return
@@ -70,6 +74,14 @@ def deliver(store, vault, job):
     event=job['event_key'].split(':',1)[1]
     text = f"{event} · {incident['severity'].upper()} · {report['target']} · {report['check']}\n{incident['status']} · Cause: {report['cause']}\nIncident {incident['id']}"
     if event=='recovery': text+='\n'+report.get('recovery_summary','Monitoring independently confirmed recovery.')
+    from .worklog import ticket_url
+    link=ticket_url(store,incident['id'])
+    if event.startswith('blocker:'):
+        blockers=store.rows('SELECT reason FROM ticket_blockers WHERE id=? AND cleared IS NULL',(event.split(':',1)[1],))
+        if not blockers:
+            outcome(store,job,'superseded',None);return
+        text=f"Needs your attention · {report['target']} · {report['check']}\n{blockers[0]['reason']}"
+    if link: text=text[:1500]+'\nOpen ticket: '+link
     url = vault.decrypt(configured)
     try:
         r = requests.post(url, json={'content': text[:1900], 'allowed_mentions': {'parse': []}}, timeout=(3, 8), allow_redirects=False)

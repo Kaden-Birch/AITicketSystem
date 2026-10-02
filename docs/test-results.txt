@@ -1,4 +1,4 @@
-265 passed in 26.41s
+272 passed in 27.27s
 
 HTTP opt-in tests cover cookie configuration, URL restrictions, persisted agent enrollment, nonredirecting credential delivery, continued HTTPS verification and isolated Hermes configuration.
 Local Python 3.14.6; temporary databases, fake Hermes adapters and mocked external providers/subprocesses.
@@ -27,3 +27,5 @@ Checkpoint task correction: operational triage tasks survive pause, explicit cur
 Automatic investigation and resolution milestone: opt-in admission now includes manual tickets; per-incident blockers do not stop later admission and are recorded without repeated timeline noise. Verified resolution requests wait for successful AI completion, fresh healthy host/source observations and no outstanding operations. Recovery messages include a concise summary and manual administrator resolution also queues a notification. Notification requests were mocked; no live Discord message or model call was sent. Lifecycle/handoff checks rerun after excluding old requests superseded by newer investigations or administrator ownership (18 passed).
 
 Agent reporting/live pages: reporting interval validation, persisted agent-check cadence and accepted/duplicate heartbeat interval delivery verified. JavaScript syntax checked with Node. Browser fixture verification observed CPU changing 40% → 63%, a new AI result and timeline entry appearing without reload, and preservation of an unfinished note. No live infrastructure/model request executed. Screen organization unchanged.
+
+Ticket workspace milestone: session-based AI/human work, queue/wait exclusion, intervention deduplication, same-ticket clarification, authenticated blocker tool, public URL validation and Discord linking/suppression. Browser fixture reviewed in light/dark appearance with ticket creation, live timer, blocker banner and preserved draft. No live AI, host command or Discord notification sent.

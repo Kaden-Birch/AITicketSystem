@@ -189,6 +189,16 @@ def create_app(data_dir=None, testing=False):
                 machine=incident['machine_id'];incident_id=job['incident_id']
         else:
             machine=payload.get('machine_id');incident_id=payload.get('incident_id')
+        if action=='block':
+            if not ai_job: abort(403)
+            reason=payload.get('summary')
+            if not isinstance(reason,str) or not 1<=len(reason.strip())<=1000: raise ValueError('Supply a brief blocker explanation.')
+            from .worklog import block
+            with store.connect() as c:
+                c.execute('BEGIN IMMEDIATE')
+                if not ai_allowed(c,ai_job): abort(403)
+                block(c,store,incident_id,ai_job,reason,time.time())
+            return {'state':'waiting_for_human','note':'Finish this run with a brief note. The administrator can reply and resume this ticket.'}
         if action=='resolve':
             if not ai_job: abort(403)
             summary=payload.get('summary')
@@ -271,9 +281,12 @@ def create_app(data_dir=None, testing=False):
         if request.method=='POST':
             from .host_admin import open_ticket
             f=request.form
-            identifier=open_ticket(store,f.get('machine_id'),f.get('title',''),f.get('description',''),f.get('severity','low'),f.get('notify')=='yes')
+            handling=f.get('handling_mode','automatic')
+            if handling not in ('automatic','human','paused'): raise ValueError('Unknown handling mode.')
+            identifier=open_ticket(store,f.get('machine_id'),f.get('title',''),f.get('description',''),f.get('severity','low'),f.get('notify')=='yes',handling_mode=handling)
             return redirect(url_for('incident',incident_id=identifier))
-        return render_template('ticket-new.html',machines=store.rows('SELECT id,name FROM machines ORDER BY name'),selected=request.args.get('machine',''))
+        from .hostview import overview
+        return render_template('ticket-new.html',host_previews=overview(store),machines=store.rows('SELECT id,name FROM machines ORDER BY name'),selected=request.args.get('machine',''))
 
     @app.post('/hosts/<machine_id>/power-policy')
     @login_required
@@ -383,7 +396,9 @@ def create_app(data_dir=None, testing=False):
             abort(404)
         from .ai import meter
         from .handoff import view
-        return render_template('incident.html', recovery_drafts=[{**d,'data':json.loads(d['payload'])} for d in store.rows('SELECT d.*,a.proposal_id FROM recovery_drafts d LEFT JOIN draft_adoptions a ON a.job_id=d.job_id WHERE d.incident_id=? ORDER BY d.created DESC LIMIT 100',(incident_id,))], merge_candidates=store.rows("SELECT id,severity,first_seen FROM incidents WHERE machine_id=? AND id<>? AND closed IS NULL AND status<>'Resolved'",(rows[0]['machine_id'],incident_id)), ownership=view(store, incident_id), handoff_request_id=uid(), proposals=[{**p,'data':json.loads(p['payload'])} for p in store.rows('SELECT * FROM action_proposals WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,))], action_agents=[{**a,'action_services':json.loads(a['capabilities']).get('action_services',{})} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))], automatic_ai_config=store.setting('hermes_config',{}),workspace_request_id=uid(), workspace_messages=store.rows('SELECT m.*,j.state,j.mode FROM ai_messages m JOIN ai_jobs j ON j.id=m.job_id WHERE m.incident_id=? ORDER BY m.created DESC LIMIT 100', (incident_id,)), workspace_sources=store.rows('SELECT s.check_id,c.name FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=?',(incident_id,)), ai_jobs=store.rows('SELECT id,state,mode,execution_mode,model,reasoning_effort,created,summary,error,resolution_summary FROM ai_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100', (incident_id,)), ai_meter=meter(store, incident_id), incident=rows[0], report=json.loads(rows[0]['report']), timeline=store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at', (incident_id,)), links=store.rows('SELECT * FROM incident_links WHERE left_id=? OR right_id=?',(incident_id,incident_id)), diagnostic_jobs=store.rows('SELECT * FROM diagnostic_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,)), diagnostic_agents=[{**a,'caps':json.loads(a['capabilities'])} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))])
+        from .worklog import view as work_view
+        from .hostview import detail
+        return render_template('incident.html', machine_detail=detail(store,rows[0]['machine_id']),work=work_view(store,incident_id),recovery_drafts=[{**d,'data':json.loads(d['payload'])} for d in store.rows('SELECT d.*,a.proposal_id FROM recovery_drafts d LEFT JOIN draft_adoptions a ON a.job_id=d.job_id WHERE d.incident_id=? ORDER BY d.created DESC LIMIT 100',(incident_id,))], merge_candidates=store.rows("SELECT id,severity,first_seen FROM incidents WHERE machine_id=? AND id<>? AND closed IS NULL AND status<>'Resolved'",(rows[0]['machine_id'],incident_id)), ownership=view(store, incident_id), handoff_request_id=uid(), proposals=[{**p,'data':json.loads(p['payload'])} for p in store.rows('SELECT * FROM action_proposals WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,))], action_agents=[{**a,'action_services':json.loads(a['capabilities']).get('action_services',{})} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))], automatic_ai_config=store.setting('hermes_config',{}),workspace_request_id=uid(), workspace_messages=store.rows('SELECT m.*,j.state,j.mode FROM ai_messages m JOIN ai_jobs j ON j.id=m.job_id WHERE m.incident_id=? ORDER BY m.created DESC LIMIT 100', (incident_id,)), workspace_sources=store.rows('SELECT s.check_id,c.name FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=?',(incident_id,)), ai_jobs=store.rows('SELECT id,state,mode,execution_mode,model,reasoning_effort,created,summary,error,resolution_summary FROM ai_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100', (incident_id,)), ai_meter=meter(store, incident_id), incident=rows[0], report=json.loads(rows[0]['report']), timeline=store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at', (incident_id,)), links=store.rows('SELECT * FROM incident_links WHERE left_id=? OR right_id=?',(incident_id,incident_id)), diagnostic_jobs=store.rows('SELECT * FROM diagnostic_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,)), diagnostic_agents=[{**a,'caps':json.loads(a['capabilities'])} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))])
 
     @app.post('/incidents/<incident_id>/archive')
     @login_required
@@ -432,6 +447,10 @@ def create_app(data_dir=None, testing=False):
                 take_control(c, store, incident_id)
                 # Keep the condition attached; no endless reopening while it is unhealthy.
                 report = json.loads(row['report'])
+                from .worklog import end,clear
+                end(c,incident_id,'hermes','Resolved',time.time(),text)
+                end(c,incident_id,'user','Resolved',time.time(),text)
+                clear(c,incident_id,time.time())
                 report['manual_resolution'] = True
                 report['recovery_summary']='Administrator marked resolved: '+text[:1000]
                 c.execute("UPDATE incidents SET status='Resolved',report=? WHERE id=?", (json.dumps(report), incident_id))
@@ -455,7 +474,8 @@ def create_app(data_dir=None, testing=False):
                 flash('Agent reporting interval saved; updated agents apply it on their next heartbeat.')
                 return redirect(url_for('settings'))
             if request.form.get('section') == 'discord':
-                updates = {}
+                from .worklog import public_url
+                updates = {'public_url':public_url(request.form.get('public_url',store.setting('public_url',''))),'discord_blockers':bool(request.form.get('blockers'))}
                 secret = request.form.get('webhook', '').strip()
                 if secret:
                     validate_url(secret, ('https',))
@@ -478,7 +498,7 @@ def create_app(data_dir=None, testing=False):
                 store.save_many({'ai_config': cfg}, actor='user')
             flash('Settings saved. AI activation is managed on the Hermes page.')
             return redirect(url_for('settings'))
-        return render_template('settings.html', agent_interval=store.setting('agent_interval',30),ai=store.setting('ai_config', AI_DEFAULTS), discord_configured=bool(store.setting('discord_secret')), minimum=store.setting('discord_minimum', 'medium'), recovery=store.setting('discord_recovery', True), ai_enabled=store.setting('hermes_config', {}).get('enabled', False))
+        return render_template('settings.html', public_url=store.setting('public_url',''),blockers=store.setting('discord_blockers',True),agent_interval=store.setting('agent_interval',30),ai=store.setting('ai_config', AI_DEFAULTS), discord_configured=bool(store.setting('discord_secret')), minimum=store.setting('discord_minimum', 'medium'), recovery=store.setting('discord_recovery', True), ai_enabled=store.setting('hermes_config', {}).get('enabled', False))
 
 
     @app.route('/administration', methods=['GET', 'POST'])
@@ -1126,6 +1146,57 @@ def create_app(data_dir=None, testing=False):
             return {'status':power_complete(store,agent_id,payload)}
         return {'status':complete(store,agent_id,payload)}
 
+    @app.post('/incidents/<incident_id>/work')
+    @login_required
+    def human_work(incident_id):
+        from .worklog import start,end
+        operation=request.form.get('operation')
+        if operation not in ('start','stop'): raise ValueError('Unknown work operation.')
+        with store.connect() as c:
+            c.execute('BEGIN IMMEDIATE')
+            row=c.execute('SELECT status FROM incidents WHERE id=?',(incident_id,)).fetchone()
+            if not row: abort(404)
+            if operation=='start':
+                if row['status']=='Resolved': raise ValueError('This ticket is already resolved.')
+                start(c,incident_id,'user',time.time())
+            else: end(c,incident_id,'user','Session complete',time.time())
+        return redirect(url_for('incident',incident_id=incident_id))
+
+    @app.post('/incidents/<incident_id>/handling')
+    @login_required
+    def ticket_handling(incident_id):
+        from .handoff import pause,resume,view
+        mode=request.form.get('handling_mode')
+        if mode not in ('automatic','human','paused'): raise ValueError('Unknown handling mode.')
+        generation=int(request.form.get('generation','-1'))
+        current=view(store,incident_id)
+        if generation!=current['generation']: raise ValueError('Ticket control changed; reload before switching modes.')
+        if mode=='automatic':
+            if current['owner']=='user':
+                resume(store,vault,incident_id,current['checkpoint_id'],generation,request.form.get('request_id'),request.form.get('current_task'))
+        else: pause(store,incident_id,generation)
+        with store.connect() as c:
+            c.execute('UPDATE incident_control SET handling_mode=? WHERE incident_id=?',(mode,incident_id))
+            if mode!='human':
+                from .worklog import end
+                end(c,incident_id,'user','Stopped',time.time())
+        return redirect(url_for('incident',incident_id=incident_id))
+
+    @app.post('/incidents/<incident_id>/continue')
+    @login_required
+    def continue_ticket(incident_id):
+        from .handoff import view,pause,resume
+        task=request.form.get('current_task','').strip()
+        if not task or len(task)>2000: raise ValueError('Provide a task or clarification of 1–2000 characters.')
+        current=view(store,incident_id)
+        if current['owner']!='user':
+            pause(store,incident_id,current['generation'])
+            current=view(store,incident_id)
+        task=request.form.get('current_task','').strip()
+        if not task or len(task)>2000: raise ValueError('Provide a task or clarification of 1–2000 characters.')
+        resume(store,vault,incident_id,current['checkpoint_id'],current['generation'],request.form.get('request_id'),task)
+        return redirect(url_for('incident',incident_id=incident_id))
+
     @app.post('/incidents/<incident_id>/handoff')
     @login_required
     def handoff(incident_id):
@@ -1181,6 +1252,9 @@ def create_app(data_dir=None, testing=False):
         with store.connect() as c:
             job=c.execute('SELECT * FROM ai_jobs WHERE id=?',(job_id,)).fetchone()
             allowed=permission(c,job)
+            if allowed:
+                from .worklog import update_job
+                update_job(c,store,dict(job),'running',time.time())
         response=app.json.response({'allowed':allowed})
         response.headers['Cache-Control']='no-store'
         return response

@@ -178,6 +178,9 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
         generation = ownership['generation']+1
         c.execute("UPDATE incident_control SET owner='ai',generation=?,updated=? WHERE incident_id=?", (generation, now, incident_id))
         c.execute('UPDATE ai_jobs SET control_generation=? WHERE id=?', (generation, job_id))
+        from .worklog import clear
+        clear(c, incident_id, now)
+        c.execute("UPDATE incident_control SET handling_mode='automatic' WHERE incident_id=?",(incident_id,))
         if resume_checkpoint:
             store.timeline(c, incident_id, 'handoff_ai', 'New read-only execution resumed from checkpoint '+resume_checkpoint+' · '+job_id, actor='user', now=now)
             store.audit(c, 'handoff.ai', incident_id, {'checkpoint_id':resume_checkpoint, 'job_id':job_id})
@@ -363,6 +366,8 @@ def apply_status(store, job_id, document, now=None):
                 state='failed'
                 summary=str(exc)
         c.execute('UPDATE ai_jobs SET state=?,summary=?,completed=?,error=?,next_attempt=?,lease_until=NULL,lease_token=NULL WHERE id=?', (state, redact(summary), now if state in TERMINAL else None, 'Bridge interrupted; execution must not be replayed.' if state=='unknown' else None, now+30, job_id))
+        from .worklog import update_job
+        update_job(c, store, dict(job), state, now, redact(summary))
         if state in TERMINAL:
             from .handoff import release
             release(c, job)
@@ -381,6 +386,8 @@ def cancel(store, job_id):
             raise ValueError('Unknown AI execution.')
         if job['state'] not in TERMINAL:
             c.execute("UPDATE ai_jobs SET state='cancelled',completed=?,lease_until=NULL,lease_token=NULL WHERE id=?", (time.time(), job_id))
+            from .worklog import end
+            end(c,job['incident_id'],'hermes','Stopped',time.time())
             store.timeline(c, job['incident_id'], 'ai_cancelled', 'Further model requests denied; in-flight usage remains reserved.', actor='user')
             store.audit(c, 'ai.cancelled', job_id)
             from .handoff import release
@@ -419,6 +426,8 @@ def tick(store, vault, now=None):
             c.execute("UPDATE ai_jobs SET state='cancelled',completed=? WHERE id=?", (now, job['id']))
             from .handoff import release
             release(c, job)
+            from .worklog import end
+            end(c,job['incident_id'],'hermes','Stopped',time.time())
             store.timeline(c, job['incident_id'], 'ai_cancelled', 'Incident resolved; further model calls denied.', now=now)
             return True
         token = uid()

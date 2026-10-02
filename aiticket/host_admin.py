@@ -25,7 +25,8 @@ def edit(store,machine_id,name,parent):
         store.audit(c,'machine.updated',machine_id,{'name':name,'parent_id':parent})
 
 
-def open_ticket(store,machine_id,title,description,severity,notify=False):
+def open_ticket(store,machine_id,title,description,severity,notify=False,handling_mode='automatic'):
+    if handling_mode not in ('automatic','human','paused'): raise ValueError('Unknown handling mode.')
     title=title.strip();description=description.strip()
     if not 1<=len(title)<=100 or not 1<=len(description)<=4000 or severity not in SEVERITIES:
         raise ValueError('Supply a title (1–100), description (1–4000) and valid severity.')
@@ -39,6 +40,10 @@ def open_ticket(store,machine_id,title,description,severity,notify=False):
         c.execute("INSERT INTO checks(id,machine_id,name,kind,config,interval,enabled,severity) VALUES(?,?,?,'manual','{}',60,0,?)",(source,machine_id,title,severity))
         report={'target':machine['name'],'check':title,'title':title,'description':description,'manual_ticket':True,'cause':'Unknown','observed':'user reported','expected':'Administrator review','evidence':{'description':description},'sources':[],'severity':severity,'ai_status':'disabled','observed_at':now}
         c.execute("INSERT INTO incidents(id,machine_id,check_id,severity,severity_floor,status,first_seen,last_seen,report,condition_key) VALUES(?,?,?,?,?,'Open',?,?,?,'manual-ticket')",(identifier,machine_id,source,severity,severity,now,now,json.dumps(report)))
+        if handling_mode!='automatic':
+            from .handoff import take_control
+            take_control(c,store,identifier)
+            c.execute('UPDATE incident_control SET handling_mode=? WHERE incident_id=?',(handling_mode,identifier))
         store.timeline(c,identifier,'manual_opened',description,actor='user',now=now)
         store.audit(c,'incident.manual_created',identifier,{'machine_id':machine_id,'severity':severity,'notify':notify})
         if notify:

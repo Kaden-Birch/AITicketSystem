@@ -210,3 +210,7 @@ sudo systemctl restart aiticket-agent
 ```
 
 Dashboard, host workspaces, incident pages, Proxmox inventory and history/queue/audit/Hermes views refresh displayed information every five seconds without navigation or a full browser reload. Metric values change when new agent samples or Proxmox refreshes arrive, not every UI poll. New AI results, timeline entries, command results and ticket status appear automatically. Unsaved/active forms and expanded disclosures are preserved. Hidden tabs pause polling; connection failures retry and expired sessions stop polling. Polling never queues AI or executes commands. The screen organization remains unchanged.
+
+## Ticket workspace and blocker requests
+
+The operational tool also supports `block` with a brief `summary` when human input is needed. The ticket shows a blocker banner, stops its work session, and can notify Discord with a configured public ticket URL. See [ticket workspace](ticket-workspace.md) for appearance, session tracking and upgrading both the application and bridge.

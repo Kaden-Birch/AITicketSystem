@@ -6,14 +6,19 @@ import time
 from werkzeug.security import generate_password_hash
 from .engine import SEVERITIES
 
-KEYS = {'ai_config', 'discord_minimum', 'discord_recovery', 'notification_policy', 'retention_days'}
+KEYS = {'ai_config', 'discord_minimum', 'discord_recovery', 'notification_policy', 'retention_days', 'public_url', 'discord_blockers'}
 
 
 def validate(values):
     if not isinstance(values, dict) or set(values) - KEYS:
         raise ValueError('Only supported nonsecret preferences can be imported.')
     for key, value in values.items():
-        if key == 'retention_days':
+        if key=='public_url':
+            from .worklog import public_url
+            if not isinstance(value,str) or public_url(value)!=value: raise ValueError('Invalid public application URL.')
+        elif key=='discord_blockers':
+            if type(value) is not bool: raise ValueError('Blocker notification preference must be true or false.')
+        elif key == 'retention_days':
             if type(value) is not int or not 1 <= value <= 3650:
                 raise ValueError('Retention must be 1–3650 days.')
         elif key == 'discord_minimum':
@@ -147,6 +152,8 @@ def archive_incident(store,incident_id,restore=False):
             'sources':[dict(r) for r in c.execute('SELECT * FROM incident_sources WHERE incident_id=?',(incident_id,))],
             'observations':[dict(r) for r in c.execute('SELECT o.* FROM observations o JOIN incident_observations i ON i.observation_id=o.id WHERE i.incident_id=? ORDER BY o.at',(incident_id,))],
             'timeline':[dict(r) for r in c.execute('SELECT * FROM timeline WHERE incident_id=? ORDER BY at',(incident_id,))],
+            'work_sessions':[dict(r) for r in c.execute('SELECT * FROM work_sessions WHERE incident_id=? ORDER BY started',(incident_id,))],
+            'blockers':[dict(r) for r in c.execute('SELECT * FROM ticket_blockers WHERE incident_id=? ORDER BY created',(incident_id,))],
             'commands':[dict(r) for r in c.execute('SELECT id,machine_id,agent_id,ai_job_id,fingerprint,state,created,result,completed FROM command_jobs WHERE incident_id=?',(incident_id,))],
             'diagnostics':[dict(r) for r in c.execute('SELECT id,agent_id,operation,parameters,state,created,result,completed FROM diagnostic_jobs WHERE incident_id=?',(incident_id,))],
             'ai_messages':[dict(r) for r in c.execute('SELECT * FROM ai_messages WHERE incident_id=? ORDER BY created',(incident_id,))],
