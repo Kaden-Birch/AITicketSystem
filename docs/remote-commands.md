@@ -180,3 +180,7 @@ Example: ask Hermes to inspect the current state of the linked VM and, if stoppe
 Proxmox requests persist dispatch before delivery and never automatically replay. Network ambiguity, server errors or oversized responses lock that host's API operations as unknown until independent reconciliation. Cancelling an awaiting request prevents delivery; cancelling or undoing an already accepted Proxmox task is a separate token-authorized API operation. Policy changes, unlinking or migrations invalidate queued request bindings; do not replay the old request. Key rotation re-encrypts payloads; inventory imports disable permission and refuse unresolved dispatched operations.
 
 Local tests use mocked Proxmox responses. No live Proxmox mutation or model request has been performed by these checks.
+
+### Resuming older checkpoints
+
+The incident page now shows an editable **Current task for this resumed investigation** above the resume button. For an old checkpoint containing a generic read-only review task, replace that text with the action you currently authorize before resuming. New checkpoints preserve the actual operational task, including manual-ticket triage tasks. Resuming creates a new execution with that visible task; historical checkpoint outputs do not authorize replay of previously dispatched commands. Update/rebuild the main application for this field; the bridge does not need another update for this correction.

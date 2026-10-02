@@ -186,3 +186,31 @@ def test_schema_nine_upgrade_preserves_active_ai_ownership(tmp_path):
     assert store.rows('SELECT version FROM schema_version')==[{'version': __import__('aiticket.migrations',fromlist=['CURRENT_VERSION']).CURRENT_VERSION}]
     assert handoff.view(store,'i')['owner']=='ai'
     assert store.rows('SELECT control_generation FROM ai_jobs')==[{'control_generation':0}]
+
+
+def test_resumed_current_task_overrides_generic_history_and_is_idempotent(environment):
+    from test_codex_mode import configure
+    _,store,vault=environment
+    incident=configure(store,vault,command_tools=True)
+    checkpoint=handoff.pause(store,incident,handoff.view(store,incident)['generation'])
+    state=handoff.view(store,incident);identity=uid()
+    task='Execute id; hostname; uptime now and report actual output.'
+    resumed=handoff.resume(store,vault,incident,checkpoint,state['generation'],identity,current_task=task)
+    evidence=json.loads(store.rows('SELECT evidence FROM ai_jobs WHERE id=?',(resumed,))[0]['evidence'])
+    assert evidence['administrator_task']==task and evidence['question']==task
+    assert evidence['checkpoint']['id']==checkpoint
+    assert handoff.resume(store,vault,incident,checkpoint,state['generation'],identity,current_task=task)==resumed
+    with pytest.raises(ValueError,match='different parameters'):
+        handoff.resume(store,vault,incident,checkpoint,state['generation'],identity,current_task='Different task')
+
+
+def test_checkpoint_preserves_operational_triage_task(environment):
+    from test_codex_mode import configure
+    _,store,vault=environment;incident=configure(store,vault,command_tools=True)
+    with store.connect() as c:
+        report=json.loads(c.execute('SELECT report FROM incidents WHERE id=?',(incident,)).fetchone()[0])
+        report.update(manual_ticket=True,description='Execute id and inspect the linked VM.')
+        c.execute('UPDATE incidents SET report=? WHERE id=?',(json.dumps(report),incident))
+    ai.request_job(store,vault,incident)
+    checkpoint=handoff.pause(store,incident,handoff.view(store,incident)['generation'])
+    assert handoff.view(store,incident)['checkpoint']['data']['question']=='Execute id and inspect the linked VM.'

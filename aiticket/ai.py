@@ -60,8 +60,10 @@ def evidence_snapshot(value):
     return redact(value) if isinstance(value, str) else value
 
 
-def request_job(store, vault, incident_id, automatic=False, now=None, mode='triage', question='', request_id=None, source_ids=(), diagnostic_ids=(), resume_checkpoint=None, expected_generation=None, recovery_target=None):
+def request_job(store, vault, incident_id, automatic=False, now=None, mode='triage', question='', request_id=None, source_ids=(), diagnostic_ids=(), resume_checkpoint=None, expected_generation=None, recovery_target=None, resume_task=None):
     now = time.time() if now is None else now
+    if resume_task is not None and (not resume_checkpoint or not isinstance(resume_task,str) or not 1<=len(resume_task.strip())<=2000):
+        raise ValueError('Supply a current checkpoint task of 1–2000 characters.')
     if mode not in ('triage', 'advice', 'exploration','recovery_proposal') or (automatic and mode != 'triage'):
         raise ValueError('Unsupported AI workspace mode.')
     if mode != 'triage':
@@ -72,7 +74,7 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
             uuid.UUID(request_id)
         except (ValueError, TypeError, AttributeError):
             raise ValueError('Invalid request identity; reload the incident page.')
-    fingerprint = hashlib.sha256(json.dumps({'mode': mode, 'question': question.strip(), 'sources': sorted(source_ids), 'diagnostics': sorted(diagnostic_ids), 'checkpoint': resume_checkpoint, 'generation': expected_generation,'recovery_target':recovery_target}, sort_keys=True).encode()).hexdigest()
+    fingerprint = hashlib.sha256(json.dumps({'mode': mode, 'question': question.strip(), 'sources': sorted(source_ids), 'diagnostics': sorted(diagnostic_ids), 'checkpoint': resume_checkpoint, 'generation': expected_generation,'recovery_target':recovery_target,**({'resume_task':resume_task.strip()} if resume_task else {})}, sort_keys=True).encode()).hexdigest()
     with store.connect() as c:
         c.execute('BEGIN IMMEDIATE')
         if request_id:
@@ -104,7 +106,7 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
                 raise ValueError('Unknown incident checkpoint.')
             checkpoint_data = json.loads(checkpoint['snapshot'])
             checkpoint_data['id'] = resume_checkpoint
-            question = checkpoint_data['question']
+            question = resume_task.strip() if resume_task else checkpoint_data['question']
             # Refresh selected sources; detached selections are explicitly omitted from the new run.
             source_ids = [identifier for identifier in checkpoint_data['source_ids'] if c.execute('SELECT 1 FROM incident_sources WHERE incident_id=? AND check_id=?',(incident_id,identifier)).fetchone()]
             diagnostic_ids = [identifier for identifier in checkpoint_data['diagnostic_ids'] if c.execute("SELECT 1 FROM diagnostic_jobs WHERE incident_id=? AND id=? AND state='completed'",(incident_id,identifier)).fetchone()]

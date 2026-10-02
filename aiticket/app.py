@@ -1109,7 +1109,7 @@ def create_app(data_dir=None, testing=False):
         if request.form.get('operation')=='pause':
             pause(store, incident_id, generation)
         elif request.form.get('operation')=='resume':
-            resume(store, vault, incident_id, request.form.get('checkpoint_id'), generation, request.form.get('request_id'))
+            resume(store, vault, incident_id, request.form.get('checkpoint_id'), generation, request.form.get('request_id'),request.form.get('current_task'))
         else:
             raise ValueError('Unknown handoff operation.')
         return redirect(url_for('incident', incident_id=incident_id))
