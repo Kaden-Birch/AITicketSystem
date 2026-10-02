@@ -121,8 +121,8 @@ def create_app(data_dir=None, testing=False):
     @app.get('/hosts/<machine_id>')
     @login_required
     def host_detail(machine_id):
-        connection=store.rows('SELECT id FROM unifi_connections WHERE machine_id=?',(machine_id,))
-        device=store.rows('SELECT connection_id,device_id FROM unifi_devices WHERE machine_id=?',(machine_id,))
+        connection=store.rows('SELECT id FROM unifi_connections WHERE machine_id=? AND deleted IS NULL',(machine_id,))
+        device=store.rows('SELECT connection_id,device_id FROM unifi_devices WHERE machine_id=? AND deleted IS NULL',(machine_id,))
         if connection: return redirect('/network-devices/'+connection[0]['id'])
         if device: return redirect('/network-devices/'+device[0]['connection_id']+'/devices/'+device[0]['device_id'])
         from .hostview import detail
@@ -665,7 +665,7 @@ def create_app(data_dir=None, testing=False):
             if enabled:
                 from .inventory import config,CONFIG
                 if row['kind'] in ('unifi','unifi_device'):
-                    if not (c.execute('SELECT 1 FROM unifi_connections WHERE id=? AND machine_id=?',(cfg.get('connection_id'),row['machine_id'])).fetchone() or c.execute('SELECT 1 FROM unifi_devices WHERE connection_id=? AND machine_id=?',(cfg.get('connection_id'),row['machine_id'])).fetchone()): raise ValueError('Restore the UniFi connection first.')
+                    if not (c.execute('SELECT 1 FROM unifi_connections WHERE id=? AND deleted IS NULL AND machine_id=?',(cfg.get('connection_id'),row['machine_id'])).fetchone() or c.execute('SELECT 1 FROM unifi_devices WHERE connection_id=? AND machine_id=? AND deleted IS NULL',(cfg.get('connection_id'),row['machine_id'])).fetchone()): raise ValueError('Restore the UniFi connection first.')
                 else: config(row['kind'],{k:v for k,v in cfg.items() if k in CONFIG[row['kind']]})
                 if row['kind']=='proxmox':
                     secret=request.form.get('token_secret','')
@@ -922,8 +922,8 @@ def create_app(data_dir=None, testing=False):
     @app.get('/network-devices')
     @login_required
     def network_devices():
-        connections=store.rows('SELECT id,name,kind,machine_id,snapshot FROM unifi_connections ORDER BY name')
-        devices=store.rows('SELECT d.*,u.name AS connection_name FROM unifi_devices d JOIN unifi_connections u ON u.id=d.connection_id ORDER BY u.name')
+        connections=store.rows('SELECT id,name,kind,machine_id,snapshot FROM unifi_connections WHERE deleted IS NULL ORDER BY name')
+        devices=store.rows('SELECT d.*,u.name AS connection_name FROM unifi_devices d JOIN unifi_connections u ON u.id=d.connection_id WHERE d.deleted IS NULL AND u.deleted IS NULL ORDER BY u.name')
         for item in connections: item['snapshot']=json.loads(item['snapshot']) if item['snapshot'] else None
         for item in devices: item['device']=json.loads(item['data']).get('device',{})
         return render_template('network-devices.html',connections=connections,devices=devices)
@@ -933,22 +933,40 @@ def create_app(data_dir=None, testing=False):
     @login_required
     def network_device_detail(identifier,device_id=None):
         from .unifi import history,facts
-        rows=store.rows('SELECT id,name,kind,machine_id,snapshot FROM unifi_connections WHERE id=?',(identifier,))
+        rows=store.rows('SELECT id,name,kind,machine_id,snapshot FROM unifi_connections WHERE id=? AND deleted IS NULL',(identifier,))
         if not rows: abort(404)
         connection=rows[0]; snapshot=json.loads(connection['snapshot']) if connection['snapshot'] else {}
         readings=snapshot.get('readings',{}); machine=connection['machine_id']; name=connection['name']; observed=snapshot.get('sampled_at')
         if device_id:
-            devices=store.rows('SELECT * FROM unifi_devices WHERE connection_id=? AND device_id=?',(identifier,device_id))
+            devices=store.rows('SELECT * FROM unifi_devices WHERE connection_id=? AND device_id=? AND deleted IS NULL',(identifier,device_id))
             if not devices: abort(404)
             device=devices[0];readings=json.loads(device['data']);machine=device['machine_id'];name=readings.get('device',{}).get('name',device_id);observed=device['last_seen']
         checks=store.rows('SELECT * FROM checks WHERE machine_id=?',(machine,))
         tickets=store.rows('SELECT id,status,first_seen,closed FROM incidents WHERE machine_id=? ORDER BY first_seen DESC LIMIT 50',(machine,))
         device_info=readings.get('device',{})
-        children=store.rows('SELECT device_id,data FROM unifi_devices WHERE connection_id=?',(identifier,)) if not device_id else []
+        children=store.rows('SELECT device_id,data FROM unifi_devices WHERE connection_id=? AND deleted IS NULL',(identifier,)) if not device_id else []
         for child in children: child['device']=json.loads(child['data']).get('device',{})
         network_names={item.get('id'):str(item.get('name',''))+' (VLAN '+str(item.get('vlanId','?'))+')' for item in snapshot.get('readings',{}).get('networks',{}).get('items',[])}
-        device_names={item['device_id']:json.loads(item['data']).get('device',{}).get('name',item['device_id']) for item in store.rows('SELECT device_id,data FROM unifi_devices WHERE connection_id=?',(identifier,))}
-        return render_template('network-device.html',network_names=network_names,device_names=device_names,connection=connection,name=name,machine=machine,observed=observed,readings=readings,device=device_info,children=children,checks=checks,tickets=tickets,history=history(store,machine,request.args.get('window','6h')),facts=facts(readings),errors=snapshot.get('errors',{}),fresh=bool(observed and 0<=time.time()-observed<=max(180,3*max([c['interval'] for c in checks] or [60]))))
+        device_names={item['device_id']:json.loads(item['data']).get('device',{}).get('name',item['device_id']) for item in store.rows('SELECT device_id,data FROM unifi_devices WHERE connection_id=? AND deleted IS NULL',(identifier,))}
+        return render_template('network-device.html',network_names=network_names,device_names=device_names,connection=connection,device_id=device_id,name=name,machine=machine,observed=observed,readings=readings,device=device_info,children=children,checks=checks,tickets=tickets,history=history(store,machine,request.args.get('window','6h')),facts=facts(readings),errors=snapshot.get('errors',{}),fresh=bool(observed and 0<=time.time()-observed<=max(180,3*max([c['interval'] for c in checks] or [60]))))
+
+    @app.get('/network-devices/<identifier>/settings')
+    @app.get('/network-devices/<identifier>/devices/<device_id>/settings')
+    @login_required
+    def network_device_settings(identifier,device_id=None):
+        if not device_id: return redirect('/unifi?connection='+identifier)
+        rows=store.rows('SELECT data FROM unifi_devices WHERE connection_id=? AND device_id=? AND deleted IS NULL',(identifier,device_id))
+        if not rows: abort(404)
+        return render_template('network-device-settings.html',identifier=identifier,device_id=device_id,name=json.loads(rows[0]['data']).get('device',{}).get('name',device_id))
+
+    @app.post('/network-devices/<identifier>/delete')
+    @app.post('/network-devices/<identifier>/devices/<device_id>/delete')
+    @login_required
+    def delete_network_device(identifier,device_id=None):
+        from .unifi import remove
+        remove(store,identifier,device_id)
+        flash('Removed from monitoring. Existing ticket history is preserved. No UniFi configuration was changed.')
+        return redirect('/network-devices')
 
     @app.route('/unifi', methods=['GET','POST'])
     @login_required
@@ -962,11 +980,15 @@ def create_app(data_dir=None, testing=False):
                 save(store,vault,request.form)
                 flash('UniFi read-only connection saved; monitoring is scheduled.')
             return redirect(url_for('unifi_page'))
-        rows=store.rows('SELECT u.id,u.name,u.kind,u.url,u.ca,u.insecure_tls,u.site,u.machine_id,u.ai_context,u.check_id,u.snapshot,c.interval,c.severity,c.fail_after,c.recover_after FROM unifi_connections u JOIN checks c ON c.id=u.check_id ORDER BY u.name')
+        rows=store.rows('SELECT u.id,u.name,u.kind,u.url,u.ca,u.insecure_tls,u.site,u.machine_id,u.ai_context,u.check_id,u.snapshot,c.interval,c.severity,c.fail_after,c.recover_after FROM unifi_connections u JOIN checks c ON c.id=u.check_id WHERE u.deleted IS NULL ORDER BY u.name')
+        selected=request.args.get('connection')
+        if selected:
+            rows=[row for row in rows if row['id']==selected]
+            if not rows: abort(404)
         for row in rows:
             row['snapshot']=json.loads(row['snapshot']) if row['snapshot'] else None
             row['tickets']=store.rows('SELECT id,status,first_seen FROM incidents WHERE check_id=? ORDER BY first_seen DESC LIMIT 20',(row['check_id'],))
-        return render_template('unifi.html',connections=rows)
+        return render_template('unifi.html',connections=rows,selected=selected)
 
     @app.route('/proxmox', methods=['GET','POST'])
     @login_required

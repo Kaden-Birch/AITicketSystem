@@ -1,6 +1,10 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 28
+CURRENT_VERSION = 29
 MIGRATIONS = {
+    29: (
+        "ALTER TABLE unifi_connections ADD COLUMN deleted REAL",
+        "ALTER TABLE unifi_devices ADD COLUMN deleted REAL",
+    ),
     28: (
         "CREATE TABLE unifi_devices(connection_id TEXT NOT NULL REFERENCES unifi_connections(id),device_id TEXT NOT NULL,machine_id TEXT NOT NULL UNIQUE REFERENCES machines(id),check_id TEXT NOT NULL,data TEXT NOT NULL,last_seen REAL NOT NULL,PRIMARY KEY(connection_id,device_id))",
     ),

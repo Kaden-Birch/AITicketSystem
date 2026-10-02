@@ -162,6 +162,7 @@ def test_migration_detaches_existing_connection_preserving_history(environment):
         c.execute('UPDATE incidents SET machine_id=?',('host',))
         c.execute('DELETE FROM machines WHERE id=?',(row['machine_id'],))
         c.execute('DROP TABLE unifi_devices')
+        c.execute('ALTER TABLE unifi_connections DROP COLUMN deleted')
         c.execute('UPDATE schema_version SET version=26')
     migrated=Store(store.path)
     connection=migrated.rows('SELECT * FROM unifi_connections')[0]
@@ -226,3 +227,56 @@ def test_nas_readable_metrics_and_history(signed_in,monkeypatch):
 
 def test_extra_numeric_telemetry_retained_without_credentials():
     assert unifi.clean({'newStatistics':{'packetLossPct':2.5,'numericSecret':123,'description':'unknown text'},'apiKey':'private'})=={'newStatistics':{'packetLossPct':2.5}}
+
+
+def test_delete_connection_csrf_and_history(signed_in,monkeypatch):
+    from aiticket.engine import observe
+    client,store,vault,csrf=signed_in
+    row=configured(store,vault)
+    for i in range(3):observe(store,row['check_id'],False,{'reason':'test'},now=i+1)
+    incident=store.rows('SELECT * FROM incidents')[0]
+    assert b'Delete connection' in client.get('/unifi?connection='+row['id']).data
+    path='/network-devices/'+row['id']+'/delete'
+    assert client.post(path,data={'csrf':'wrong'}).status_code==403
+    assert client.post(path,data={'csrf':csrf}).status_code==302
+    deleted=store.rows('SELECT * FROM unifi_connections')[0]
+    assert deleted['deleted'] and deleted['secret']=='' and deleted['snapshot'] is None
+    assert store.rows('SELECT enabled FROM checks')[0]['enabled']==0
+    assert store.rows('SELECT id,status FROM incidents')[0]=={'id':incident['id'],'status':'Open'}
+    assert store.rows('SELECT handling_mode FROM incident_control')[0]['handling_mode']=='paused'
+    assert client.get('/network-devices/'+row['id']).status_code==404
+    assert client.get('/unifi?connection='+row['id']).status_code==404
+    assert b'Delete connection' not in client.get('/unifi').data
+    with pytest.raises(ValueError):unifi.refresh(store,vault,row['id'])
+
+
+def test_delete_discovered_device_suppresses_rediscovery(signed_in,monkeypatch):
+    client,store,vault,csrf=signed_in;row=configured(store,vault,'network')
+    with store.connect() as c:c.execute("UPDATE unifi_connections SET site='site1'")
+    def get(self,path,params=None):
+        if path.endswith('/devices'):return {'data':[{'id':'switch1','name':'Switch','state':'ONLINE'}]}
+        if '/devices/switch1' in path:return {'id':'switch1','name':'Switch','state':'ONLINE'}
+        return {'data':[]}
+    monkeypatch.setattr(unifi.Client,'get',get)
+    unifi.refresh(store,vault,row['id'])
+    device=store.rows('SELECT * FROM unifi_devices')[0]
+    root='/network-devices/'+row['id']+'/devices/switch1'
+    assert b'Delete device' in client.get(root+'/settings').data
+    assert client.post(root+'/delete',data={'csrf':csrf}).status_code==302
+    unifi.refresh(store,vault,row['id'])
+    assert len(store.rows('SELECT * FROM unifi_devices'))==1
+    assert store.rows('SELECT deleted FROM unifi_devices')[0]['deleted']
+    assert store.rows('SELECT enabled FROM checks WHERE id=?',(device['check_id'],))[0]['enabled']==0
+    assert client.get(root).status_code==404
+    assert b'Switch' not in client.get('/network-devices').data
+    assert client.get('/network-devices/'+row['id']).status_code==200
+    with store.connect() as c:assert unifi.ai_context(c,device['machine_id'])==[]
+
+
+def test_delete_connection_cascades_child_monitoring(environment,monkeypatch):
+    _,store,vault=environment;row=configured(store,vault,'network')
+    snapshot={'sampled_at':time.time(),'readings':{'devices':{'items':[{'id':'switch1','name':'Switch','state':'ONLINE'}]}},'errors':{}}
+    with store.connect() as c:unifi.retain(c,row,snapshot)
+    unifi.remove(store,row['id'])
+    assert all(r['enabled']==0 for r in store.rows('SELECT enabled FROM checks'))
+    assert store.rows('SELECT deleted FROM unifi_devices')[0]['deleted']

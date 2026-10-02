@@ -1,5 +1,5 @@
 {% extends 'base.html' %}{% block content %}
-<div class="host-heading"><h1>{{ name }}</h1><div><a class="button" href="/network-devices">Network Devices</a><a class="button" href="/unifi">Connection settings</a><a class="button" href="/tickets/new?machine={{ machine }}">Open ticket</a></div></div>
+<div class="host-heading"><h1>{{ name }}</h1><div><a class="button" href="/network-devices">Network Devices</a><a class="button" href="/network-devices/{{ connection.id }}{{ '/devices/'+device_id if device_id else '' }}/settings">Device settings</a><a class="button" href="/tickets/new?machine={{ machine }}">Open ticket</a></div></div>
 <p>{{ 'Fresh snapshot' if fresh else 'Stale or unavailable snapshot' }} · Read-only UniFi observation · Collected {{ observed|timestamp }}. These are snapshots; an old ONLINE state does not establish current availability.</p>
 {% for name,error in errors.items() %}<p class="notice">{{ name }}: {{ error }}</p>{% endfor %}
 <div class="host-workspace"><div class="host-main">

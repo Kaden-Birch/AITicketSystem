@@ -1,6 +1,6 @@
 # UniFi Network and NAS monitoring
 
-Upgrade the main application with `git pull --ff-only origin main` and `sudo docker compose up -d --build`. No agent or Hermes upgrade is required for this integration. Database migration 28 is automatic.
+Upgrade the main application with `git pull --ff-only origin main` and `sudo docker compose up -d --build`. No agent or Hermes upgrade is required for this integration. Database migration 29 is automatic.
 
 ## Setup
 
@@ -56,3 +56,7 @@ Each collection retains numeric telemetry for seven days, with 1h/6h/24h/7d char
 Discovered Network appliances receive independent device-availability checks and their own tickets. Only ONLINE establishes an up result; OFFLINE/DISCONNECTED establish failures, and stale/missing/unknown states are unknown. Repeated polling of the same collection timestamp does not advance retry or recovery counters. NAS storage and visibility alerts remain attached to the NAS connection. Existing ticket, Discord and automatic AI severity/enablement settings apply. Network access remains read-only regardless of host shell modes.
 
 Discovered-device checks inherit the connection polling interval, severity and failure/recovery thresholds. Saving connection settings updates these inherited values.
+
+## Delete a device
+
+Open Network Devices, select the appliance, then Device settings → Delete device. Discovered devices are removed from monitoring and excluded from later discovery; existing observations and tickets are preserved. To remove a NAS or an entire console connection, its Device settings page offers Delete connection. This disables its checks and child-device checks and clears the stored API key. Open tickets are paused rather than falsely resolved, and pending notifications are superseded. These operations affect only AITicketSystem, never the UniFi appliance or network configuration.

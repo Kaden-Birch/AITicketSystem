@@ -78,6 +78,7 @@ def collect(connection,vault):
                 read(kind,lambda kind=kind:listing(client,NETWORK+'/sites/'+site+'/'+kind))
             # Bounded detail collection; coverage is explicit for larger sites.
             devices=readings.get('devices',{}).get('items',[])
+            devices[:]=[d for d in devices if d.get('id') not in connection.get('_excluded',set())]
             for d in devices[:8]:
                 identifier=d.get('id','')
                 if re.fullmatch(r'[A-Za-z0-9-]+',identifier):
@@ -88,11 +89,13 @@ def collect(connection,vault):
 
 
 def refresh(store,vault,identifier):
-    rows=store.rows('SELECT * FROM unifi_connections WHERE id=?',(identifier,))
+    rows=store.rows('SELECT * FROM unifi_connections WHERE id=? AND deleted IS NULL',(identifier,))
     if not rows: raise ValueError('Unknown UniFi connection.')
-    row=rows[0]; result=collect(row,vault)
+    row=rows[0]
+    row['_excluded']={d['device_id'] for d in store.rows('SELECT device_id FROM unifi_devices WHERE connection_id=? AND deleted IS NOT NULL',(identifier,))}
+    result=collect(row,vault)
     with store.connect() as c:
-        changed=c.execute('UPDATE unifi_connections SET snapshot=? WHERE id=? AND url=? AND secret=? AND site=? AND kind=?',(json.dumps(result),identifier,row['url'],row['secret'],row['site'],row['kind']))
+        changed=c.execute('UPDATE unifi_connections SET snapshot=? WHERE id=? AND url=? AND secret=? AND site=? AND kind=? AND deleted IS NULL',(json.dumps(result),identifier,row['url'],row['secret'],row['site'],row['kind']))
         if not changed.rowcount: return result
         retain(c,row,result)
         store.audit(c,'unifi.telemetry_read',identifier,{'readable':list(result['readings']),'unavailable':list(result['errors'])},actor='monitor')
@@ -112,9 +115,9 @@ def probe(store,vault,config):
 
 
 def ai_context(c,machine):
-    rows=c.execute('SELECT name,kind,snapshot FROM unifi_connections WHERE machine_id=? OR id IN (SELECT connection_id FROM unifi_devices WHERE machine_id=?) OR (kind=\'network\' AND ai_context=1) ORDER BY name LIMIT 3',(machine,machine)).fetchall()
+    rows=c.execute('SELECT name,kind,snapshot FROM unifi_connections WHERE deleted IS NULL AND (machine_id=? OR id IN (SELECT connection_id FROM unifi_devices WHERE machine_id=? AND deleted IS NULL) OR (kind=\'network\' AND ai_context=1)) ORDER BY name LIMIT 3',(machine,machine)).fetchall()
     output=[]
-    target=c.execute('SELECT data,last_seen FROM unifi_devices WHERE machine_id=?',(machine,)).fetchone()
+    target=c.execute('SELECT data,last_seen FROM unifi_devices WHERE machine_id=? AND deleted IS NULL',(machine,)).fetchone()
     if target:
         data=json.loads(target['data'])
         output.append({'name':'Ticket network device','snapshot':{'sampled_at':target['last_seen'],'readings':data,'errors':{}},'note':'Read-only target observations; may be stale. No network changes are authorized.'})
@@ -132,7 +135,8 @@ def ai_context(c,machine):
 
 def save(store,vault,form):
     identifier=form.get('id') or uid()
-    old=store.rows('SELECT * FROM unifi_connections WHERE id=?',(identifier,))
+    old=store.rows('SELECT * FROM unifi_connections WHERE id=? AND deleted IS NULL',(identifier,))
+    if form.get('id') and not old: raise ValueError('Connection was deleted or is unavailable.')
     old=old[0] if old else None
     kind=form.get('kind','network')
     if kind not in ('network','drive'): raise ValueError('Choose Network or Drive.')
@@ -198,19 +202,20 @@ def retain(c,connection,snapshot):
         identifier=item.get('id')
         if not isinstance(identifier,str) or not re.fullmatch('[A-Za-z0-9-]{1,100}',identifier):continue
         old=c.execute('SELECT * FROM unifi_devices WHERE connection_id=? AND device_id=?',(connection['id'],identifier)).fetchone()
+        if old and old['deleted'] is not None:continue
         machine=old['machine_id'] if old else 'unifi-device:'+uid(); check=old['check_id'] if old else uid()
         detail=snapshot['readings'].get('device:'+identifier,item)
         data={**item,**detail}; statistics=snapshot['readings'].get('statistics:'+identifier,{})
         name=str(data.get('name') or data.get('model') or identifier)[:100]
         c.execute('INSERT INTO machines(id,name,created) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name',(machine,name,at))
-        c.execute('INSERT INTO unifi_devices VALUES(?,?,?,?,?,?) ON CONFLICT(connection_id,device_id) DO UPDATE SET data=excluded.data,last_seen=excluded.last_seen',(connection['id'],identifier,machine,check,json.dumps({'device':data,'statistics':statistics}),at))
+        c.execute('INSERT INTO unifi_devices(connection_id,device_id,machine_id,check_id,data,last_seen) VALUES(?,?,?,?,?,?) ON CONFLICT(connection_id,device_id) DO UPDATE SET data=excluded.data,last_seen=excluded.last_seen',(connection['id'],identifier,machine,check,json.dumps({'device':data,'statistics':statistics}),at))
         if not old:
             c.execute('INSERT INTO checks(id,machine_id,name,kind,config,interval,severity,fail_after,recover_after) VALUES(?,?,?,\'unifi_device\',?,?,?,?,?)',(check,machine,'UniFi device availability',json.dumps({'connection_id':connection['id'],'device_id':identifier}),policy['interval'],policy['severity'],policy['fail_after'],policy['recover_after']))
         record(machine,{'device':data,'statistics':statistics})
 
 
 def device_probe(store,config):
-    rows=store.rows('SELECT d.*,u.snapshot,c.interval FROM unifi_devices d JOIN unifi_connections u ON u.id=d.connection_id JOIN checks c ON c.id=u.check_id WHERE d.connection_id=? AND d.device_id=?',(config['connection_id'],config['device_id']))
+    rows=store.rows('SELECT d.*,u.snapshot,c.interval FROM unifi_devices d JOIN unifi_connections u ON u.id=d.connection_id JOIN checks c ON c.id=u.check_id WHERE d.connection_id=? AND d.device_id=? AND d.deleted IS NULL AND u.deleted IS NULL',(config['connection_id'],config['device_id']))
     if not rows:return None,{'reason':'Device no longer available in inventory'}
     row=rows[0]; state=json.loads(row['data']).get('device',{}).get('state')
     if time.time()-row['last_seen']>max(180,3*row['interval']):return None,{'reason':'UniFi device observation is stale','sampled_at':row['last_seen']}
@@ -249,3 +254,30 @@ def facts(value,path=''):
         for index,item in enumerate(value):output.extend(facts(item,path+' '+str(index+1)))
     elif value is not None:output.append((path,str(value)))
     return output
+
+
+def remove(store,identifier,device_id=None):
+    """Retain audit/ticket identity, suppress rediscovery and revoke local monitoring."""
+    now=time.time()
+    with store.connect() as c:
+        c.execute('BEGIN IMMEDIATE')
+        connection=c.execute('SELECT * FROM unifi_connections WHERE id=? AND deleted IS NULL',(identifier,)).fetchone()
+        if not connection:raise ValueError('Connection already deleted or unavailable.')
+        if device_id:
+            device=c.execute('SELECT * FROM unifi_devices WHERE connection_id=? AND device_id=? AND deleted IS NULL',(identifier,device_id)).fetchone()
+            if not device:raise ValueError('Device already deleted or unavailable.')
+            targets=[(device['machine_id'],device['check_id'])]
+            c.execute('UPDATE unifi_devices SET deleted=? WHERE connection_id=? AND device_id=?',(now,identifier,device_id))
+        else:
+            targets=[(connection['machine_id'],connection['check_id'])]+[(r['machine_id'],r['check_id']) for r in c.execute('SELECT * FROM unifi_devices WHERE connection_id=? AND deleted IS NULL',(identifier,))]
+            c.execute('UPDATE unifi_devices SET deleted=? WHERE connection_id=? AND deleted IS NULL',(now,identifier))
+            c.execute("UPDATE unifi_connections SET deleted=?,secret='',snapshot=NULL,ai_context=0 WHERE id=?",(now,identifier))
+        from .handoff import take_control
+        for machine,check in targets:
+            c.execute('UPDATE checks SET enabled=0,lease_until=NULL,lease_token=NULL WHERE id=?',(check,))
+            for incident in c.execute('SELECT id FROM incidents WHERE machine_id=? AND closed IS NULL',(machine,)).fetchall():
+                take_control(c,store,incident['id'])
+                c.execute("UPDATE incident_control SET handling_mode='paused' WHERE incident_id=?",(incident['id'],))
+                c.execute("UPDATE deliveries SET state='superseded',lease_token=NULL,lease_until=NULL WHERE incident_id=? AND state IN ('pending','leased')",(incident['id'],))
+                store.timeline(c,incident['id'],'network_device_deleted','Removed from network monitoring. Ticket history retained; removal does not establish recovery.',actor='user',now=now)
+        store.audit(c,'unifi.device_deleted' if device_id else 'unifi.connection_deleted',device_id or identifier,{'connection_id':identifier,'monitoring_records_removed':len(targets)})

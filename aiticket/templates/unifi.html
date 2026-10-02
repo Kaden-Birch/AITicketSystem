@@ -1,7 +1,7 @@
 {% extends 'base.html' %}{% block content %}
 <h1>UniFi connection settings</h1><a class="button" href="/network-devices">Network Devices</a>
 <p>Network and NAS telemetry, with no configuration or action tools. Drive support is experimental. Endpoint failures indicate missing visibility, not proof that a device or share is down.</p>
-{% for connection in connections + [none] %}
+{% for connection in connections + ([] if selected else [none]) %}
 <section class="card" data-live-key="unifi-{{ connection.id if connection else 'new' }}">
 <h2>{{ connection.name if connection else 'Add connection' }}</h2>
 {% if connection %}<p><a href="/network-devices/{{ connection.id }}">Monitoring workspace</a> · API access is always read-only.</p>{% endif %}
@@ -39,5 +39,6 @@
 <h3>Disks</h3><table><thead><tr><th>Slot / model</th><th>State</th><th>Temperature</th><th>Power-on hours</th></tr></thead><tbody>{% for item in result.get('disks',[]) %}<tr><td>{{ item.slotId }} · {{ item.model }}</td><td>{{ item.state }}</td><td>{{ item.temperature }} °C</td><td>{{ item.powerOnHours }}</td></tr>{% endfor %}</tbody></table>
 {% endif %}<details><summary>{{ name }} · Readable</summary><pre>{{ result|tojson(indent=2) }}</pre></details>{% endfor %}
 {% else %}<p>Awaiting first collection.</p>{% endif %}
+<form method="post" action="/network-devices/{{ connection.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><p>Delete removes this connection and its discovered devices from monitoring, clears the stored API key and preserves ticket history. Your UniFi equipment is unchanged.</p><button>Delete connection</button></form>
 {% endif %}</section>{% endfor %}
 {% endblock %}
