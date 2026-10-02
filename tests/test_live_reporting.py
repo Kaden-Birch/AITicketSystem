@@ -33,3 +33,36 @@ def test_heartbeat_returns_interval_on_accept_and_duplicate(environment):
         result=client.post('/api/agent/heartbeat',json=body,headers={'Authorization':'Bearer report-fixture'})
         assert result.status_code==200 and result.json['status']==state
         assert result.json['poll_interval_seconds']==20
+
+
+def test_live_keys_ignore_named_form_id_controls():
+    """Exercise the real key function with the browser's named-control behavior."""
+    import shutil,subprocess
+    from pathlib import Path
+    import pytest
+    node=shutil.which('node')
+    if not node: pytest.skip('Node is required for JavaScript regression checks')
+    source=Path('aiticket/static/live.js').read_text()
+    key=source[source.index('  function key(node) {'):source.index('  function edited(node) {')]
+    script="""
+const assert = require('node:assert/strict');
+const Node = {ELEMENT_NODE:1};
+"""+key+"""
+function form(value, attributeId=null) {
+  return {
+    nodeType:1, dataset:{},
+    // Each parsed form has a distinct input object masquerading as .id.
+    id:{value},
+    getAttribute(name) {return name==='id'?attributeId:name==='action'?'/unifi':null;},
+    matches(selector) {return selector==='form';},
+    querySelector(selector) {return selector==='[name="id"]'?{value}:null;}
+  };
+}
+const before=form('nas-connection');
+for (let poll=0;poll<100;poll++) assert.equal(key(before),key(form('nas-connection')));
+assert.equal(typeof key(before),'string');
+assert.notEqual(key(before),key(form('network-connection')));
+assert.equal(key(form('nas-connection','settings-form')),'settings-form');
+assert.equal(key(form('')),key(form('')));
+"""
+    subprocess.run([node,'-e',script],check=True,capture_output=True,text=True)

@@ -1,4 +1,4 @@
-351 passed in 32.27s
+352 passed in 32.17s
 
 HTTP opt-in tests cover cookie configuration, URL restrictions, persisted agent enrollment, nonredirecting credential delivery, continued HTTPS verification and isolated Hermes configuration.
 Local Python 3.14.6; temporary databases, fake Hermes adapters and mocked external providers/subprocesses.
@@ -53,3 +53,5 @@ AI/timestamp/work-log correction: Medium vs High automatic admission and queuein
 UniFi read-only integration: seven fixture tests cover fixed GET endpoint boundaries, discarded credential fields, redirects/non-JSON/size rejection, bounded pagination, partial Drive results and capacity/health alerts, optional shared AI context and size limits, CSRF, encrypted-key preservation/rotation, monitoring toggles, credential-free UI and inventory-transfer exclusion. Live Network/Drive console compatibility remains pending. No UniFi writes, host commands or model requests executed.
 
 Standalone UniFi setup: creation without any preexisting host, rejected/ignored caller host association, retained record identity during rename, and schema-26 connection migration with encrypted keys, check/ticket IDs and observation history preserved verified. UniFi investigations bound to the old host are cancelled during migration.
+
+Live form duplication regression: actual JavaScript key function checked against independently parsed forms with an id-named input, across 100 comparisons; stable string keys, distinct connection keys, explicit element IDs and blank new-connection IDs verified. Reading the id attribute avoids HTMLFormElement named-control shadowing.

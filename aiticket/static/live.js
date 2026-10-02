@@ -18,8 +18,10 @@
   function key(node) {
     if (node.nodeType !== Node.ELEMENT_NODE) return null;
     if (node.dataset.liveKey) return node.dataset.liveKey;
-    if (node.id) return node.id;
-    if (node.matches('form')) return 'form:' + (node.getAttribute('action') || '') + ':' + ['section', 'operation', 'machine_id', 'agent_id', 'check_id', 'object_id', 'connection_id'].map(name => node.querySelector('[name="' + name + '"]')?.value || '').join(':');
+    // Form controls named id shadow HTMLFormElement.id; read the attribute.
+    const identifier = node.getAttribute('id');
+    if (identifier) return identifier;
+    if (node.matches('form')) return 'form:' + (node.getAttribute('action') || '') + ':' + ['section', 'operation', 'machine_id', 'agent_id', 'check_id', 'object_id', 'connection_id', 'id'].map(name => node.querySelector('[name="' + name + '"]')?.value || '').join(':');
     return null;
   }
   function edited(node) {

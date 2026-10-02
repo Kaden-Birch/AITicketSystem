@@ -43,3 +43,5 @@ UniFi connections and their managed checks are excluded from the existing invent
 
 Existing connections are automatically detached from their previously selected host during migration 27. Connection/check IDs, keys, snapshots, observations and ticket IDs are retained; UniFi tickets move to the independent record. Other checks, agents and tickets on the previously selected host remain there. Monitoring records also appear in the existing overview; Network device inventory remains on the UniFi page.
 Any in-flight AI investigations on the old UniFi association are cancelled on migration, so they cannot continue operating against the previously associated host. Start a new investigation on the retained ticket after updating.
+
+If an older build repeatedly appended connection forms during live updates, update the main application and reload the UniFi page once to load the corrected script and clear duplicated markup. No agent or Hermes update is needed.
