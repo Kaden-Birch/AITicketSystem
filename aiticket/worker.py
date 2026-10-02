@@ -30,6 +30,8 @@ def tick(store, vault):
             # Do not put URLs, tokens or raw upstream error bodies in evidence.
             healthy, evidence = (None if job['kind']=='agent_metric' else False), {'reason': 'Check could not complete', 'error_type': type(exc).__name__}
         observe(store, job['id'], healthy, evidence, lease_token=job['lease_token'])
+    from .engine import resolution_tick
+    resolution_tick(store)
     delivery = claim(store, 'deliveries')
     if delivery:
         deliver(store, vault, delivery)
@@ -67,6 +69,7 @@ def deliver(store, vault, job):
     report = json.loads(incident['report'])
     event=job['event_key'].split(':',1)[1]
     text = f"{event} · {incident['severity'].upper()} · {report['target']} · {report['check']}\n{incident['status']} · Cause: {report['cause']}\nIncident {incident['id']}"
+    if event=='recovery': text+='\n'+report.get('recovery_summary','Monitoring independently confirmed recovery.')
     url = vault.decrypt(configured)
     try:
         r = requests.post(url, json={'content': text[:1900], 'allowed_mentions': {'parse': []}}, timeout=(3, 8), allow_redirects=False)

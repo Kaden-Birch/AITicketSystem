@@ -120,9 +120,8 @@ def observe(store, check_id, healthy, evidence, now=None, lease_token=None):
             store.timeline(c,iid,'severity_changed','Additional source evidence raised severity to '+severity+'.',now=now)
             enqueue(c,iid,'severity-'+severity,now,store)
         if recovered:
-            c.execute("UPDATE incidents SET status='Resolved',closed=? WHERE id=?",(now,iid))
-            store.timeline(c,iid,'recovery','All attached sources independently confirmed recovery with fresh observations.',now=now)
-            enqueue(c,iid,'recovery',now,store)
+            summary='Recovered: '+', '.join(r['check']+' is healthy' for r in sources)+'.'
+            resolve_verified(c,store,iid,summary,now)
 
 
 def enqueue(c, incident_id, event, now, store):
@@ -161,3 +160,31 @@ def claim(store, table, now=None, lease=60):
         result = dict(row)
         result['lease_token'] = token
         return result
+
+
+def resolve_verified(c,store,incident_id,summary,now):
+    row=c.execute('SELECT report,closed FROM incidents WHERE id=?',(incident_id,)).fetchone()
+    if not row or row['closed'] is not None: return
+    report=json.loads(row['report']);report['recovery_summary']=summary[:1000]
+    report['recovered_at']=now;report['observed']='healthy'
+    c.execute("UPDATE incidents SET status='Resolved',closed=?,last_seen=?,report=? WHERE id=?",(now,now,json.dumps(report),incident_id))
+    store.timeline(c,incident_id,'recovery',summary,actor='monitor',now=now)
+    enqueue(c,incident_id,'recovery',now,store)
+
+
+def resolution_tick(store,now=None):
+    """AI can request closure; fresh independent monitoring decides recovery."""
+    now=time.time() if now is None else now
+    with store.connect() as c:
+        c.execute('BEGIN IMMEDIATE')
+        jobs=c.execute("SELECT j.*,i.machine_id,i.report FROM ai_jobs j JOIN incidents i ON i.id=j.incident_id WHERE j.resolution_summary IS NOT NULL AND j.state='completed' AND i.closed IS NULL AND i.status!='Resolved' AND NOT EXISTS (SELECT 1 FROM ai_jobs newer WHERE newer.incident_id=j.incident_id AND newer.created>j.created) AND NOT EXISTS (SELECT 1 FROM incident_control ic WHERE ic.incident_id=j.incident_id AND ic.owner='user')").fetchall()
+        for job in jobs:
+            if c.execute("SELECT 1 FROM command_jobs WHERE machine_id=? AND state IN ('awaiting','pending','dispatched','running','cancelling','unknown')",(job['machine_id'],)).fetchone() or c.execute("SELECT 1 FROM proxmox_api_jobs WHERE machine_id=? AND state IN ('awaiting','dispatched','unknown')",(job['machine_id'],)).fetchone(): continue
+            if c.execute("SELECT 1 FROM power_jobs WHERE machine_id=? AND state IN ('awaiting','approved','dispatched','authorized','verifying','unknown')",(job['machine_id'],)).fetchone(): continue
+            if c.execute("SELECT 1 FROM action_proposals WHERE incident_id=? AND state IN ('awaiting','approved','dispatched','authorized','verifying','unknown')",(job['incident_id'],)).fetchone(): continue
+            checks=c.execute("SELECT c.*,o.at AS observed_at,o.health AS latest_health FROM checks c LEFT JOIN observations o ON o.id=(SELECT id FROM observations WHERE check_id=c.id ORDER BY at DESC LIMIT 1) WHERE c.machine_id=? AND c.enabled=1",(job['machine_id'],)).fetchall()
+            if not checks or any(r['health']!='healthy' or r['latest_health']!='healthy' or r['observed_at'] is None or r['observed_at']<job['created'] or now-r['observed_at']>max(180,r['interval']*3) for r in checks): continue
+            sources=c.execute('SELECT c.enabled,s.report FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=?',(job['incident_id'],)).fetchall()
+            if any(not r['enabled'] or json.loads(r['report']).get('observed')!='healthy' or now-json.loads(r['report']).get('observed_at',0)>180 for r in sources): continue
+            summary='Recovered: '+', '.join(r['name']+' is healthy' for r in checks)+'. AI repair summary (unverified explanation): '+job['resolution_summary']
+            resolve_verified(c,store,job['incident_id'],summary,now)

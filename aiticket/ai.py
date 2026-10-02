@@ -94,7 +94,6 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
         incident = c.execute('SELECT * FROM incidents WHERE id=?', (incident_id,)).fetchone()
         if not incident or incident['closed'] is not None or incident['status'] == 'Resolved':
             raise ValueError('Investigation requires an active unresolved incident.')
-        if automatic and incident['condition_key']=='manual-ticket': return None
         from .handoff import control
         ownership = control(c, incident_id)
         checkpoint_data = None
@@ -444,21 +443,35 @@ def tick(store, vault, now=None):
     return True
 
 
+def automatic_tick(store,vault):
+    """One opt-in automatic run per incident; a blocked ticket cannot starve others."""
+    bridge=store.setting('hermes_config',BRIDGE_DEFAULTS)
+    if not bridge.get('enabled') or not bridge.get('automatic'): return 0
+    eligible=SEVERITIES[SEVERITIES.index(bridge.get('minimum','high')):]
+    placeholders=','.join('?' for _ in eligible)
+    candidates=store.rows("SELECT id FROM incidents WHERE closed IS NULL AND status!='Resolved' AND severity IN ("+placeholders+") AND NOT EXISTS (SELECT 1 FROM ai_jobs WHERE incident_id=incidents.id) AND NOT EXISTS (SELECT 1 FROM incident_control WHERE incident_id=incidents.id AND owner='user') AND NOT EXISTS (SELECT 1 FROM timeline WHERE incident_id=incidents.id AND kind='ai_auto_blocked' AND at>?) ORDER BY first_seen LIMIT 100",(*eligible,time.time()-900))
+    queued=0
+    for incident in candidates:
+        try:
+            if request_job(store,vault,incident['id'],automatic=True): queued+=1
+        except ValueError as exc:
+            # Record a useful blocker without repeatedly adding the same timeline entry.
+            reason=str(exc)[:500]
+            with store.connect() as c:
+                previous=c.execute("SELECT text FROM timeline WHERE incident_id=? AND kind='ai_auto_blocked' ORDER BY at DESC LIMIT 1",(incident['id'],)).fetchone()
+                if not previous or previous['text']!=reason:
+                    store.timeline(c,incident['id'],'ai_auto_blocked',reason,actor='monitor')
+            continue
+    return queued
+
+
 def run(store, vault, stop):
     """Separate bounded orchestration loop; external AI never blocks check probes."""
     import logging
     while not stop.is_set():
         try:
-            bridge = store.setting('hermes_config', BRIDGE_DEFAULTS)
-            if bridge.get('enabled') and bridge.get('automatic'):
-                # At most one triage per incident, including previous failures/cancellations.
-                candidates = store.rows("SELECT id FROM incidents WHERE closed IS NULL AND status!='Resolved' AND condition_key<>'manual-ticket' AND NOT EXISTS (SELECT 1 FROM ai_jobs WHERE incident_id=incidents.id) ORDER BY first_seen LIMIT 20")
-                for incident in candidates:
-                    try:
-                        request_job(store, vault, incident['id'], automatic=True)
-                    except ValueError:
-                        break
-            tick(store, vault)
+            automatic_tick(store,vault)
+            tick(store,vault)
         except Exception:
             logging.getLogger(__name__).exception('AI orchestration paused; durable jobs retained')
         stop.wait(5)

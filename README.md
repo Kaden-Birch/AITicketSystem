@@ -89,3 +89,5 @@ Milestone 19 adds [host editing, Proxmox visibility and manual tickets](docs/hos
 Milestone 20 adds [general remote commands](docs/remote-commands.md): arbitrary shell execution through outbound agents, per-host immediate/approval policies, isolated Codex command tools and independent Hermes MCP access, bounded results, cancellation, immutable identities and non-replaying dispatch. All execution access defaults disabled pending explicit local/GUI configuration.
 
 Operational investigations preserve the current administrator task and linked Proxmox guest context. General token-authorized Proxmox API requests work without a live guest agent; see [remote command and Proxmox operations setup](docs/remote-commands.md).
+
+Automatic AI investigations include eligible monitoring and manual tickets when enabled. AI can request verified resolution; fresh monitoring controls closure and recovery notifications include a brief summary.
