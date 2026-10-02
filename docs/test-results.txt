@@ -1,4 +1,4 @@
-230 passed in 21.97s
+234 passed in 22.81s
 
 HTTP opt-in tests cover cookie configuration, URL restrictions, persisted agent enrollment, nonredirecting credential delivery, continued HTTPS verification and isolated Hermes configuration.
 Local Python 3.14.6; temporary databases, fake Hermes adapters and mocked external providers/subprocesses.
@@ -11,3 +11,5 @@ Host dashboard milestone: fresh/stale Proxmox and agent metrics, guest navigatio
 Hermes legacy compatibility: fixture tests verify suppression of the v0.20.0 background-review hook without modifying the original class, mandatory suppression and rejection of unknown hook interfaces. Installed constructor/hook evidence was supplied by the administrator; installed import/routing/provider validation remains pending. No live model calls executed.
 
 Codex subscription mode: transactional queue/run limits, cancellation counting, restart persistence, exact signed model/reasoning, no API key or paid gateway admission, explicit OAuth profile isolation, native route rejection, tool-free agent options, SDK retry suppression and process-group cancellation verified with fixtures. Settings page visually checked with local fixture data. No live Codex authentication or inference executed. Installed runtime and model entitlement remain unverified.
+
+Host editing/manual ticket milestone: dependency-cycle rejection, retained enrollment credential and ticket identity during late Proxmox linking, managed node dependencies, unassigned dashboard metrics and node guest lists, manual ticket creation/independent closure, CSRF and invalid-target rejection, disabled-source admission/export exclusion, and explicit Codex requests with automatic-triage exclusion. Host editor and preselected manual ticket form visually reviewed with local fixture data. No live agent, Proxmox or model action executed.

@@ -111,7 +111,7 @@ def create_app(data_dir=None, testing=False):
     @login_required
     def dashboard():
         from .hostview import overview
-        return render_template('dashboard.html', hosts=overview(store), checks=store.rows('SELECT checks.*,machines.name AS machine FROM checks JOIN machines ON machines.id=machine_id ORDER BY machines.name'),
+        return render_template('dashboard.html', connections=store.rows('SELECT id,name,last_discovery FROM proxmox_connections ORDER BY name'), hosts=overview(store), checks=store.rows("SELECT checks.*,machines.name AS machine FROM checks JOIN machines ON machines.id=machine_id WHERE checks.kind<>'manual' ORDER BY machines.name"),
                                incidents=store.rows('SELECT incidents.*,machines.name AS machine FROM incidents JOIN machines ON machines.id=machine_id WHERE incidents.archived_at IS NULL ORDER BY first_seen DESC LIMIT 100'),
                                jobs=store.rows('SELECT state,count(*) AS count FROM deliveries GROUP BY state'), ai_enabled=store.setting('hermes_config', {}).get('enabled', False))
 
@@ -122,6 +122,41 @@ def create_app(data_dir=None, testing=False):
         data=detail(store,machine_id)
         if not data: abort(404)
         return render_template('host-detail.html',**data)
+
+    @app.post('/hosts/<machine_id>/edit')
+    @login_required
+    def edit_host(machine_id):
+        from .host_admin import edit
+        edit(store,machine_id,request.form.get('name',''),request.form.get('parent'))
+        return redirect(url_for('host_detail',machine_id=machine_id))
+
+    @app.post('/hosts/<machine_id>/proxmox-link')
+    @login_required
+    def link_host(machine_id):
+        from .proxmox import link
+        if request.form.get('confirm')!='yes': raise ValueError('Confirm the exact machine/resource link.')
+        link(store,request.form.get('object_id'),machine_id,request.form.get('expected'))
+        return redirect(url_for('host_detail',machine_id=machine_id))
+
+    @app.post('/proxmox/resources/<object_id>/link')
+    @login_required
+    def assign_resource(object_id):
+        from .proxmox import link
+        f=request.form
+        if f.get('confirm')!='yes': raise ValueError('Confirm the exact machine/resource link.')
+        link(store,object_id,f.get('machine_id'),f.get('expected'),f.get('create_name','').strip() if not f.get('machine_id') else None)
+        machine=store.rows('SELECT machine_id FROM proxmox_objects WHERE id=?',(object_id,))[0]['machine_id']
+        return redirect(url_for('host_detail',machine_id=machine))
+
+    @app.route('/tickets/new',methods=['GET','POST'])
+    @login_required
+    def new_ticket():
+        if request.method=='POST':
+            from .host_admin import open_ticket
+            f=request.form
+            identifier=open_ticket(store,f.get('machine_id'),f.get('title',''),f.get('description',''),f.get('severity','low'),f.get('notify')=='yes')
+            return redirect(url_for('incident',incident_id=identifier))
+        return render_template('ticket-new.html',machines=store.rows('SELECT id,name FROM machines ORDER BY name'),selected=request.args.get('machine',''))
 
     @app.post('/hosts/<machine_id>/power-policy')
     @login_required
@@ -171,7 +206,7 @@ def create_app(data_dir=None, testing=False):
                 c.execute('INSERT INTO machines(id,name,parent_id,created) VALUES(?,?,?,?)', (machine_id, name, parent, time.time()))
                 store.audit(c, 'machine.created', machine_id, {'parent_id': parent})
             return redirect(url_for('hosts'))
-        return render_template('hosts.html', checks=store.rows('SELECT c.*,m.name AS machine FROM checks c JOIN machines m ON m.id=c.machine_id ORDER BY m.name,c.name'), machines=store.rows('SELECT * FROM machines ORDER BY name'), agents=store.rows('SELECT agents.*,machines.name FROM agents JOIN machines ON machines.id=machine_id'))
+        return render_template('hosts.html', checks=store.rows("SELECT c.*,m.name AS machine FROM checks c JOIN machines m ON m.id=c.machine_id WHERE c.kind<>'manual' ORDER BY m.name,c.name"), machines=store.rows('SELECT * FROM machines ORDER BY name'), agents=store.rows('SELECT agents.*,machines.name FROM agents JOIN machines ON machines.id=machine_id'))
 
     @app.post('/checks')
     @login_required
@@ -280,6 +315,8 @@ def create_app(data_dir=None, testing=False):
                 report = json.loads(row['report'])
                 report['manual_resolution'] = True
                 c.execute("UPDATE incidents SET status='Resolved',report=? WHERE id=?", (json.dumps(report), incident_id))
+                if report.get('manual_ticket'):
+                    c.execute('UPDATE incidents SET closed=?,last_seen=? WHERE id=?',(time.time(),time.time(),incident_id))
         return redirect(url_for('incident', incident_id=incident_id))
 
     @app.route('/settings', methods=['GET', 'POST'])
@@ -381,6 +418,7 @@ def create_app(data_dir=None, testing=False):
             c.execute('BEGIN IMMEDIATE')
             row=c.execute('SELECT * FROM checks WHERE id=?',(check_id,)).fetchone()
             if not row: abort(404)
+            if row['kind']=='manual': raise ValueError('Manual tickets cannot be enabled as monitoring checks.')
             cfg=json.loads(row['config'])
             if enabled:
                 from .inventory import config,CONFIG

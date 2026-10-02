@@ -92,6 +92,7 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
         incident = c.execute('SELECT * FROM incidents WHERE id=?', (incident_id,)).fetchone()
         if not incident or incident['closed'] is not None or incident['status'] == 'Resolved':
             raise ValueError('Investigation requires an active unresolved incident.')
+        if automatic and incident['condition_key']=='manual-ticket': return None
         from .handoff import control
         ownership = control(c, incident_id)
         checkpoint_data = None
@@ -434,7 +435,7 @@ def run(store, vault, stop):
             bridge = store.setting('hermes_config', BRIDGE_DEFAULTS)
             if bridge.get('enabled') and bridge.get('automatic'):
                 # At most one triage per incident, including previous failures/cancellations.
-                candidates = store.rows("SELECT id FROM incidents WHERE closed IS NULL AND status!='Resolved' AND NOT EXISTS (SELECT 1 FROM ai_jobs WHERE incident_id=incidents.id) ORDER BY first_seen LIMIT 20")
+                candidates = store.rows("SELECT id FROM incidents WHERE closed IS NULL AND status!='Resolved' AND condition_key<>'manual-ticket' AND NOT EXISTS (SELECT 1 FROM ai_jobs WHERE incident_id=incidents.id) ORDER BY first_seen LIMIT 20")
                 for incident in candidates:
                     try:
                         request_job(store, vault, incident['id'], automatic=True)

@@ -27,6 +27,8 @@ def merge(store,source_id,target_id,reason,now=None):
             raise ValueError('Merge targets must belong to the same explicitly linked machine.')
         if any(i['closed'] is not None or i['status']=='Resolved' or i['merged_into'] for i in (source,target)):
             raise ValueError('Only active, unresolved, unmerged incidents can be merged.')
+        if any(json.loads(i['report']).get('manual_ticket') for i in (source,target)):
+            raise ValueError('Manual tickets retain independent user-reported evidence and cannot be merged with monitored conditions.')
         for identifier in (source_id,target_id):
             if c.execute("SELECT 1 FROM ai_jobs WHERE incident_id=? AND state IN ('pending','dispatching','running','unknown')",(identifier,)).fetchone() or c.execute("SELECT 1 FROM ai_calls a JOIN ai_jobs j ON j.id=a.job_id WHERE j.incident_id=? AND a.state!='known'",(identifier,)).fetchone():
                 raise ValueError('Stop AI work and reconcile unknown usage before merging.')

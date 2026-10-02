@@ -134,6 +134,8 @@ def refresh_parents(c,store,cluster_id):
 
 
 def link(store, object_id, machine_id, expected, create_name=None):
+    if create_name is not None and not 1<=len(create_name.strip())<=100:
+        raise ValueError('Machine name must contain 1–100 characters.')
     with store.connect() as c:
         c.execute('BEGIN IMMEDIATE')
         obj = c.execute('SELECT * FROM proxmox_objects WHERE id=? AND present=1',(object_id,)).fetchone()

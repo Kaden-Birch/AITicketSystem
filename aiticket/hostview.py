@@ -56,6 +56,8 @@ def overview(store,now=None):
         m['health']='down' if 'down' in states else 'unknown' if 'unknown' in states else 'healthy' if states else 'unmonitored'
         m['active_incidents']=counts.get(m['id'],0)
         m['type']=m['object']['kind'] if m['object'] else 'Linux host' if m['agent'] else 'Machine'
+    for obj in store.rows("SELECT * FROM proxmox_objects WHERE machine_id IS NULL AND present=1 AND template=0 AND kind IN ('node','qemu','lxc') ORDER BY kind,name"):
+        machines.append({'id':None,'name':obj['name'],'type':obj['kind'],'object':obj,'agent':None,'sample':sample(None,obj,now),'health':'unassigned','active_incidents':0})
     return machines
 
 
@@ -67,7 +69,7 @@ def detail(store,machine_id):
         guests=store.rows("SELECT o.*,m.name AS machine FROM proxmox_objects o LEFT JOIN machines m ON m.id=o.machine_id WHERE o.cluster_id=? AND o.node=? AND o.kind IN ('qemu','lxc') AND o.present=1 ORDER BY o.kind,o.object_key",(obj['cluster_id'],obj['node']))
     for guest in guests:
         guest['sample']=sample(None,guest,time.time())
-    return {'host':host,'guests':guests,'checks':store.rows('SELECT * FROM checks WHERE machine_id=? ORDER BY name',(machine_id,)),'incidents':store.rows('SELECT * FROM incidents WHERE machine_id=? ORDER BY first_seen DESC LIMIT 100',(machine_id,)),'parent':store.rows('SELECT id,name FROM machines WHERE id=?',(host['parent_id'],)),'lifecycle':[{**r,'data':json.loads(r['payload'])} for r in store.rows('SELECT * FROM power_jobs WHERE machine_id=? ORDER BY created DESC LIMIT 50',(machine_id,))], 'power_policy':next(iter(store.rows('SELECT machine_id,backend,enabled,validated,version FROM power_policies WHERE machine_id=?',(machine_id,))),None),'power_connections':store.rows('SELECT id,name FROM proxmox_connections WHERE cluster_id=?',(obj['cluster_id'],)) if obj else []}
+    return {'machines':store.rows('SELECT id,name FROM machines ORDER BY name'),'proxmox_sample':sample(None,obj,time.time()) if obj else None,'link_candidates':store.rows("SELECT o.*,p.name AS cluster FROM proxmox_objects o JOIN proxmox_clusters p ON p.id=o.cluster_id WHERE o.machine_id IS NULL AND o.present=1 AND o.template=0 AND o.kind IN ('node','qemu','lxc') ORDER BY p.name,o.kind,o.name"),'host':host,'guests':guests,'checks':store.rows("SELECT * FROM checks WHERE machine_id=? AND kind<>'manual' ORDER BY name",(machine_id,)),'incidents':store.rows('SELECT * FROM incidents WHERE machine_id=? ORDER BY first_seen DESC LIMIT 100',(machine_id,)),'parent':store.rows('SELECT id,name FROM machines WHERE id=?',(host['parent_id'],)),'lifecycle':[{**r,'data':json.loads(r['payload'])} for r in store.rows('SELECT * FROM power_jobs WHERE machine_id=? ORDER BY created DESC LIMIT 50',(machine_id,))], 'power_policy':next(iter(store.rows('SELECT machine_id,backend,enabled,validated,version FROM power_policies WHERE machine_id=?',(machine_id,))),None),'power_connections':store.rows('SELECT id,name FROM proxmox_connections WHERE cluster_id=?',(obj['cluster_id'],)) if obj else []}
 
 
 def object_detail(store,object_id):
@@ -76,4 +78,6 @@ def object_detail(store,object_id):
     obj=objects[0]
     if obj['machine_id']: return detail(store,obj['machine_id'])
     host={'id':None,'name':obj['name'],'type':obj['kind'],'object':obj,'agent':None,'sample':sample(None,obj,time.time()),'health':'unmonitored','active_incidents':0}
-    return {'host':host,'guests':[],'checks':[],'incidents':[],'parent':[],'lifecycle':[],'power_policy':None}
+    guests=store.rows("SELECT * FROM proxmox_objects WHERE cluster_id=? AND node=? AND present=1 AND kind IN ('qemu','lxc') ORDER BY name",(obj['cluster_id'],obj['node'])) if obj['kind']=='node' else []
+    for g in guests: g['sample']=sample(None,g,time.time())
+    return {'machines':store.rows('SELECT id,name FROM machines ORDER BY name'),'host':host,'guests':guests,'checks':[],'incidents':[],'parent':[],'lifecycle':[],'power_policy':None}

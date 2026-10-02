@@ -83,3 +83,5 @@ Milestone 16 adds budgeted AI preparation of recovery proposal text, immutable u
 Milestone 17 adds [host dashboards and manual power controls](docs/host-dashboard.md): fresh/stale CPU, RAM, storage and uptime views, extra Linux metrics, node guest inventory, linked alert history, separate power credentials and exact-target approvals. Power defaults disabled; Proxmox node/storage shutdown remains protected. Live power permission/runtime validation remains deferred.
 
 Milestone 18 adds [Hermes Codex subscription mode](docs/hermes-codex.md), schema 19, exact model/reasoning snapshots, transactional run limits, dedicated OAuth isolation and cancellation supervision. Live installed-Hermes/login/model validation remains pending.
+
+Milestone 19 adds [host editing, Proxmox visibility and manual tickets](docs/host-editing-tickets.md): retained machine identity, late association with agent hosts, unassigned resource dashboard cards and node guest views, and user-reported machine-tagged tickets with explicit AI requests and independent resolution.

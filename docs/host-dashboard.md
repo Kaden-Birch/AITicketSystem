@@ -62,3 +62,5 @@ sudo systemctl status aiticket-agent --no-pager
 Keep `/var/lib/aiticket-agent/identity.json` and its execution ledgers; reenrollment is unnecessary. Agent 0.4.0 adds OS information, CPU core count, swap and additional load averages. Earlier agents can still report their existing metrics.
 
 Automated tests use mocked power endpoints/subprocesses. No real host/guest power operation has been run by development tests; live permission/runtime validation remains necessary before enabling controls.
+
+For editing existing hosts, linking previously enrolled agents, viewing unassigned Proxmox resources and opening manual tickets, see [host editing and tickets](host-editing-tickets.md).
