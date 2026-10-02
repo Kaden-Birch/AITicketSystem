@@ -6,7 +6,7 @@ Agent telemetry is preferred for guest filesystem usage. Proxmox metrics are sna
 
 ## Proxmox guest power
 
-On a linked application's host page, expand **Configure power permissions**, choose **Proxmox guest power API**, select its cluster connection and enter a separate guest-scoped API token. The monitoring token cannot be reused. Grant the power token only the required guest audit/power and task-read permissions for the installed Proxmox version; consult its [API viewer](https://pve.proxmox.com/pve-docs/api-viewer/). The official [QEMU API implementation](https://github.com/proxmox/qemu-server/blob/master/src/PVE/API2/Qemu.pm) and [LXC API implementation](https://github.com/proxmox/pve-container/blob/master/src/PVE/API2/LXC/Status.pm) define the start, reboot and shutdown endpoints used here. Validate on a disposable guest before checking the validation/enabled boxes.
+On a linked application's **Host settings → Manual power buttons**, choose **Proxmox guest power API**, select the existing cluster connection and enable the buttons. The saved connection's current API token is reused for start, reboot and shutdown, including task verification; no secondary token is required. Proxmox enforces the token's permissions and denied requests are reported as failures.
 
 **Start** requires a stopped, explicitly associated Proxmox guest. **Restart** and **Shutdown** require a running guest. Templates, Proxmox nodes and storage cannot be powered through this application. Keep the monitoring VM, Hermes and other essential infrastructure protected. Enter a reason, create the proposal, review its exact identity/operation/impact and confirm **Approve once**. A migration, changed binding, stale inventory, expired proposal or changed policy invalidates the proposal. Shutdown is graceful; no forced stop fallback is sent. Restart calls the reboot API, rather than independently sending stop/start commands.
 
@@ -73,3 +73,5 @@ Each host now has current CPU, memory, storage and uptime cards, with retained h
 System details are in a compact sidebar. Checks expand to show evidence; open tickets and historical tickets are below. **Add check** at the top opens a form already scoped to this host. Configure permissions, host details, associations, manual power and check enable/disable through **Host settings**. Operational power controls remain available on the host page; command history is collapsed until needed.
 
 Only update/rebuild the main application for this workspace (schema 25). No agent or Hermes update is required. Existing data and check settings are retained. Graphs refresh using the existing five-second live page updates; collection speed still depends on the agent reporting and Proxmox discovery intervals.
+
+Existing Proxmox power policies now reuse their selected connection token. Legacy separate power tokens are no longer used. Only update/rebuild the main application; no agent or Hermes update is required.

@@ -23,9 +23,10 @@ def configure(store,vault,machine_id,backend,connection_id=None,token_id='',secr
             raise ValueError('Proxmox nodes and storage are protected; only application guests/hosts are eligible.')
         obj=next((o for o in objects if o['kind'] in ('qemu','lxc') and not o['template']),None)
         if backend=='proxmox':
-            connection=c.execute('SELECT * FROM proxmox_connections WHERE id=?',(connection_id,)).fetchone()
-            if not obj or not connection or connection['cluster_id']!=obj['cluster_id'] or not 1<=len(token_id)<=200 or not 1<=len(secret)<=2048 or token_id==connection['token_id']:
-                raise ValueError('Choose the exact linked guest connection and a separate guest-scoped power token.')
+            connection=c.execute('SELECT * FROM proxmox_connections WHERE id=?',(connection_id,)).fetchone() if connection_id else c.execute('SELECT * FROM proxmox_connections WHERE cluster_id=? ORDER BY id LIMIT 1',(obj['cluster_id'],)).fetchone() if obj else None
+            if not obj or not connection or connection['cluster_id']!=obj['cluster_id'] or not connection['token_id'] or not connection['token_secret']:
+                raise ValueError('Choose a configured Proxmox connection in the linked guest cluster.')
+            connection_id=connection['id'];token_id=None;secret=None
         else:
             if not c.execute('SELECT 1 FROM agents WHERE machine_id=? AND revoked=0',(machine_id,)).fetchone():
                 raise ValueError('Enroll the host agent first.')
@@ -150,7 +151,7 @@ def complete(store,agent_id,payload,now=None):
 
 
 def task_connection(policy,connection):
-    return {**dict(connection),'token_id':policy['token_id'],'token_secret':policy['token_secret']}
+    return dict(connection)
 
 
 def dispatch_proxmox(store,vault,now):

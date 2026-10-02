@@ -47,11 +47,12 @@ def test_dashboard_metrics_guest_tree_stale_and_history(signed_in):
     assert client.get('/hosts/missing').status_code==404
 
 
-def test_power_separate_credentials_protected_hash_and_state(environment):
+def test_power_existing_credentials_protected_hash_and_state(environment):
     _,store,vault=environment
     mid,_=guest(store,vault)
-    with pytest.raises(ValueError,match='separate'):
-        power.configure(store,vault,mid,'proxmox','p1','monitor@pve!readonly','fixture-secret',True,True,True)
+    power.configure(store,vault,mid,'proxmox','p1',enabled=True,validated=True,confirm=True)
+    policy=store.rows('SELECT * FROM power_policies WHERE machine_id=?',(mid,))[0]
+    assert policy['token_id'] is None and policy['token_secret'] is None
     job=power.propose(store,mid,'shutdown','Planned maintenance')
     with pytest.raises(ValueError,match='hash'): power.decide(store,job,'wrong','approve')
     with pytest.raises(ValueError,match='already exists'): power.propose(store,mid,'restart','Duplicate')
@@ -73,7 +74,7 @@ def test_proxmox_once_dispatch_task_and_fresh_state_verification(environment):
         assert post.call_count==1
         args=post.call_args
         assert '/nodes/a/qemu/209/status/shutdown' in args.args[0]
-        assert args.kwargs['headers']['Authorization'].endswith('power-only-secret')
+        assert args.kwargs['headers']['Authorization'].endswith('fixture-secret')
         assert args.kwargs['data']['forceStop']==0 and args.kwargs['allow_redirects'] is False
     stopped=[{**r,'status':'stopped'} if r['type']=='qemu' else r for r in resources]
     with patch.object(Client,'get',side_effect=[{'status':'stopped','exitstatus':'OK'},stopped]),patch('aiticket.power.requests.post') as post:
@@ -189,3 +190,18 @@ def test_host_ticket_links_and_protected_node_controls(signed_in):
     nodeid=store.rows('SELECT machine_id FROM proxmox_objects WHERE id=?',(node['id'],))[0]['machine_id']
     with pytest.raises(ValueError,match='protected'):
         power.configure(store,vault,nodeid,'proxmox','p1','power@pve!node','secret',True,True,True)
+
+
+def test_existing_connection_token_rotation_applies_to_legacy_power_policy(environment):
+    _,store,vault=environment
+    mid,resources=guest(store,vault)
+    with store.connect() as c:
+        c.execute('UPDATE power_policies SET token_id=?,token_secret=? WHERE machine_id=?',('legacy@pve!power',vault.encrypt('legacy-unused'),mid))
+        c.execute('UPDATE proxmox_connections SET token_id=?,token_secret=? WHERE id=?',('current@pve!power',vault.encrypt('rotated-current'),'p1'))
+    job=power.propose(store,mid,'restart','Token reuse test');approve(store,job)
+    response=Mock(status_code=403)
+    with patch.object(Client,'get',return_value=resources),patch('aiticket.power.requests.post',return_value=response) as post:
+        power.tick(store,vault)
+        assert post.call_args.kwargs['headers']['Authorization']=='PVEAPIToken=current@pve!power=rotated-current'
+        assert '/status/reboot' in post.call_args.args[0]
+    assert store.rows('SELECT state FROM power_jobs WHERE id=?',(job,))[0]['state']=='failed'

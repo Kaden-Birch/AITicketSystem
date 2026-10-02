@@ -1,4 +1,4 @@
-336 passed in 29.79s
+337 passed in 30.46s
 
 HTTP opt-in tests cover cookie configuration, URL restrictions, persisted agent enrollment, nonredirecting credential delivery, continued HTTPS verification and isolated Hermes configuration.
 Local Python 3.14.6; temporary databases, fake Hermes adapters and mocked external providers/subprocesses.
@@ -43,3 +43,5 @@ Agent heartbeat regression: full runtime tests verify two successive heartbeat d
 Host performance workspace: source-separated agent/Proxmox history, seven-day retention, bounded graph buckets and missing-data gaps, authenticated host-specific check creation and empty-history rendering. Full suite 326 passed; final route/template checks 13 passed. Dark-mode workspace and scoped Add check flow visually reviewed with synthetic fixture data. No live model, Discord or host actions performed.
 
 Docker monitoring: running/health/paused/restarting states, missing vs unavailable inspection, required healthchecks, minimal inspect format excluding secrets, host-bound evidence, ticket/recovery flow, inventory export and older-agent dispatch exclusion. Full suite 336 passed; final Docker compatibility checks 10 passed. Real Docker host validation remains pending.
+
+Proxmox manual power now reuses the selected linked connection token. Tests verify no secondary credential requirement, migration/hash fencing, current connection token use after rotation with a legacy power policy, task verification and HTTP 403 failure handling. Full suite 337 passed.
