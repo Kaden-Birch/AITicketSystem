@@ -30,8 +30,9 @@ def invoke(server,args,credential=None,job=None,secret=None,ca=None):
             result=json.loads(raw)
         if result.get('state') not in ('pending','dispatched','running') or time.monotonic()>=deadline: break
         time.sleep(1)
-    except Exception:
-        return json.dumps({'error':'Request failed or delivery is ambiguous. Do not replay the command. Check its UUID/status in the host workspace.','id':args.get('id')})
+    except Exception as exc:
+        lookup=args.get('action') in ('status','proxmox_status','targets')
+        return json.dumps({'state':'lookup_failed' if lookup else 'unknown','error_type':type(exc).__name__,'error':'Status/target lookup failed; this does not establish whether an operation was dispatched.' if lookup else 'Request failed or delivery is ambiguous. Do not replay the command. Check its UUID/status in the host workspace.','id':args.get('id')})
     if result.get('result') and 'stdout' in result['result']:
         full=result['result'];result['result']={**full,**{k:full[k][offset:offset+2048] for k in ('stdout','stderr')}}
         result['more_output']=any(len(full[k])>offset+2048 for k in ('stdout','stderr'))

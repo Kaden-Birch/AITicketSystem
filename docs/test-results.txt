@@ -1,4 +1,4 @@
-276 passed in 27.73s
+279 passed in 27.89s
 
 HTTP opt-in tests cover cookie configuration, URL restrictions, persisted agent enrollment, nonredirecting credential delivery, continued HTTPS verification and isolated Hermes configuration.
 Local Python 3.14.6; temporary databases, fake Hermes adapters and mocked external providers/subprocesses.
@@ -31,3 +31,5 @@ Agent reporting/live pages: reporting interval validation, persisted agent-check
 Ticket workspace milestone: session-based AI/human work, queue/wait exclusion, intervention deduplication, same-ticket clarification, authenticated blocker tool, public URL validation and Discord linking/suppression. Browser fixture reviewed in light/dark appearance with ticket creation, live timer, blocker banner and preserved draft. No live AI, host command or Discord notification sent.
 
 Machine context improvement: fresh/stale agent peer address provenance, explicit shell availability, ticket-bound identity discovery without shell permission, rejected request detail relay and safe Proxmox exception diagnostics. No live VM network query performed.
+
+Resumed status regression: earlier shell and Proxmox requests readable only within the same ticket/machine; cross-ticket reads and earlier-run cancellation remain denied. Missing UUID and lookup transport errors are distinguished from dispatch ambiguity.

@@ -227,15 +227,19 @@ def create_app(data_dir=None, testing=False):
             return pxops.view(store,vault,identifier)
         if action=='proxmox_status':
             result=pxops.view(store,vault,payload.get('id'))
-            if (ai_job and result['ai_job_id']!=ai_job): abort(403)
+            if ai_job:
+                prior=store.rows('SELECT incident_id FROM ai_jobs WHERE id=?',(result['ai_job_id'],))
+                if result['machine_id']!=machine or not prior or prior[0]['incident_id']!=incident_id: abort(403)
             with store.connect() as c: pxops.policy(c,result['machine_id'],ai_job,external)
             return result
         if action=='run':
             identifier=queue(store,vault,machine,payload.get('command'),payload.get('id'),incident_id,ai_job,external)
         else:
             identifier=payload.get('id')
-            rows=store.rows('SELECT machine_id,ai_job_id FROM command_jobs WHERE id=?',(identifier,))
-            if not rows or (ai_job and rows[0]['ai_job_id']!=ai_job): abort(403)
+            rows=store.rows('SELECT machine_id,ai_job_id,incident_id FROM command_jobs WHERE id=?',(identifier,))
+            if not rows:
+                return {'state':'not_recorded','id':identifier,'note':'No command with this UUID is currently recorded. A failed status lookup does not establish dispatch.'}
+            if ai_job and (rows[0]['machine_id']!=machine or rows[0]['incident_id']!=incident_id or (action!='status' and rows[0]['ai_job_id']!=ai_job)): abort(403)
             machine=rows[0]['machine_id']
             if external and not store.rows('SELECT 1 FROM command_policies WHERE machine_id=? AND external=1',(machine,)): abort(403)
             if action=='cancel': decide(store,identifier,'cancel')
