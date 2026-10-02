@@ -94,6 +94,8 @@ def test_codex_runner_fixed_route_reasoning_no_tools(monkeypatch):
             assert kwargs['provider']=='openai-codex' and kwargs['api_key']=='fixture-oauth-token'
             assert kwargs['enabled_toolsets']==[] and kwargs['skip_background_review']
             assert kwargs['fallback_model'] is None
+            # Codex rejects a Chat Completions stream override in Responses requests.
+            assert 'stream' not in kwargs['request_overrides']
             self.tools=[];self.client=SimpleNamespace(base_url=route['base_url'])
         def run_conversation(self,prompt):
             assert self.client.max_retries==0

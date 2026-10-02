@@ -64,7 +64,7 @@ def execute(agent_class, job, gateway):
         raise RuntimeError('Runner is not configured for Codex mode.')
     route=codex_runtime(job['model']) if codex else {'base_url':base,'api_key':job['credential']}
     extra={'reasoning_config':{'enabled':True,'effort':job['reasoning']},'fallback_model':None} if codex else {}
-    agent = agent_class(**route, **extra, model=job['model'], max_iterations=job['max_calls'], enabled_toolsets=[], skip_context_files=True, skip_memory=True, skip_background_review=True, load_soul_identity=False, request_overrides={'stream': False}, quiet_mode=True, save_trajectories=False)
+    agent = agent_class(**route, **extra, model=job['model'], max_iterations=job['max_calls'], enabled_toolsets=[], skip_context_files=True, skip_memory=True, skip_background_review=True, load_soul_identity=False, request_overrides={} if codex else {'stream': False}, quiet_mode=True, save_trajectories=False)
     try:
         if getattr(agent, 'tools', None) != []:
             raise RuntimeError('Hermes loaded tools; refusing execution.')
