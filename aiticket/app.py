@@ -390,16 +390,17 @@ def create_app(data_dir=None, testing=False):
             cfg = {'url': validate_url(f.get('url', '')), 'status': int(f.get('expected_status', 200))}
             if not 100 <= cfg['status'] <= 599:
                 raise ValueError('Invalid HTTP status.')
-        elif kind in ('process','smb'):
+        elif kind in ('process','smb','docker'):
             target=f.get('target','').strip()
-            if kind=='process':
+            if kind in ('process','docker'):
                 if not re.fullmatch(r'[A-Za-z0-9_.@-]{1,100}',target) or target.startswith('-'):
-                    raise ValueError('Enter a process name or systemd .service unit.')
+                    raise ValueError('Enter a valid container name/ID, process name or systemd .service unit.')
             elif not target.startswith('/') or len(target)>512 or '\n' in target:
                 raise ValueError('Enter the absolute mounted SMB directory on the monitored host.')
             if not store.rows('SELECT id FROM agents WHERE machine_id=? AND revoked=0',(machine,)):
                 raise ValueError('Enroll an agent on this host first.')
             cfg={'target':target}
+            if kind=='docker': cfg['require_health']=f.get('require_health')=='yes'
         elif kind == 'ping':
             target=f.get('host','').strip()
             if not target or target.startswith('-') or len(target)>253 or not re.fullmatch(r'[A-Za-z0-9_.:-]+',target):
@@ -417,7 +418,7 @@ def create_app(data_dir=None, testing=False):
             raise ValueError('Unsupported check type.')
         interval, fail, recover = int(f.get('interval', 60)), int(f.get('fail_after', 3)), int(f.get('recover_after', 2))
         severity = f.get('severity', 'medium')
-        if not (1 if kind=='ping' else 20 if kind in ('process','smb') else 10) <= interval <= 86400 or not 1 <= fail <= 100 or not 1 <= recover <= 100 or severity not in SEVERITIES:
+        if not (1 if kind=='ping' else 20 if kind in ('process','smb','docker') else 10) <= interval <= 86400 or not 1 <= fail <= 100 or not 1 <= recover <= 100 or severity not in SEVERITIES:
             raise ValueError('Invalid interval, thresholds or severity.')
         name = f.get('name', '').strip()
         if not 1 <= len(name) <= 100:
@@ -855,8 +856,8 @@ def create_app(data_dir=None, testing=False):
         if not isinstance(results,list) or len(results)>20: abort(400)
         from .engine import observe
         for result in results:
-            if not isinstance(result,dict) or type(result.get('healthy')) is not bool: abort(400)
-            checks=store.rows("SELECT * FROM checks WHERE id=? AND machine_id=? AND enabled=1 AND kind IN ('process','smb')",(result.get('id'),machine))
+            if not isinstance(result,dict) or result.get('healthy') is not None and type(result.get('healthy')) is not bool: abort(400)
+            checks=store.rows("SELECT * FROM checks WHERE id=? AND machine_id=? AND enabled=1 AND kind IN ('process','smb','docker')",(result.get('id'),machine))
             if not checks: continue
             check=checks[0]
             sampled=result.get('sampled_at')
@@ -864,8 +865,20 @@ def create_app(data_dir=None, testing=False):
             previous=store.rows('SELECT evidence FROM observations WHERE check_id=? ORDER BY at DESC LIMIT 1',(check['id'],))
             if previous and json.loads(previous[0]['evidence']).get('sampled_at',0)>=sampled: continue
             if result.get('config')!=json.loads(check['config']) or check['next_run']>time.time(): continue
-            observe(store,check['id'],result['healthy'],{'target':result['config']['target'],'reason':'Agent check passed' if result['healthy'] else 'Agent check failed','sampled_at':sampled})
-        return {'checks':[{'id':r['id'],'kind':r['kind'],'config':json.loads(r['config'])} for r in store.rows("SELECT * FROM checks WHERE machine_id=? AND enabled=1 AND kind IN ('process','smb') AND next_run<=? ORDER BY next_run,id LIMIT 20",(machine,time.time()))]}
+            evidence={'target':result['config']['target'],'reason':'Agent check passed' if result.get('healthy') else 'Agent check unavailable' if result.get('healthy') is None else 'Agent check failed','sampled_at':sampled}
+            if check['kind']=='docker':
+                details=result.get('details',{})
+                if not isinstance(details,dict): abort(400)
+                for key in ('status','health','reason'):
+                    if isinstance(details.get(key),str): evidence[key]=details[key][:200]
+                for key in ('exit_code','restart_count'):
+                    if type(details.get(key)) is int: evidence[key]=details[key]
+                for key in ('running','paused','restarting','oom_killed'):
+                    if type(details.get(key)) is bool: evidence[key]=details[key]
+            observe(store,check['id'],result.get('healthy'),evidence)
+        version=rows[0]['version'] or ''
+        docker_supported=bool(re.fullmatch(r'\d+\.\d+\.\d+',version)) and tuple(int(v) for v in version.split('.'))>=(0,7,0)
+        return {'checks':[{'id':r['id'],'kind':r['kind'],'config':json.loads(r['config'])} for r in store.rows("SELECT * FROM checks WHERE machine_id=? AND enabled=1 AND kind IN ('process','smb','docker') AND (kind<>'docker' OR ?) AND next_run<=? ORDER BY next_run,id LIMIT 20",(machine,docker_supported,time.time()))]}
 
     @app.route('/proxmox', methods=['GET','POST'])
     @login_required

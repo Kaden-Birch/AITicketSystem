@@ -255,7 +255,7 @@ sudo systemctl start aiticket-agent
 sudo systemctl status aiticket-agent --no-pager
 ```
 
-Agent version is `0.6.1`. Existing credentials and local permissions are retained. Hermes does not need an update for these checks.
+Agent version is `0.7.0`. Existing credentials and local permissions are retained. Hermes does not need an update for these checks.
 
 ### Heartbeats stopped after the process/SMB update
 
@@ -268,3 +268,21 @@ sudo journalctl -u aiticket-agent --since "5 minutes ago" --no-pager -n 50
 ```
 
 A `ModuleNotFoundError` in the optional-check log indicates `monitoring.py` was not copied beside `agent.py`. HTTP 404 indicates the main application must be updated/rebuilt to provide `/api/agent/checks`. These errors no longer suppress heartbeats. Healthy heartbeat checks recover existing incidents using their configured success threshold.
+
+## Docker container monitoring
+
+On a monitored host, choose **Add check → Docker container**. Enter the exact container name or ID, such as `immich_server`, and configure failure/recovery thresholds and severity. Names are preferable to IDs when Compose recreates containers. Add a separate check for each container involved in the application.
+
+The agent uses Docker's [container inspection command](https://docs.docker.com/reference/cli/docker/container/inspect/) with a fixed format that collects only running state, health status, paused/restarting flags, exit code, OOM flag and restart count. Container environment variables, configuration secrets and healthcheck log output are excluded. Check details appear in the host's expandable checks and incident evidence.
+
+- **Up:** running, not paused/restarting, and healthy when a Docker HEALTHCHECK exists.
+- **Retrying / Down:** stopped, missing, paused, restarting, or unhealthy/starting; consecutive failure thresholds determine when a ticket opens.
+- **Unknown:** Docker CLI/daemon inspection unavailable, denied, timed out or malformed. This does not claim that the container is stopped. If **Require a Docker HEALTHCHECK** is selected and a running container has no healthcheck, its state is unknown until configured.
+
+Without a healthcheck, running state cannot establish application functionality. Add an HTTP check and an SMB check when appropriate. A `docker.service` process/service check can additionally detect daemon failure; inability to inspect Docker alone does not open a container-down ticket.
+
+Checks run against the local Docker daemon, with the agent's existing OS account. The Docker CLI must be installed on the monitored host and the agent must already be permitted to access its local daemon. The root agent configuration used for testing can do this directly. This update does not change service accounts, grant Docker group membership, expose the Docker socket or install Docker. Rootless/custom Docker endpoints are not configured by this check.
+
+Upgrade the main application and copy both `agent/agent.py` and `agent/monitoring.py` to each monitored host using the commands above. Agent version is **0.7.0**. Hermes needs no update. Agent checks follow the existing reporting cadence, as low as 20 seconds.
+
+Container failures use the normal automatic ticket/AI workflow. With automatic triage enabled, a severity that meets its minimum and Full access, AI can investigate and use commands such as `docker restart immich_server`. Guarded access asks for approval for changes; read-only access blocks them. Subsequent checks establish recovery before closure. No automatic restart is performed by the inspection itself.

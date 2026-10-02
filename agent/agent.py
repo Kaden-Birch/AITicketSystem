@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-VERSION = '0.6.1'
+VERSION = '0.7.0'
 
 
 def endpoint(value,allow_http=False):
@@ -152,7 +152,7 @@ def monitor_checks(send,base,state,path):
             state['monitor_results']=[];write_state(path,state)
     except Exception as exc:
         status=getattr(exc,'code',None)
-        print('Optional process/SMB checks unavailable: '+type(exc).__name__+(' (HTTP '+str(status)+')' if status else '')+'; heartbeat continues.',flush=True)
+        print('Optional host checks unavailable: '+type(exc).__name__+(' (HTTP '+str(status)+')' if status else '')+'; heartbeat continues.',flush=True)
 
 
 def main():

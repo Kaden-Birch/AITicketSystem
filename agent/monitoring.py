@@ -1,4 +1,5 @@
 """Bounded read-only process and mounted CIFS health checks."""
+import json
 import subprocess
 import sys
 import time
@@ -21,11 +22,34 @@ def mount_probe(argv):
         return False
 
 
+DOCKER_FORMAT='{"status":{{json .State.Status}},"running":{{json .State.Running}},"paused":{{json .State.Paused}},"restarting":{{json .State.Restarting}},"exit_code":{{json .State.ExitCode}},"oom_killed":{{json .State.OOMKilled}},"restart_count":{{json .RestartCount}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}"not_configured"{{end}}}'
+
+
+def docker_probe(target,require_health=False):
+    try:
+        reply=subprocess.run(['docker','container','inspect','--format',DOCKER_FORMAT,'--',target],stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=5,env={'PATH':'/usr/local/bin:/usr/bin:/bin','LANG':'C'})
+        if reply.returncode:
+            missing=b'No such container' in reply.stderr[:4096] or b'No such object' in reply.stderr[:4096]
+            return (False if missing else None), {'status':'missing' if missing else 'unknown','reason':'Container does not exist' if missing else 'Docker inspection unavailable; check daemon and agent permissions'}
+        data=json.loads(reply.stdout[:4096])
+        if not isinstance(data,dict) or type(data.get('running')) is not bool or data.get('health') not in ('healthy','unhealthy','starting','not_configured'):
+            raise ValueError('Malformed Docker state')
+        if require_health and data['running'] and not data.get('paused') and not data.get('restarting') and data['health']=='not_configured':
+            return None, {**data,'reason':'Required Docker HEALTHCHECK is not configured'}
+        healthy=data['running'] and not data.get('paused') and not data.get('restarting') and data['health'] in ('healthy','not_configured')
+        return bool(healthy),data
+    except (OSError,subprocess.SubprocessError,ValueError):
+        return None, {'status':'unknown','reason':'Docker inspection unavailable; check CLI, daemon and agent permissions'}
+
+
 def evaluate(check):
     target=check['config']['target']
     healthy=False
+    details={}
     try:
-        if check['kind']=='process':
+        if check['kind']=='docker':
+            healthy,details=docker_probe(target,check['config'].get('require_health',False))
+        elif check['kind']=='process':
             if target.endswith('.service'):
                 healthy=subprocess.run(['systemctl','is-active','--quiet',target],timeout=3,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0
             else:
@@ -51,4 +75,4 @@ os.statvfs(path)
             healthy=mount_probe([sys.executable,'-c',script,target])
     except (OSError,subprocess.SubprocessError):
         pass
-    return {'sampled_at':time.time(),'id':check['id'],'config':check['config'],'healthy':healthy}
+    return {'sampled_at':time.time(),'id':check['id'],'config':check['config'],'healthy':healthy,'details':details}

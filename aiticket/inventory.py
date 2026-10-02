@@ -21,7 +21,7 @@ FIELDS={
  'notification_overrides':('scope_kind','scope_id','policy'),
 }
 CONFIG={
- 'ping':{'host'}, 'process':{'target'}, 'smb':{'target'},
+ 'ping':{'host'}, 'process':{'target'}, 'smb':{'target'}, 'docker':{'target','require_health'},
  'http':{'url','status'},'tcp':{'host','port'},
  'proxmox':{'url','token_id','resource','expected'},
  'proxmox_linked':{'object_id','cluster_id','resource','expected'},
@@ -63,11 +63,12 @@ def config(kind,cfg):
         import re
         if not isinstance(cfg.get('host'),str) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,253}',cfg['host']) or cfg['host'].startswith('-'):
             raise ValueError('Invalid ping target.')
-    elif kind in ('process','smb'):
+    elif kind in ('process','smb','docker'):
         import re
         target=cfg.get('target','')
-        if not isinstance(target,str) or (kind=='process' and (not re.fullmatch(r'[A-Za-z0-9_.@-]{1,100}',target) or target.startswith('-'))) or (kind=='smb' and (not target.startswith('/') or len(target)>512 or '\n' in target)):
+        if not isinstance(target,str) or (kind in ('process','docker') and (not re.fullmatch(r'[A-Za-z0-9_.@-]{1,100}',target) or target.startswith('-'))) or (kind=='smb' and (not target.startswith('/') or len(target)>512 or '\n' in target)):
             raise ValueError('Invalid agent check target.')
+        if kind=='docker' and type(cfg.get('require_health',False)) is not bool: raise ValueError('Invalid container health setting.')
     elif kind=='tcp':
         text(cfg.get('host'),253)
         integer(cfg.get('port'),1,65535)
@@ -124,7 +125,7 @@ def validate_document(document):
                     raise ValueError('Invalid inventory scalar.')
             if name=='checks':
                 config(row['kind'],row['config'])
-                integer(row['interval'],1 if row['kind']=='ping' else 20 if row['kind'] in ('process','smb') else 10,86400)
+                integer(row['interval'],1 if row['kind']=='ping' else 20 if row['kind'] in ('process','smb','docker') else 10,86400)
                 integer(row['fail_after'],1,100)
                 integer(row['recover_after'],1,100)
                 if row['severity'] not in SEVERITIES:
