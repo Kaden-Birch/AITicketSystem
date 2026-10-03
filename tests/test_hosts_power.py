@@ -28,6 +28,28 @@ def approve(store,job):
     power.decide(store,job,row['payload_hash'],'approve')
 
 
+def test_inventory_workspaces_without_agents_and_linked_resource_redirect(signed_in):
+    client,store,vault,_=signed_in
+    setup(store,vault)
+    with patch.object(Client,'get',return_value=inventory()): discover(store,vault,'p1')
+    objects=store.rows("SELECT * FROM proxmox_objects WHERE kind IN ('node','qemu','lxc')")
+    assert objects
+    for obj in objects:
+        response=client.get('/proxmox/resources/'+obj['id'])
+        assert response.status_code==200
+        assert obj['name'].encode() in response.data
+        assert b'Performance history' in response.data
+        assert b'Inventory resource' in response.data
+    obj=next(o for o in objects if o['kind']=='qemu')
+    link(store,obj['id'],None,'running','Guest without agent')
+    mid=store.rows('SELECT machine_id FROM proxmox_objects WHERE id=?',(obj['id'],))[0]['machine_id']
+    response=client.get('/proxmox/resources/'+obj['id'])
+    assert response.status_code==302 and response.headers['Location']=='/hosts/'+mid
+    response=client.get(response.headers['Location'])
+    assert response.status_code==200 and b'Guest without agent' in response.data
+    assert client.get('/proxmox/resources/missing').status_code==404
+
+
 def test_dashboard_metrics_guest_tree_stale_and_history(signed_in):
     client,store,vault,_=signed_in
     mid,resources=guest(store,vault)

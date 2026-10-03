@@ -1,4 +1,4 @@
-389 passed in 36.14s
+391 passed in 36.04s
 
 HTTP opt-in tests cover cookie configuration, URL restrictions, persisted agent enrollment, nonredirecting credential delivery, continued HTTPS verification and isolated Hermes configuration.
 Local Python 3.14.6; temporary databases, fake Hermes adapters and mocked external providers/subprocesses.
@@ -77,3 +77,5 @@ Individual ticket refresh: all 16 existing submission routes retained; fixture t
 Multi-endpoint Proxmox: tests cover atomic endpoint creation, IPv4/IPv6 normalization, duplicate/invalid URL rejection, shared credential replacement, single cluster scheduling, existing linked monitoring fallback and discovery fallback with the first endpoint unavailable. Fixture browser checks cover adding optional addresses, persisted cluster grouping and live-update preservation. No live Proxmox request was sent.
 
 Installer empty-filter regression: 5 installer tests passed; an empty SystemCallFilter deny list is accepted while real allow/deny filters remain rejected. No production service settings changed.
+
+Agentless host regression: unassigned Proxmox node/VM/container workspaces render successfully; linked resources redirect to their canonical host workspace. Existing unenrolled host rendering and missing-resource 404 tests pass. No live infrastructure request executed.

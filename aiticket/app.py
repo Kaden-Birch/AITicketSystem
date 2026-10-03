@@ -470,8 +470,9 @@ def create_app(data_dir=None, testing=False):
         from .hostview import object_detail
         data=object_detail(store,object_id)
         if not data: abort(404)
-        from .proxmox_operations import view as px_view
-        data['proxmox_api_jobs']=[px_view(store,vault,r['id']) for r in store.rows('SELECT id FROM proxmox_api_jobs WHERE machine_id=? ORDER BY created DESC LIMIT 20',(machine_id,))]
+        if data['host']['id']:
+            return redirect(url_for('host_detail',machine_id=data['host']['id']))
+        data['proxmox_api_jobs']=[]
         from .metric_history import charts
         data['history']=charts(store,data['host'],request.args.get('window','6h'))
         return render_template('host-detail.html',**data)
