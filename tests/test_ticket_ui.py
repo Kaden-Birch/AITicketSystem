@@ -113,3 +113,26 @@ def test_settings_save_public_url_and_blocker_opt_out(signed_in):
     assert store.setting('discord_blockers') is False
     assert client.post('/settings',data={'csrf':csrf,'section':'discord','public_url':'https://a.com/#bad','minimum':'low'}).status_code==400
     assert store.setting('public_url')=='https://tickets.example.com'
+
+
+def test_ticket_workspace_keeps_actions_in_focused_tools(signed_in):
+    client,store,vault,_=signed_in
+    incident=configure(store,vault,command_tools=True)
+    job=ai.request_job(store,vault,incident)
+    page=client.get('/incidents/'+incident)
+    assert page.status_code==200
+    text=page.get_data(as_text=True)
+    for label in ('At a glance','Conversation','Work log','Machine diagnostics','AI history &amp; evidence review','Ticket management'):
+        assert label.replace('&amp;','&') in text or label in text
+    for endpoint in ('handling','work','note','workspace','ai','silence'):
+        assert '/incidents/'+incident+'/'+endpoint in text
+    assert 'ticket-tool-grid' in text and 'ticket-detail-layout' in text
+    assert 'Technical evidence &amp; advanced controls' not in text
+    assert 'name="operation"><option value="note"' not in text
+    assert 'name="operation" value="acknowledge"' in text
+    assert 'aria-pressed="true"' in text
+    for mode in ("automatic","human","paused"):
+        assert text.count('id="ticket-mode-'+mode+'"')==1
+
+    assert "Stop AI investigation" in text
+    assert "/ai/"+job+"/cancel" in text

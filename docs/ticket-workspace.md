@@ -8,9 +8,10 @@ Human and paused modes hold automatic investigation. Machine previews and the
 saved ticket sidebar retain the explicit Proxmox association.
 
 The saved ticket has a summary at the top, machine details on the left, a session
-work log and conversation in the main column. Raw evidence, diagnostic requests,
-usage details, recovery proposals, grouping, silence and archival remain under
-**Technical evidence & advanced controls**. Host command history and approvals
+work log and conversation in the main column. The compact **Tools & history** area groups evidence, machine diagnostics, AI run
+history and evidence review, recovery proposals, and ticket management. Open a
+section to work with it without expanding every tool at once. Notification pause,
+grouping, acknowledgement, and archival are retained in Ticket management. Host command history and approvals
 are linked directly from the ticket. Existing detailed findings remain accessible.
 New operational AI responses are instructed to use two or three short sentences
 about the findings, actions, verification or help needed.
@@ -120,3 +121,14 @@ Resolved tickets cannot restart work timers. The previous timer reconciliation b
 All rendered timestamps now default to **America/Edmonton**: Mountain time with automatic MDT/MST daylight-saving adjustment. Change the IANA timezone under **Settings → Display timezone** if needed. Stored timestamps, Unix evidence timestamps and AI accounting periods remain UTC. For example, `2026-10-02 17:32:19 UTC` displays as `2026-10-02 11:32:19 MDT`.
 
 Only the main application needs updating/rebuilding for these changes.
+
+### Individual ticket layout
+
+The ticket workspace uses a compact machine sidebar, a brief summary with a direct
+AI investigation action, live work sessions, and side-by-side note and AI reply
+forms. Handling modes remain separate buttons. Detailed findings, saved evidence,
+proposal payloads, and audit identifiers are available on demand. Every existing
+submission route and permission check is preserved; notes still do not trigger AI.
+The tools panels preserve their open state and unsent forms during live updates.
+On narrow screens, the sidebar, reply forms, and tools stack into a single column.
+Only the main application needs rebuilding for this visual update.
