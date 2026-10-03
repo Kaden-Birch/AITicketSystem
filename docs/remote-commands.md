@@ -294,3 +294,7 @@ Open **Host settings → Monitoring → Edit check**, or use **Edit check** in t
 Saving retains the check ID, observations and ticket history. Failure counters and current health reset while fresh results are collected; stale agent results and in-flight check leases are not applied to the new configuration. Existing tickets are not deleted or immediately closed by an edit. A blank replacement Proxmox token secret retains the existing encrypted secret; secrets are never displayed in the form.
 
 Update only the main application for check editing; no agent or Hermes update is required.
+
+## Simplified agent installation
+
+Use the [one-command installer](agent.md#recommended-one-command-installation-or-upgrade) for new hosts and upgrades. It enables local shell execution and installs a root service automatically; no separate command-policy edit or root override is needed. Enrollment is followed by automatic service restart. Application host access mode continues to control command admission. Legacy manual local-policy instructions above remain useful for troubleshooting custom deployments.

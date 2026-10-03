@@ -1,5 +1,20 @@
 # Install using HTTP: application VM and monitored hosts
 
+## Recommended one-command installation or upgrade
+
+Run on the monitored Ubuntu/Debian host (curl must be available):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Kaden-Birch/AITicketSystem/main/agent/install.sh -o /tmp/aiticket-agent-install.sh && sudo bash /tmp/aiticket-agent-install.sh --server http://10.128.2.203:8080
+```
+
+For a new host, create an enrollment token in the main application first, then enter it at the installer's hidden prompt. The installer downloads and verifies the agent bundle, installs all modules, enables local shell execution, enrolls and restarts the service automatically. Upgrades preserve enrollment and execution history and do not require another token. HTTPS servers can add `--ca /absolute/path/to/ca.pem`. Run without `--server` to be prompted for the application URL on a fresh installation.
+
+Every installation runs as root with local command execution enabled and access to the system Docker daemon when installed. The application host access mode controls which remote commands are admitted; choosing Full access requires no additional local policy edits. Existing unrelated custom systemd restrictions may still limit execution. The installer adds a full-access drop-in to override the old standard restrictions. It does not install Docker or alter the main application's permissions. Local limits allow up to one hour and 65536 bytes; application limits still apply. Read-only and approval modes are configured in Host settings on the main application.
+
+The manual instructions below are retained for reference; the installer is the supported setup path.
+
+
 This is the explicit HTTP option for your setup. No certificate, local Nginx or reverse proxy is required. Your existing reverse proxy can still provide optional HTTPS browser access to the same HTTP backend.
 
 HTTP sends administrator passwords, agent tokens, diagnostics and integration credentials without transport encryption. On a WAN, they can be intercepted or altered. Login, CSRF checks, agent credentials, action approval, signatures and encrypted storage remain enabled, but do not provide transport confidentiality. This mode is opt-in; HTTPS remains the default.
