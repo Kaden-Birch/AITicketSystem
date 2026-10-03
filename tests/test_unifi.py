@@ -182,7 +182,7 @@ def test_device_inventory_metrics_and_deduplicated_tickets(signed_in,monkeypatch
     def get(self,path,params=None):
         if path.endswith('/devices'):return {'data':[{'id':'switch1','name':'Switch','model':'USW','state':'OFFLINE','ipAddress':'10.0.0.5'}]}
         if path.endswith('/devices/switch1'):return {'id':'switch1','name':'Switch','state':'OFFLINE','interfaces':{'ports':[{'idx':3,'speedMbps':1000,'state':'UP','nativeNetworkId':'net1'}]}}
-        if path.endswith('/statistics'):return {'cpuUtilizationPct':25,'memoryUtilizationPct':50,'uptimeSec':120}
+        if path.endswith('/statistics/latest'):return {'cpuUtilizationPct':25,'memoryUtilizationPct':50,'uptimeSec':120}
         return {'data':[]}
     monkeypatch.setattr(unifi.Client,'get',get)
     for i in range(3):
@@ -280,3 +280,37 @@ def test_delete_connection_cascades_child_monitoring(environment,monkeypatch):
     unifi.remove(store,row['id'])
     assert all(r['enabled']==0 for r in store.rows('SELECT enabled FROM checks'))
     assert store.rows('SELECT deleted FROM unifi_devices')[0]['deleted']
+
+
+def test_statistics_latest_and_optional_failure_do_not_mark_network_down(environment,monkeypatch):
+    _,store,vault=environment;row=configured(store,vault,'network')
+    with store.connect() as c:c.execute("UPDATE unifi_connections SET site='site1'")
+    requested=[]
+    def get(self,path,params=None):
+        requested.append(path)
+        if path.endswith('/devices'):return {'data':[{'id':'device1','state':'ONLINE'}]}
+        if path.endswith('/statistics/latest'):raise ValueError('HTTP 404')
+        if path.endswith('/devices/device1'):return {'id':'device1','state':'ONLINE'}
+        return {'data':[]}
+    monkeypatch.setattr(unifi.Client,'get',get)
+    healthy,evidence=unifi.probe(store,vault,{'connection_id':row['id']})
+    assert healthy is True
+    assert evidence['endpoint_errors']=={}
+    assert evidence['optional_telemetry_errors']=={'statistics:device1':'HTTP 404'}
+    assert any(p.endswith('/statistics/latest') for p in requested)
+    assert not any(p.endswith('/statistics') for p in requested)
+
+
+def test_statistics_allowlist_uses_latest(environment,monkeypatch):
+    _,store,vault=environment;row=configured(store,vault,'network')
+    class Response:
+        status_code=200;headers={'Content-Type':'application/json'}
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def iter_content(self,n):yield b'{"cpuUtilizationPct":25}'
+    calls=[]
+    monkeypatch.setattr(unifi.requests,'get',lambda url,**kw:(calls.append(url) or Response()))
+    api=unifi.Client(row,vault)
+    with pytest.raises(ValueError):api.get(unifi.NETWORK+'/sites/site1/devices/device1/statistics')
+    assert api.get(unifi.NETWORK+'/sites/site1/devices/device1/statistics/latest')['cpuUtilizationPct']==25
+    assert len(calls)==1

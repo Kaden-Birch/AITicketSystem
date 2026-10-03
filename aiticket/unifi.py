@@ -35,7 +35,7 @@ class Client:
         self.connection=connection
         self.key=vault.decrypt(connection['secret'])
     def get(self, path, params=None):
-        allowed = path in DRIVE.values() or path == NETWORK+'/sites' or re.fullmatch(re.escape(NETWORK)+r'/sites/[A-Za-z0-9-]+/(devices|clients|networks)(/[A-Za-z0-9-]+(/statistics)?)?',path)
+        allowed = path in DRIVE.values() or path == NETWORK+'/sites' or re.fullmatch(re.escape(NETWORK)+r'/sites/[A-Za-z0-9-]+/(devices|clients|networks)(/[A-Za-z0-9-]+(/statistics/latest)?)?',path)
         if not allowed: raise ValueError('UniFi endpoint is not an approved telemetry read.')
         with requests.get(self.connection['url']+path, headers={'X-API-KEY':self.key,'Accept':'application/json'},params=params,timeout=(3,5),verify=self.connection['ca'] or not self.connection['insecure_tls'],allow_redirects=False,stream=True) as r:
             if r.status_code != 200: raise ValueError('HTTP '+str(r.status_code))
@@ -83,7 +83,7 @@ def collect(connection,vault):
                 identifier=d.get('id','')
                 if re.fullmatch(r'[A-Za-z0-9-]+',identifier):
                     read('device:'+identifier,lambda identifier=identifier:client.get(NETWORK+'/sites/'+site+'/devices/'+identifier))
-                    read('statistics:'+identifier,lambda identifier=identifier:client.get(NETWORK+'/sites/'+site+'/devices/'+identifier+'/statistics'))
+                    read('statistics:'+identifier,lambda identifier=identifier:client.get(NETWORK+'/sites/'+site+'/devices/'+identifier+'/statistics/latest'))
             if len(devices)>8: warnings.append('Only the first eight devices have detail/statistics coverage.')
     return {'sampled_at':time.time(),'kind':connection['kind'],'read_only':True,'experimental':connection['kind']=='drive','readings':readings,'errors':errors,'warnings':warnings}
 
@@ -104,14 +104,15 @@ def refresh(store,vault,identifier):
 
 def probe(store,vault,config):
     result=refresh(store,vault,config['connection_id'])
-    healthy=not bool(result['errors']) and bool(result['readings'])
+    required_errors={k:v for k,v in result['errors'].items() if not k.startswith('statistics:')}
+    healthy=not bool(required_errors) and bool(result['readings'])
     alerts=[]
     for pool in result['readings'].get('storage',{}).get('pools',[]):
         if pool.get('status') and pool['status']!='fullyOperational': alerts.append('Storage pool '+str(pool.get('number',''))+': '+pool['status'])
         if pool.get('capacity',0)>0 and pool.get('usage',0)/pool['capacity']>=.9: alerts.append('Storage pool at least 90% full')
     for disk in result['readings'].get('storage',{}).get('disks',[]):
         if disk.get('state') and disk['state']!='optimal': alerts.append('Disk '+str(disk.get('slotId',''))+': '+disk['state'])
-    return healthy and not alerts, {'sampled_at':result['sampled_at'],'reason':'UniFi telemetry available' if healthy and not alerts else 'UniFi telemetry requires attention','alerts':alerts,'endpoint_errors':result['errors']}
+    return healthy and not alerts, {'sampled_at':result['sampled_at'],'reason':'UniFi telemetry available' if healthy and not alerts else 'UniFi telemetry requires attention','alerts':alerts,'endpoint_errors':required_errors,'optional_telemetry_errors':{k:v for k,v in result['errors'].items() if k.startswith('statistics:')}}
 
 
 def ai_context(c,machine):

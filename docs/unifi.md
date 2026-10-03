@@ -60,3 +60,9 @@ Discovered-device checks inherit the connection polling interval, severity and f
 ## Delete a device
 
 Open Network Devices, select the appliance, then Device settings → Delete device. Discovered devices are removed from monitoring and excluded from later discovery; existing observations and tickets are preserved. To remove a NAS or an entire console connection, its Device settings page offers Delete connection. This disables its checks and child-device checks and clears the stored API key. Open tickets are paused rather than falsely resolved, and pending notifications are superseded. These operations affect only AITicketSystem, never the UniFi appliance or network configuration.
+
+## Statistics compatibility
+
+Network device statistics use `GET /proxy/network/integration/v1/sites/{siteId}/devices/{deviceId}/statistics/latest`, as specified in the [official Network OpenAPI specification](https://developer.ui.com/network/v10.1.84/openapi.json). Earlier builds omitted `/latest`, producing HTTP 404 responses. Update the main application and refresh the connection to retry the corrected route.
+
+Unavailable optional statistics remain visible in the snapshot and check evidence as `optional_telemetry_errors`; they alone do not mark the network down. Required inventory/API failures and actual device or NAS health failures still affect their checks. A previous statistics-only incident can recover after the configured number of successful check samples. This does not establish application or end-to-end network health.

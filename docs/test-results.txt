@@ -1,4 +1,4 @@
-358 passed in 33.17s
+360 passed in 33.40s
 
 HTTP opt-in tests cover cookie configuration, URL restrictions, persisted agent enrollment, nonredirecting credential delivery, continued HTTPS verification and isolated Hermes configuration.
 Local Python 3.14.6; temporary databases, fake Hermes adapters and mocked external providers/subprocesses.
@@ -59,3 +59,5 @@ Live form duplication regression: actual JavaScript key function checked against
 Network Devices milestone: appliance/NAS detail pages and SVG histories, retained extra numeric telemetry with credential-field removal, port identifiers/link/network information, isolated device metric series, discovery identity retention, independent device availability incidents, duplicate cached-observation suppression, source-separated host histories, host-list exclusion and old workspace redirects verified with fixtures. Existing consoles remain read-only. No live UniFi change, shell action or AI request executed.
 
 Network deletion: CSRF enforcement, per-device settings, retained ticket identity/history, paused open tickets, credential clearing, disabled child checks, removal from lists/detail pages and AI context, rejected deleted-connection refreshes and suppression of automatic rediscovery verified with fixtures. No UniFi write operation executed.
+
+UniFi statistics regression: corrected /statistics/latest allowlist and collection path; optional statistics HTTP 404 remains visible without a false network-down result. Fixture validation only; no live UniFi requests made.
