@@ -14,7 +14,18 @@
     if (!group) return;
     for (const field of form.querySelectorAll('[name="targets"]')) field.checked = group === 'all' || field.dataset.group === group;
   });
+  function selectionCount() {
+    const count = form.querySelectorAll('[name="targets"]:checked').length;
+    const output = form.querySelector('[data-fleet-count]');
+    if (output) output.textContent = count + ' selected';
+  }
+  form.addEventListener('change', selectionCount);
+  form.addEventListener('input', () => {
+    const output = form.querySelector('[data-fleet-draft]');
+    if (output) output.textContent = 'Draft · not submitted';
+  });
   const preset = JSON.parse(form.querySelector('[data-fleet-preset]').value);
   for (const [name, value] of Object.entries(preset)) if (form.elements[name]) form.elements[name].value = value;
   update();
+  selectionCount();
 })();

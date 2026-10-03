@@ -1,7 +1,7 @@
 /* Update server-rendered information while preserving active edits and disclosures. */
 (() => {
   'use strict';
-  const paths = [/^\/fleet\/[^/]+$/,/^\/$/, /^\/hosts(?:\/[^/]+)?$/, /^\/incidents\/[^/]+$/, /^\/network-devices(?:\/[^/]+(?:\/devices\/[^/]+)?)?$/, /^\/proxmox\/resources\/[^/]+$/, /^\/(tickets|history|queue|audit|hermes|proxmox|unifi)$/];
+  const paths = [/^\/fleet\/(?!preview$)[^/]+$/,/^\/$/, /^\/hosts(?:\/[^/]+)?$/, /^\/incidents\/[^/]+$/, /^\/network-devices(?:\/[^/]+(?:\/devices\/[^/]+)?)?$/, /^\/proxmox\/resources\/[^/]+$/, /^\/(tickets|history|queue|audit|hermes|proxmox|unifi)$/];
   if (!paths.some(pattern => pattern.test(location.pathname))) return;
   const dirty = new WeakSet();
   document.addEventListener('input', event => { if (event.target.form) dirty.add(event.target.form); });

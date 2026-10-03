@@ -30,3 +30,9 @@ Offline, disabled or busy agents are reported as blocked without dispatch. There
 Fleet job definitions/scripts are encrypted in application storage; private keys and passphrases are excluded from audit logs. Fleet records are retained in full database backups, not the inventory configuration export. This milestone does not implement continuous configuration enforcement, scheduled jobs, automatic rollback, or AI fleet tools.
 
 Before submission, hosts need a fresh shell-capable agent and an application access mode permitting the task. The current agent installer runs as root and verifies its effective privileges. Reinstall legacy agents with the [one-command installer](agent.md); a GUI Full access setting alone does not elevate an older unprivileged process. Retry failed/blocked targets individually after correcting the cause.
+
+## Workspace layout
+
+Configure a task and select hosts in the main workspace; SSH keys and recent jobs are in the sidebar. The selected-host count updates as you choose a group or individual hosts. Only fields for the selected task are shown. Review still precedes launch, and host permissions remain unchanged.
+
+Job pages show readable outcomes and guidance, with request references and output under **Execution details**. Submitted commands remain available for inspection. Unknown outcomes are labelled **Needs verification**, including results with a recorded zero exit code. The review screen does not poll a POST-only endpoint; job results continue updating automatically.

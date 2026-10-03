@@ -97,3 +97,27 @@ def test_public_key_add_remove_preserves_other_keys(environment,tmp_path,monkeyp
         assert other in text
         assert text.count(public)==(0 if kind=='revoke' else 1)
     assert path.stat().st_mode & 0o777==0o600
+
+
+def test_job_results_preserve_output_and_uncertain_outcomes(signed_in):
+    import time
+    from aiticket.commands import configure,complete
+    from aiticket.security import digest
+    client,store,vault,csrf=signed_in;machine=host(store);agent=uid()
+    with store.connect() as c:
+        c.execute('INSERT INTO agents(id,machine_id,credential_digest,last_seen,capabilities) VALUES(?,?,?,?,?)',(agent,machine,digest('fixture'),time.time(),json.dumps({'shell_commands':True})))
+    configure(store,machine,{'enabled':'yes','approval':'immediate'})
+    response=client.post('/fleet',data={'csrf':csrf,'label':'Result review','kind':'script','script':'id','targets':machine,'confirm':'yes'})
+    assert response.status_code==302
+    job=store.rows('SELECT * FROM command_jobs')[0]
+    with store.connect() as c:
+        c.execute("UPDATE command_jobs SET state='dispatched',dispatch_token='fixture-dispatch' WHERE id=?",(job['id'],))
+    complete(store,agent,{'id':job['id'],'dispatch_token':'fixture-dispatch','result':{'state':'unknown','exit_code':0,'stdout':'<script>untrusted output</script>','stderr':'bounded error text','truncated':True}})
+    page=client.get(response.location)
+    assert page.status_code==200 and b'Needs verification' in page.data
+    assert b'Finished successfully' not in page.data
+    assert b'&lt;script&gt;untrusted output&lt;/script&gt;' in page.data
+    assert b'bounded error text' in page.data and b'Output shortened' in page.data
+    assert b'Execution details' in page.data and job['id'].encode() in page.data
+    reuse=client.get('/fleet?task='+response.location.rsplit('/',1)[-1])
+    assert reuse.status_code==200 and b'Result review' in reuse.data
