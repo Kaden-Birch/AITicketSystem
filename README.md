@@ -99,3 +99,5 @@ Ticket workspace, dark appearance, work sessions and blocker notifications: [gui
 [UniFi Network and experimental UNAS monitoring](docs/unifi.md) adds read-only telemetry, host checks and optional AI network context. No UniFi action or configuration tools are exposed.
 
 Network Devices separates UniFi appliances from Hosts, with readable telemetry, seven-day metric history and device-specific availability tickets.
+
+Fleet management: [SSH keys, users, packages and scripts](docs/fleet.md), with per-host permissions and execution results.

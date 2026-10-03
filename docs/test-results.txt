@@ -1,4 +1,4 @@
-360 passed in 33.40s
+368 passed in 35.66s
 
 HTTP opt-in tests cover cookie configuration, URL restrictions, persisted agent enrollment, nonredirecting credential delivery, continued HTTPS verification and isolated Hermes configuration.
 Local Python 3.14.6; temporary databases, fake Hermes adapters and mocked external providers/subprocesses.
@@ -61,3 +61,5 @@ Network Devices milestone: appliance/NAS detail pages and SVG histories, retaine
 Network deletion: CSRF enforcement, per-device settings, retained ticket identity/history, paused open tickets, credential clearing, disabled child checks, removal from lists/detail pages and AI context, rejected deleted-connection refreshes and suppression of automatic rediscovery verified with fixtures. No UniFi write operation executed.
 
 UniFi statistics regression: corrected /statistics/latest allowlist and collection path; optional statistics HTTP 404 remains visible without a false network-down result. Fixture validation only; no live UniFi requests made.
+
+Fleet milestone: encrypted OpenSSH key generation/passphrase downloads and explicit private-key removal; public-key add/remove preserves other keys and deduplicates repeated deployment; reviewed host submissions reuse durable UUIDs and actual Full/guarded/read-only permission tests; blocked/offline hosts retain explicit results. Generated remote script tested with temporary authorized_keys and mocked account lookup; no live host accounts, packages or SSH settings changed. Browser script syntax and rendered forms checked.

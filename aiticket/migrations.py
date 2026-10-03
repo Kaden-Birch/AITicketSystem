@@ -1,6 +1,11 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 29
+CURRENT_VERSION = 30
 MIGRATIONS = {
+    30: (
+        "CREATE TABLE fleet_keys(id TEXT PRIMARY KEY,label TEXT NOT NULL,public TEXT NOT NULL,private TEXT,created REAL NOT NULL)",
+        "CREATE TABLE fleet_jobs(id TEXT PRIMARY KEY,label TEXT NOT NULL,kind TEXT NOT NULL,created REAL NOT NULL,command TEXT NOT NULL,definition TEXT NOT NULL)",
+        "CREATE TABLE fleet_targets(job_id TEXT NOT NULL REFERENCES fleet_jobs(id),machine_id TEXT NOT NULL REFERENCES machines(id),command_id TEXT NOT NULL UNIQUE,state TEXT NOT NULL,error TEXT NOT NULL,PRIMARY KEY(job_id,machine_id))",
+    ),
     29: (
         "ALTER TABLE unifi_connections ADD COLUMN deleted REAL",
         "ALTER TABLE unifi_devices ADD COLUMN deleted REAL",

@@ -75,6 +75,70 @@ def create_app(data_dir=None, testing=False):
             return {'error':redact(str(exc))[:500],'state':'rejected'},400
         return render_template('error.html', message=str(exc)), 400
 
+    @app.route('/fleet',methods=['GET','POST'])
+    @login_required
+    def fleet_page():
+        from . import fleet
+        if request.method=='POST':
+            if request.form.get('operation')=='key':
+                identifier=fleet.generate(store,vault,request.form.get('label',''),request.form.get('passphrase',''))
+                flash('Key generated. Download and save it, then confirm removal of the stored private key.')
+                return redirect('/fleet#key-'+identifier)
+            if request.form.get('confirm')!='yes': raise ValueError('Confirm the selected fleet targets and task.')
+            identifier=fleet.launch(store,vault,request.form,request.form.getlist('targets'))
+            return redirect('/fleet/'+identifier)
+        preset={}
+        if request.args.get('task'):
+            rows=store.rows('SELECT definition FROM fleet_jobs WHERE id=?',(request.args['task'],))
+            if not rows:abort(404)
+            preset=json.loads(vault.decrypt(rows[0]['definition']))
+        return render_template('fleet.html',preset=preset,groups=store.rows("SELECT * FROM notification_groups ORDER BY name"),machines=store.rows("SELECT m.*,g.group_id FROM machines m LEFT JOIN machine_groups g ON g.machine_id=m.id WHERE m.id NOT LIKE 'unifi:%' AND m.id NOT LIKE 'unifi-device:%' ORDER BY m.name"),keys=store.rows('SELECT id,label,public,private IS NOT NULL AS downloadable FROM fleet_keys ORDER BY created DESC'),jobs=store.rows('SELECT * FROM fleet_jobs ORDER BY created DESC LIMIT 100'))
+
+    @app.post('/fleet/preview')
+    @login_required
+    def fleet_preview():
+        from .fleet import command
+        values={key:request.form.get(key,'') for key in ('label','kind','username','key_id','access','groups','packages','script')}
+        if not values['access']:values['access']='standard'
+        text=command(store,values)
+        values['fleet_id']=uid()
+        targets=list(dict.fromkeys(request.form.getlist('targets')))
+        if not targets or len(targets)>200:raise ValueError('Select between 1 and 200 hosts.')
+        machines=store.rows("SELECT m.*,p.approval FROM machines m LEFT JOIN command_policies p ON p.machine_id=m.id AND p.enabled=1 WHERE m.id NOT LIKE 'unifi:%' AND m.id NOT LIKE 'unifi-device:%'")
+        machines=[m for m in machines if m['id'] in targets]
+        if len(machines)!=len(targets):raise ValueError('Unknown fleet host.')
+        key_label=store.rows('SELECT label FROM fleet_keys WHERE id=?',(values['key_id'],))[0]['label'] if values['key_id'] else ''
+        return render_template('fleet_preview.html',values=values,command=text,machines=machines,key_label=key_label)
+
+    @app.post('/fleet/keys/<identifier>/download')
+    @login_required
+    def fleet_download(identifier):
+        from flask import Response
+        rows=store.rows('SELECT private FROM fleet_keys WHERE id=?',(identifier,))
+        if not rows or not rows[0]['private']: abort(404)
+        with store.connect() as c: store.audit(c,'fleet.key_downloaded',identifier)
+        return Response(vault.decrypt(rows[0]['private']),mimetype='application/octet-stream',headers={'Content-Disposition':'attachment; filename="aiticket-'+identifier+'"'})
+
+    @app.post('/fleet/keys/<identifier>/forget')
+    @login_required
+    def fleet_forget(identifier):
+        if request.form.get('confirm')!='yes':raise ValueError('Confirm you saved the private key.')
+        with store.connect() as c:
+            c.execute('UPDATE fleet_keys SET private=NULL WHERE id=?',(identifier,))
+            store.audit(c,'fleet.private_key_removed',identifier)
+        return redirect('/fleet')
+
+    @app.get('/fleet/<identifier>')
+    @login_required
+    def fleet_detail(identifier):
+        from .commands import view
+        rows=store.rows('SELECT * FROM fleet_jobs WHERE id=?',(identifier,))
+        if not rows:abort(404)
+        targets=store.rows('SELECT t.*,m.name FROM fleet_targets t JOIN machines m ON m.id=t.machine_id WHERE job_id=?',(identifier,))
+        for target in targets:
+            if store.rows('SELECT id FROM command_jobs WHERE id=?',(target['command_id'],)):target['execution']=view(store,vault,target['command_id'])
+        return render_template('fleet_job.html',job=rows[0],command=vault.decrypt(rows[0]['command']),targets=targets)
+
     @app.get('/health')
     def health():
         return {'status': 'ok', 'ai_dispatch': 'enabled' if store.setting('hermes_config', {}).get('enabled') else 'disabled', 'version': '0.1.0'}
