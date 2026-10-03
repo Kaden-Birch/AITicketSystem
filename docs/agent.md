@@ -8,7 +8,7 @@ Run on the monitored Ubuntu/Debian host (curl must be available):
 curl -fsSL https://raw.githubusercontent.com/Kaden-Birch/AITicketSystem/main/agent/install.sh -o /tmp/aiticket-agent-install.sh && sudo bash /tmp/aiticket-agent-install.sh --server http://10.128.2.203:8080
 ```
 
-For a new host, create an enrollment token in the main application first, then enter it at the installer's hidden prompt. The installer downloads and verifies the agent bundle, installs all modules, enables local shell execution, enrolls and restarts the service automatically. Upgrades preserve enrollment and execution history and do not require another token. HTTPS servers can add `--ca /absolute/path/to/ca.pem`. Run without `--server` to be prompted for the application URL on a fresh installation.
+For a new host, open **Hosts → your host → Host settings** and create an enrollment token first, then enter it at the installer's hidden prompt. The installer downloads and verifies the agent bundle, installs all modules, enables local shell execution, enrolls and restarts the service automatically. Upgrades preserve enrollment and execution history and do not require another token. HTTPS servers can add `--ca /absolute/path/to/ca.pem`. Run without `--server` to be prompted for the application URL on a fresh installation.
 
 Every installation runs as root with local command execution enabled and access to the system Docker daemon when installed. The application host access mode controls which remote commands are admitted; choosing Full access requires no additional local policy edits. Existing unrelated custom systemd restrictions may still limit execution. The installer adds a full-access drop-in to override the old standard restrictions. It does not install Docker or alter the main application's permissions. Local limits allow up to one hour and 65536 bytes; application limits still apply. Read-only and approval modes are configured in Host settings on the main application.
 
@@ -25,7 +25,7 @@ The agent has no inbound listener. Enrollment identity and command history persi
 
 ## Credential rotation
 
-Rotate credentials through Hosts & checks. Stop the service and deliberately remove `/var/lib/aiticket-agent/identity.json` after revoking the old enrollment, then rerun the installer with the replacement token. Keep other state files and command ledgers. The server retains machine links and incident history. Do not remove identity during a normal upgrade.
+Rotate credentials through **Hosts → your host → Host settings**. Stop the service and deliberately remove `/var/lib/aiticket-agent/identity.json` after revoking the old enrollment, then rerun the installer with the replacement token. Keep other state files and command ledgers. The server retains machine links and incident history. Do not remove identity during a normal upgrade.
 
 ## Optional diagnostics and recovery
 

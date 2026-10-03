@@ -10,6 +10,7 @@
   function clocks() {
     document.querySelectorAll('[data-seconds]').forEach(node => { if (!node.dataset.clockStart) node.textContent = format(Number(node.dataset.seconds)); });
     document.querySelectorAll('[data-clock-start]').forEach(node => { node.textContent = format(Number(node.dataset.serverNow) - Number(node.dataset.clockStart) + elapsed(node)); });
+    document.querySelectorAll('[data-session-seconds]').forEach(node => { node.textContent = format(Number(node.dataset.sessionSeconds) + Number(node.dataset.sessionRate) * elapsed(node)); });
     document.querySelectorAll('[data-work-total]').forEach(node => { const active = document.querySelector(`[data-clock-actor="${node.dataset.workTotal}"]`); node.textContent = format(Number(node.dataset.baseSeconds) + (active ? elapsed(node) : 0)); });
   }
   clocks(); setInterval(clocks, 1000);

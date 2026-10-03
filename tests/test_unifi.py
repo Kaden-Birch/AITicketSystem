@@ -166,6 +166,7 @@ def test_migration_detaches_existing_connection_preserving_history(environment):
         c.execute('DROP TABLE fleet_targets')
         c.execute('DROP TABLE fleet_jobs')
         c.execute('DROP TABLE fleet_keys')
+        c.execute('ALTER TABLE machines DROP COLUMN offline_expected')
         c.execute('UPDATE schema_version SET version=26')
     migrated=Store(store.path)
     connection=migrated.rows('SELECT * FROM unifi_connections')[0]

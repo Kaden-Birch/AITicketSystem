@@ -74,7 +74,8 @@ def host_checks(store,machine_id):
 
 
 def detail(store,machine_id):
-    host=next((m for m in overview(store) if m['id']==machine_id),None)
+    from .overview_ui import host_list
+    host=next((m for m in host_list(store) if m['id']==machine_id),None)
     if not host: return None
     obj=host['object']; guests=[]
     if obj and obj['kind']=='node':

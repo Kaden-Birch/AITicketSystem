@@ -67,7 +67,8 @@ def create_app(data_dir=None, testing=False):
     @app.context_processor
     def context():
         session.setdefault('csrf', secrets.token_urlsafe(32))
-        return {'csrf': session['csrf'], 'severities': SEVERITIES,'ai_execution_mode':store.setting('hermes_config',{}).get('execution_mode','gateway')}
+        from .overview_ui import NAV
+        return {'navigation':NAV,'csrf': session['csrf'], 'severities': SEVERITIES,'ai_execution_mode':store.setting('hermes_config',{}).get('execution_mode','gateway')}
 
     @app.errorhandler(ValueError)
     def invalid(exc):
@@ -177,10 +178,53 @@ def create_app(data_dir=None, testing=False):
     @app.get('/')
     @login_required
     def dashboard():
-        from .hostview import overview
-        return render_template('dashboard.html', connections=store.rows('SELECT id,name,last_discovery FROM proxmox_connections ORDER BY name'), hosts=overview(store), checks=store.rows("SELECT checks.*,machines.name AS machine FROM checks JOIN machines ON machines.id=machine_id WHERE checks.kind<>'manual' ORDER BY machines.name"),
-                               incidents=store.rows('SELECT incidents.*,machines.name AS machine FROM incidents JOIN machines ON machines.id=machine_id WHERE incidents.archived_at IS NULL ORDER BY first_seen DESC LIMIT 100'),
-                               jobs=store.rows('SELECT state,count(*) AS count FROM deliveries GROUP BY state'), ai_enabled=store.setting('hermes_config', {}).get('enabled', False))
+        from .overview_ui import dashboard_data
+        return render_template('dashboard.html',summary=dashboard_data(store))
+
+    @app.get('/hosts/new')
+    @login_required
+    def new_host():
+        return render_template('host-new.html',machines=store.rows("SELECT * FROM machines WHERE id NOT LIKE 'unifi:%' AND id NOT LIKE 'unifi-device:%' ORDER BY name"))
+
+    @app.post('/hosts/<machine_id>/presence')
+    @login_required
+    def host_presence(machine_id):
+        from .host_presence import set_offline
+        mode=request.form.get('mode')
+        if mode not in ('offline','monitor'):raise ValueError('Choose intentional offline or normal monitoring.')
+        count=set_offline(store,machine_id,mode=='offline')
+        flash(('Intentional offline saved; '+str(count)+' reachability tickets resolved.') if mode=='offline' else 'Normal reachability monitoring resumed.')
+        return redirect('/hosts/'+machine_id+'/settings')
+
+    @app.get('/tickets')
+    @login_required
+    def tickets_page():
+        from .overview_ui import ticket_rows
+        rows=ticket_rows(store);view=request.args.get('view','all');query=request.args.get('q','').strip()[:100]
+        if view not in ('all','open','new','ai','manual','resolved'):raise ValueError('Unknown ticket filter.')
+        counts={key:sum((not r['resolved']) if key=='open' else True if key=='all' else r['category']==key for r in rows) for key in ('all','open','new','ai','manual','resolved')}
+        filtered=[r for r in rows if (view=='all' or view=='open' and not r['resolved'] or r['category']==view) and (not query or query.lower() in (r['title']+' '+r['machine']+' '+r['id']).lower())]
+        page=int(request.args.get('page',1))
+        if not 1<=page<=100000:raise ValueError('Invalid page.')
+        return render_template('tickets.html',tickets=filtered[(page-1)*50:page*50],counts=counts,view=view,query=query,page=page,total=len(filtered))
+
+    @app.get('/search')
+    @login_required
+    def global_search():
+        from .overview_ui import NAV
+        from urllib.parse import quote
+        query=request.args.get('q','').strip()[:100];results=[{'label':label,'kind':'Page','url':url} for label,url in NAV if query.lower() in label.lower()]
+        if query:
+            pattern='%'+query.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
+            for row in store.rows("SELECT id,name FROM machines WHERE name LIKE ? ESCAPE '\\' OR id LIKE ? ESCAPE '\\' LIMIT 12",(pattern,pattern)):
+                results.append({'label':row['name'],'kind':'Host / device','url':'/hosts/'+quote(row['id'],safe='')})
+            for row in store.rows("SELECT id,name,object_key FROM proxmox_objects WHERE present=1 AND (name LIKE ? ESCAPE '\\' OR object_key LIKE ? ESCAPE '\\') LIMIT 12",(pattern,pattern)):
+                results.append({'label':row['name']+' · '+row['object_key'],'kind':'Proxmox resource','url':'/proxmox/resources/'+quote(row['id'],safe='')})
+            for row in store.rows("SELECT c.id,c.name,c.machine_id,m.name machine FROM checks c JOIN machines m ON m.id=c.machine_id WHERE c.name LIKE ? ESCAPE '\\' LIMIT 12",(pattern,)):
+                results.append({'label':row['name']+' · '+row['machine'],'kind':'Check','url':'/hosts/'+quote(row['machine_id'],safe='')+'#check-'+quote(row['id'],safe='')})
+            for row in store.rows("SELECT i.id,i.report,m.name machine FROM incidents i JOIN machines m ON m.id=i.machine_id WHERE i.report LIKE ? ESCAPE '\\' OR i.id LIKE ? ESCAPE '\\' LIMIT 12",(pattern,pattern)):
+                results.append({'label':json.loads(row['report']).get('check','Ticket')+' · '+row['machine'],'kind':'Ticket','url':'/incidents/'+quote(row['id'],safe='')})
+        return {'results':results[:60]}
 
     @app.get('/hosts/<machine_id>')
     @login_required
@@ -445,7 +489,8 @@ def create_app(data_dir=None, testing=False):
                 c.execute('INSERT INTO machines(id,name,parent_id,created) VALUES(?,?,?,?)', (machine_id, name, parent, time.time()))
                 store.audit(c, 'machine.created', machine_id, {'parent_id': parent})
             return redirect(url_for('hosts'))
-        return render_template('hosts.html', checks=store.rows("SELECT c.*,m.name AS machine FROM checks c JOIN machines m ON m.id=c.machine_id WHERE c.kind NOT IN ('manual','unifi','unifi_device') ORDER BY m.name,c.name"), machines=store.rows("SELECT * FROM machines WHERE id NOT LIKE 'unifi:%' AND id NOT LIKE 'unifi-device:%' ORDER BY name"), agents=store.rows('SELECT agents.*,machines.name FROM agents JOIN machines ON machines.id=machine_id'))
+        from .overview_ui import host_list
+        return render_template('hosts.html',hosts=host_list(store))
 
     def save_check(existing=None):
         f = request.form

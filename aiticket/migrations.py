@@ -1,6 +1,7 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 30
+CURRENT_VERSION = 31
 MIGRATIONS = {
+    31: ("ALTER TABLE machines ADD COLUMN offline_expected INTEGER NOT NULL DEFAULT 0",),
     30: (
         "CREATE TABLE fleet_keys(id TEXT PRIMARY KEY,label TEXT NOT NULL,public TEXT NOT NULL,private TEXT,created REAL NOT NULL)",
         "CREATE TABLE fleet_jobs(id TEXT PRIMARY KEY,label TEXT NOT NULL,kind TEXT NOT NULL,created REAL NOT NULL,command TEXT NOT NULL,definition TEXT NOT NULL)",

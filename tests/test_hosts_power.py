@@ -37,7 +37,7 @@ def test_dashboard_metrics_guest_tree_stale_and_history(signed_in):
     data=detail(store,mid)
     assert data['host']['sample']['cpu']==40 and data['host']['sample']['ram']==50
     assert data['host']['sample']['disk']==25
-    assert b'Web VM' in client.get('/').data
+    assert b'Web VM' in client.get('/hosts').data
     response=client.get('/hosts/'+nodeid)
     assert response.status_code==200 and b'Guests on this Proxmox node' in response.data and b'qemu/209' in response.data
     assert len(detail(store,nodeid)['guests'])==2

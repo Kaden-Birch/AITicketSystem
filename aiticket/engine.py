@@ -25,6 +25,11 @@ def observe(store, check_id, healthy, evidence, now=None, lease_token=None):
         check = c.execute('SELECT * FROM checks WHERE id=?', (check_id,)).fetchone()
         if not check or not check['enabled'] or (lease_token and check['lease_token'] != lease_token):
             return
+        from .host_presence import suppressed as presence_suppressed
+        if presence_suppressed(c,check,now):
+            c.execute('INSERT INTO observations VALUES(?,?,?,?,?)',(uid(),check_id,now,'unknown',json.dumps({'reason':'Expected offline; reachability monitoring paused','expected_offline':True})))
+            c.execute("UPDATE checks SET health='unknown',failures=0,successes=0,first_failure_at=NULL,lease_token=NULL,lease_until=NULL,next_run=? WHERE id=?",(now+check['interval'],check_id))
+            return
         if check['kind'] in ('agent_metric','unifi_device') and healthy is not None:
             previous=c.execute('SELECT evidence FROM observations WHERE check_id=? ORDER BY at DESC LIMIT 1',(check_id,)).fetchone()
             if previous and json.loads(previous[0]).get('sampled_at')==evidence.get('sampled_at'):

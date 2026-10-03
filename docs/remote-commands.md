@@ -289,7 +289,7 @@ Container failures use the normal automatic ticket/AI workflow. With automatic t
 
 ## Editing an existing check
 
-Open **Host settings → Monitoring → Edit check**, or use **Edit check** in the **Hosts & checks** list. Correct the Docker container name/ID, process name, mounted SMB path, ping/TCP destination or HTTP URL. Intervals, failure/recovery thresholds, name and severity can also be changed. The machine and check type stay fixed; built-in agent, resource and linked-Proxmox checks retain their managed source configuration.
+Open **Hosts → your host → Host settings → Monitoring → Edit check**. Correct the Docker container name/ID, process name, mounted SMB path, ping/TCP destination or HTTP URL. Intervals, failure/recovery thresholds, name and severity can also be changed. The machine and check type stay fixed; built-in agent, resource and linked-Proxmox checks retain their managed source configuration.
 
 Saving retains the check ID, observations and ticket history. Failure counters and current health reset while fresh results are collected; stale agent results and in-flight check leases are not applied to the new configuration. Existing tickets are not deleted or immediately closed by an edit. A blank replacement Proxmox token secret retains the existing encrypted secret; secrets are never displayed in the form.
 

@@ -32,9 +32,9 @@ def test_unassigned_node_dashboard_guests_and_late_agent_link(signed_in):
     node=store.rows("SELECT * FROM proxmox_objects WHERE kind='node'")[0]
     guest=store.rows("SELECT * FROM proxmox_objects WHERE kind='qemu' AND template=0")[0]
     assert len(object_detail(store,node['id'])['guests'])==2
-    dashboard=client.get('/').data
+    dashboard=client.get('/hosts').data
     assert ('/proxmox/resources/'+node['id']).encode() in dashboard
-    assert b'20.0%' in dashboard and b'not assigned' in dashboard
+    assert b'20.0%' in dashboard and b'Unassigned' in dashboard
     client.post('/hosts',data={'csrf':csrf,'name':'Previously enrolled VM'})
     mid=store.rows("SELECT id FROM machines WHERE name='Previously enrolled VM'")[0]['id']
     with store.connect() as c:

@@ -47,7 +47,7 @@ Add the machine under **Hosts & checks**. Leave AI and recovery disabled for ini
 
 ## 2. Monitored Ubuntu/Debian Linux host
 
-Create an enrollment token for the host in the main application's Hosts & checks page. On the monitored host, run:
+Create a host under **Hosts → Add host**, then open **Host settings** and generate its enrollment token. On the monitored host, run:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Kaden-Birch/AITicketSystem/main/agent/install.sh -o /tmp/aiticket-agent-install.sh && sudo bash /tmp/aiticket-agent-install.sh --server http://10.128.2.203:8080

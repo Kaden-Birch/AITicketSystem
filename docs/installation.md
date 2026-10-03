@@ -121,15 +121,15 @@ The application currently records the reverse proxy's observed connection addres
 
 ### 5. Configure the first monitored machine
 
-1. Open **Hosts & checks** and add a machine with a recognizable name.
-2. Add HTTP/TCP checks if needed, explicitly assigning them to that machine.
-3. Complete the agent installation in section B before generating its short-lived token.
+1. Open **Hosts → Add host** and add a machine with a recognizable name.
+2. Open the host and use **Add check** for HTTP/TCP checks if needed.
+3. Open **Host settings** and generate its short-lived enrollment token, then install the agent in section B.
 4. Leave **Hermes & usage** and **Recovery policy** disabled. AI is unnecessary for telemetry, incidents, diagnostics and notifications.
 5. For Proxmox API monitoring, use **Proxmox** to add a read-only connection, test it, discover resources and explicitly link the correct resource to the correct machine. Discovery alone does not enable monitoring. If using a private Proxmox CA, mount its public CA file into the app container through a Compose override and use the container path in the GUI; host paths are not automatically visible inside the container. Example mount: `/etc/aiticket/proxmox-ca.pem:/certs/proxmox-ca.pem:ro`.
 
 ## B. Agent on the monitored Linux host
 
-Create an enrollment token in Hosts & checks, then run the one-command installer on the monitored Ubuntu/Debian host:
+Create an enrollment token under **Hosts → your host → Host settings**, then run the one-command installer on the monitored Ubuntu/Debian host:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Kaden-Birch/AITicketSystem/main/agent/install.sh -o /tmp/aiticket-agent-install.sh && sudo bash /tmp/aiticket-agent-install.sh --server https://YOUR_APPLICATION_IP --ca /absolute/path/to/trusted-ca.pem

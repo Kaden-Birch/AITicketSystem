@@ -4,7 +4,7 @@ Self-hosted monitoring with useful incidents even when AI and the internet are u
 
 **Status: monitoring plus configurable AI operations; the full product is not complete.** AI defaults to disabled pending installed-Hermes/provider validation. API mode enforces per-call token and configured-price allowances through its budget gateway. Optional [Hermes Codex subscription mode](docs/hermes-codex.md) uses a dedicated OAuth login and separate run/time limits, without an API key or API spending meter. General host commands and operational Hermes tools default to disabled and require local/host permission. Recovery defaults to disabled; approval-required controls support allowlisted service recovery and separately enabled manual host/guest power operations.
 
-Included: a metric dashboard with clickable host workspaces, Proxmox guest status, ticket history, authenticated UI, stable machine inventory, HTTP/TCP and read-only Proxmox checks, configurable failure/recovery thresholds, parent suppression, temporary maintenance, deterministic reports, manual notes/resolution, durable Discord delivery, filtered incident history, immutable configuration audit, transactional schema upgrades, and DHCP-safe Linux agent enrollment/telemetry.
+Included: a compact fleet dashboard, searchable slide-out navigation, host workspaces, a unified Tickets list, Proxmox guest status, ticket history, authenticated UI, stable machine inventory, HTTP/TCP and read-only Proxmox checks, configurable failure/recovery thresholds, parent suppression, temporary maintenance, deterministic reports, manual notes/resolution, durable Discord delivery, filtered incident history, immutable configuration audit, transactional schema upgrades, and DHCP-safe Linux agent enrollment/telemetry.
 
 ## Local development
 
@@ -101,3 +101,5 @@ Ticket workspace, dark appearance, work sessions and blocker notifications: [gui
 Network Devices separates UniFi appliances from Hosts, with readable telemetry, seven-day metric history and device-specific availability tickets.
 
 Fleet management: [SSH keys, users, packages and scripts](docs/fleet.md), with per-host permissions and execution results.
+
+[Dashboard, Hosts, Tickets and navigation](docs/ui-overview.md): aggregate graphs, compact inventory, live ticket timers, category filters, global search and intentional-offline controls.

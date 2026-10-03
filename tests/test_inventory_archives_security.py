@@ -116,7 +116,7 @@ def test_admin_transfer_review_and_archive_ui(signed_in):
     assert client.post('/administration',data=data).status_code==302
     check=store.rows("SELECT id FROM checks WHERE kind='proxmox_linked'")[0]['id']
     assert client.post('/checks/'+check+'/enabled',data={'csrf':csrf,'enabled':'yes'}).status_code==302
-    assert b'Monitoring checks' in client.get('/hosts').data
+    assert b'CPU / RAM / storage' in client.get('/hosts').data
     # Closed incident archive filters and downloadable immutable snapshot.
     seed(store)
     for n in range(3): observe(store,'c',False,{},now=100+n)
