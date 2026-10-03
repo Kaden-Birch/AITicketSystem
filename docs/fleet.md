@@ -23,7 +23,7 @@ Choose **Deploy SSH public key**, the existing Linux username, the key, and targ
 
 ## Targets, permissions and results
 
-Select individual hosts, an existing host group, or all listed hosts. Network appliances are excluded. Review the selected machines, host policies and exact command before launching. Start with one host before deploying broadly. Jobs can contain up to 200 hosts, and show individual command states/output. Job pages update automatically. Approval-required commands are approved in the existing host workspace; Full access queues them immediately. Read-only policy blocks changes. Command UUIDs, expiry, revocation, cancellation and unknown-outcome reconciliation follow the existing command ledger.
+Select individual hosts, a built-in or custom host group, or all listed hosts. Network appliances are excluded. Review the selected machines, host policies and exact command before launching. Start with one host before deploying broadly. Jobs can contain up to 200 hosts, and show individual command states/output. Job pages update automatically. Approval-required commands are approved in the existing host workspace; Full access queues them immediately. Read-only policy blocks changes. Command UUIDs, expiry, revocation, cancellation and unknown-outcome reconciliation follow the existing command ledger.
 
 Offline, disabled or busy agents are reported as blocked without dispatch. There is no indefinite offline queue. Fix the blocker, then use **Reuse task with new targets** and select only the hosts needing another attempt. Reusing a task requires a new review and creates a new job. Refreshing/resubmitting the same reviewed submission does not launch duplicate commands. If a server stops during submission, queued rows may remain without an execution record; inspect the host ledger before launching another task. Never automatically replay an unknown outcome.
 
@@ -36,3 +36,11 @@ Before submission, hosts need a fresh shell-capable agent and an application acc
 Configure a task and select hosts in the main workspace; SSH keys and recent jobs are in the sidebar. The selected-host count updates as you choose a group or individual hosts. Only fields for the selected task are shown. Review still precedes launch, and host permissions remain unchanged.
 
 Job pages show readable outcomes and guidance, with request references and output under **Execution details**. Submitted commands remain available for inspection. Unknown outcomes are labelled **Needs verification**, including results with a recorded zero exit code. The review screen does not poll a POST-only endpoint; job results continue updating automatically.
+
+## Host groups
+
+The **Host group** selector includes All enrolled agents, Linux agents, Windows agents, Proxmox nodes, Proxmox VMs & containers, and Hosts without an agent. Built-in membership follows current enrollment, reported OS information and linked Proxmox inventory. Offline agents remain members; revoked agents are excluded from enrolled-agent groups. Windows membership is ready for a future Windows agent; this release’s Fleet tasks remain designed for Linux.
+
+Selecting a group replaces the current selection with exactly that group’s hosts, including clearing it when the group is empty. You can then adjust individual checkboxes before reviewing the task. Launch uses the reviewed host selection, so later membership changes do not silently add hosts to an existing job. Group membership does not bypass host permissions or agent availability requirements.
+
+Open **Manage custom groups** to create, rename, edit membership or delete your own groups. A host can belong to several groups. Deleting a group removes only the group and its membership, retaining hosts and job history. Custom Fleet groups are separate from notification groups; existing notification groups remain available for selection. Fleet groups are retained in full database backups but are not included in the inventory configuration export.

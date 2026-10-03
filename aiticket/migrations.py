@@ -1,6 +1,10 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 32
+CURRENT_VERSION = 33
 MIGRATIONS = {
+    33: (
+        "CREATE TABLE IF NOT EXISTS fleet_groups(id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE COLLATE NOCASE)",
+        "CREATE TABLE IF NOT EXISTS fleet_group_members(group_id TEXT NOT NULL REFERENCES fleet_groups(id) ON DELETE CASCADE,machine_id TEXT NOT NULL REFERENCES machines(id) ON DELETE CASCADE,PRIMARY KEY(group_id,machine_id))",
+    ),
     32: (
         "CREATE TABLE health_rules(scope TEXT NOT NULL,metric TEXT NOT NULL,config TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 0,paused INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(scope,metric))",
         "INSERT OR IGNORE INTO health_rules(scope,metric,config,enabled) SELECT machine_id,json_extract(config,'$.metric'),config,enabled FROM checks WHERE kind='agent_metric' AND json_extract(config,'$.metric') IS NOT NULL ORDER BY id",

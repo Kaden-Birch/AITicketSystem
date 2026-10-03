@@ -1,4 +1,16 @@
 (() => {
+  const editor = document.querySelector('[data-fleet-group-editor]');
+  if (editor) {
+    const count = () => {
+      const output = document.querySelector('[data-fleet-member-count]');
+      if (output) output.textContent = editor.querySelectorAll('[name="members"]:checked').length + ' selected';
+    };
+    editor.addEventListener('change', count);
+    editor.addEventListener('input', () => {
+      editor.querySelector('[data-fleet-group-draft]').textContent = 'Unsaved changes';
+    });
+    count();
+  }
   const form = document.querySelector('[data-fleet-form]');
   if (!form) return;
   function update() {
@@ -12,7 +24,8 @@
   form.querySelector('[data-fleet-group]').addEventListener('change', event => {
     const group = event.target.value;
     if (!group) return;
-    for (const field of form.querySelectorAll('[name="targets"]')) field.checked = group === 'all' || field.dataset.group === group;
+    const members = new Set(JSON.parse(event.target.selectedOptions[0].dataset.members || '[]'));
+    for (const field of form.querySelectorAll('[name="targets"]')) field.checked = members.has(field.value);
   });
   function selectionCount() {
     const count = form.querySelectorAll('[name="targets"]:checked').length;

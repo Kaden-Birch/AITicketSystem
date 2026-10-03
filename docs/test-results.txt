@@ -1,4 +1,4 @@
-397 passed in 38.95s
+400 passed in 39.05s
 
 HTTP opt-in tests cover cookie configuration, URL restrictions, persisted agent enrollment, nonredirecting credential delivery, continued HTTPS verification and isolated Hermes configuration.
 Local Python 3.14.6; temporary databases, fake Hermes adapters and mocked external providers/subprocesses.
@@ -83,3 +83,5 @@ Agentless host regression: unassigned Proxmox node/VM/container workspaces rende
 Host association expected-state regression: generic active/inactive form selections map to node online/offline and guest running/stopped. Five route tests preserve existing agent credentials and verify saved monitoring expectations. Explicit incompatible states remain rejected by existing tests.
 
 Dashboard/Fleet redesign: all existing tasks, SSH-key routes, review/launch confirmation, task reuse, host command permissions and metric/trend data retained. Result regression verifies escaped output, truncation, retained request references and honest unknown outcomes. Browser checks cover light/dark desktop and 390px mobile, six dashboard charts, no horizontal overflow, task-specific fields, group selection/count, key disclosures, review/blocked fixture launch and populated task reuse. JavaScript syntax checks passed. No production host command, AI call or private-key disclosure performed.
+
+Fleet host groups: dynamic Linux/Windows enrollment, linked Proxmox node/guest membership, revoked/unknown OS handling, offline membership retention, overlapping custom groups, atomic validation, confirmed deletion, notification isolation, authentication and CSRF verified. Browser fixture checks verify exact built-in/custom selection, empty-group clearing, group creation and light/dark layouts with no horizontal overflow at 390px. No production host commands dispatched.

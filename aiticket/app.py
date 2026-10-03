@@ -93,7 +93,26 @@ def create_app(data_dir=None, testing=False):
             rows=store.rows('SELECT definition FROM fleet_jobs WHERE id=?',(request.args['task'],))
             if not rows:abort(404)
             preset=json.loads(vault.decrypt(rows[0]['definition']))
-        return render_template('fleet.html',preset=preset,groups=store.rows("SELECT * FROM notification_groups ORDER BY name"),machines=store.rows("SELECT m.*,g.group_id FROM machines m LEFT JOIN machine_groups g ON g.machine_id=m.id WHERE m.id NOT LIKE 'unifi:%' AND m.id NOT LIKE 'unifi-device:%' ORDER BY m.name"),keys=store.rows('SELECT id,label,public,private IS NOT NULL AS downloadable FROM fleet_keys ORDER BY created DESC'),jobs=store.rows('SELECT * FROM fleet_jobs ORDER BY created DESC LIMIT 100'))
+        from .fleet_groups import catalog
+        return render_template('fleet.html',preset=preset,**catalog(store),keys=store.rows('SELECT id,label,public,private IS NOT NULL AS downloadable FROM fleet_keys ORDER BY created DESC'),jobs=store.rows('SELECT * FROM fleet_jobs ORDER BY created DESC LIMIT 100'))
+
+    @app.route('/fleet/groups',methods=['GET','POST'])
+    @app.route('/fleet/groups/<identifier>',methods=['GET','POST'])
+    @login_required
+    def fleet_groups_page(identifier=None):
+        from .fleet_groups import catalog,save,delete
+        if identifier and not store.rows('SELECT id FROM fleet_groups WHERE id=?',(identifier,)):abort(404)
+        if request.method=='POST':
+            if request.form.get('operation')=='delete':
+                if not identifier or request.form.get('confirm')!='yes':raise ValueError('Confirm removal of this group. Hosts and jobs are kept.')
+                delete(store,identifier);flash('Group removed. Hosts and jobs are unchanged.')
+                return redirect(url_for('fleet_groups_page'))
+            identifier=save(store,request.form.get('name',''),request.form.getlist('members'),identifier)
+            flash('Fleet group saved.')
+            return redirect(url_for('fleet_groups_page',identifier=identifier))
+        data=catalog(store)
+        data['selected_group']=next((g for g in data['custom_groups'] if g['id']==identifier),None)
+        return render_template('fleet_groups.html',**data)
 
     @app.post('/fleet/preview')
     @login_required
