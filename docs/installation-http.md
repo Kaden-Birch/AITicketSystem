@@ -91,3 +91,5 @@ For metric host workspaces, Proxmox guest status, optional manual power controls
 To use your Codex subscription without an API key, follow [Hermes Codex setup](hermes-codex.md). The bridge-to-application connection can use HTTP with the same explicit transport opt-in. Codex itself connects to its HTTPS provider endpoint.
 
 General command execution is an explicit opt-in. Follow [remote command setup](remote-commands.md) for agent OS permissions, host policy and operational/independent Hermes tools.
+
+The agent installer verifies effective root service permissions, runtime capabilities and local shell policy after restart. A failed check exits with an explanation; inspect conflicting drop-ins as described in [agent permission verification](agent.md#permission-verification). Main application access modes remain under Host settings.

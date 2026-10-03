@@ -5,6 +5,8 @@ Wants=network-online.target
 [Service]
 User=root
 Group=root
+PrivateUsers=false
+DynamicUser=false
 ExecStart=/usr/bin/python3 /opt/aiticket-agent/agent.py run
 Restart=on-failure
 RestartSec=15

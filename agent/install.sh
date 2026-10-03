@@ -31,7 +31,7 @@ if sys.version_info < (3,11): raise SystemExit('Python 3.11+ is required.')
 root=Path(sys.argv[1]); sums={}
 for line in (root/'SHA256SUMS').read_text().splitlines():
     digest,path=line.split('  ',1);sums[path]=digest
-for name in ('agent.py','diagnostics.py','monitoring.py','actions.py','commands.py','aiticket-agent.service'):
+for name in ('agent.py','diagnostics.py','monitoring.py','actions.py','commands.py','install_verify.py','aiticket-agent.service'):
     path='agent/'+name
     if sums.get(path)!=hashlib.sha256((root/path).read_bytes()).hexdigest():raise SystemExit('Checksum mismatch: '+path)
 print('Agent source checksums verified.')
@@ -43,7 +43,7 @@ fi
 systemctl stop aiticket-agent 2>/dev/null || true
 install -d -o root -g root -m 0755 /opt/aiticket-agent /etc/aiticket-agent
 install -d -o root -g root -m 0700 /var/lib/aiticket-agent
-for file in agent.py diagnostics.py monitoring.py actions.py commands.py; do
+for file in agent.py diagnostics.py monitoring.py actions.py commands.py install_verify.py; do
   install -o root -g root -m 0644 "$source_dir/agent/$file" "/opt/aiticket-agent/$file"
 done
 install -o root -g root -m 0644 "$source_dir/agent/aiticket-agent.service" /etc/systemd/system/aiticket-agent.service
@@ -53,6 +53,8 @@ cat > /etc/systemd/system/aiticket-agent.service.d/zz-aiticket-full-access.conf 
 [Service]
 User=root
 Group=root
+PrivateUsers=false
+DynamicUser=false
 NoNewPrivileges=false
 ProtectSystem=off
 ProtectHome=false
@@ -87,6 +89,7 @@ systemctl enable aiticket-agent
 systemctl restart aiticket-agent
 sleep 2
 systemctl is-active --quiet aiticket-agent || { journalctl -u aiticket-agent -n 30 --no-pager; exit 1; }
+python3 /opt/aiticket-agent/install_verify.py
 echo 'Agent running with local root command access. Main application host policy controls remote execution.'
 command -v docker >/dev/null && docker info >/dev/null 2>&1 && echo 'Docker daemon accessible.' || echo 'Docker unavailable; other monitoring continues.'
 echo 'Check the host in the application after its next heartbeat.'

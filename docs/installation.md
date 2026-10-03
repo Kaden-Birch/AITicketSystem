@@ -179,3 +179,5 @@ Startup applies transactional database migrations. If an upgrade fails, older co
 For an agent upgrade, rerun the installer in section B. It replaces all modules and restarts the service while preserving identity and execution ledgers; no reenrollment is needed.
 
 For metric host workspaces, Proxmox guest status, optional manual power controls and the matching agent upgrade, see [the host dashboard guide](host-dashboard.md).
+
+The agent installer verifies effective root service permissions, runtime capabilities and local shell policy after restart. A failed check exits with an explanation; inspect conflicting drop-ins as described in [agent permission verification](agent.md#permission-verification). Main application access modes remain under Host settings.
