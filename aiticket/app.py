@@ -911,7 +911,35 @@ def create_app(data_dir=None, testing=False):
     @app.get('/queue')
     @login_required
     def queue():
-        return render_template('queue.html', jobs=store.rows('SELECT * FROM deliveries ORDER BY created DESC LIMIT 200'))
+        view=request.args.get('view','all')
+        filters={'all':'1=1','waiting':"d.state IN ('pending','leased')",'attention':"d.state IN ('failed','expired')",'sent':"d.state='completed'",'skipped':"d.state='superseded'"}
+        if view not in filters:raise ValueError('Invalid delivery category.')
+        page=int(request.args.get('page',1))
+        if not 1<=page<=100000:raise ValueError('Invalid page.')
+        counts={'all':0,'waiting':0,'attention':0,'sent':0,'skipped':0}
+        for row in store.rows('SELECT state,count(*) count FROM deliveries GROUP BY state'):
+            counts['all']+=row['count']
+            category={'pending':'waiting','leased':'waiting','failed':'attention','expired':'attention','completed':'sent','superseded':'skipped'}.get(row['state'])
+            if category:counts[category]+=row['count']
+        jobs=store.rows("SELECT d.*,i.report FROM deliveries d JOIN incidents i ON i.id=d.incident_id WHERE "+filters[view]+" ORDER BY d.created DESC,d.id LIMIT 51 OFFSET ?",((page-1)*50,))
+        for job in jobs:
+            report=json.loads(job.pop('report'))
+            job['host_name']=report.get('target','Unknown host')
+            job['ticket_title']=report.get('check','Ticket notification')
+            event=job['event_key'].split(':',1)[-1].split(':',1)[0]
+            if event.startswith('escalation-'):event='escalation'
+            job['event_label']={'opened':'Ticket opened','recovery':'Issue resolved','blocker':'Needs your attention','reminder':'Ticket reminder','escalation':'Priority increased'}.get(event,'Ticket update')
+            error=job['last_error'] or ''
+            job['explanation']=''
+            if error.startswith('Discord webhook'):job['explanation']='Set up Discord notifications to deliver this message.'
+            elif 'paused by maintenance' in error:job['explanation']='Waiting until maintenance or ticket silence ends.'
+            elif 'acceptance is unknown' in error:job['explanation']='Delivery could not be confirmed. A retry may send a duplicate.'
+            elif error.startswith('HTTP 429'):job['explanation']='Discord is limiting requests. A later attempt is scheduled.'
+            elif error:job['explanation']='Delivery did not succeed. Review the recorded error and notification settings.'
+        return render_template('queue.html',jobs=jobs[:50],counts=counts,view=view,page=page,
+                               previous=url_for('queue',view=view,page=page-1) if page>1 else None,
+                               following=url_for('queue',view=view,page=page+1) if len(jobs)>50 else None,
+                               discord_configured=bool(store.setting('discord_secret')))
 
     @app.post('/queue/<job_id>/retry')
     @login_required
