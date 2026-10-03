@@ -31,3 +31,5 @@ required. Existing endpoint IDs, resource links and histories remain intact;
 connections in the same namespace appear together in one cluster card. Save the
 cluster schedule to consolidate older per-endpoint schedules. For older endpoints
 with different credentials, replace the cluster credential to synchronize them.
+
+When linking an enrolled host from Host settings, choose **Online / running** or **Intentionally offline / stopped**. The application maps this to the selected resource: online/offline for nodes and running/stopped for VMs and containers. Enrollment and agent credentials are preserved.

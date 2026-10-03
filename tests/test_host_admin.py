@@ -8,6 +8,29 @@ from aiticket.inventory import export_inventory
 from test_proxmox import setup,inventory
 
 
+@pytest.mark.parametrize('kind,expected,state',[('node','active','online'),('node','inactive','offline'),('qemu','active','running'),('qemu','inactive','stopped'),('lxc','active','running')])
+def test_host_link_form_uses_resource_appropriate_state(signed_in,kind,expected,state):
+    client,store,vault,csrf=signed_in
+    setup(store,vault)
+    resources=inventory()
+    for resource in resources:
+        if resource['type']=='lxc': resource['template']=0
+    with patch.object(Client,'get',return_value=resources): discover(store,vault,'p1')
+    obj=store.rows('SELECT * FROM proxmox_objects WHERE kind=? AND template=0',(kind,))[0]
+    client.post('/hosts',data={'csrf':csrf,'name':'Enrolled node or guest'})
+    mid=store.rows("SELECT id FROM machines WHERE name='Enrolled node or guest'")[0]['id']
+    with store.connect() as c:
+        c.execute('INSERT INTO agents(id,machine_id,credential_digest) VALUES(?,?,?)',('existing-agent',mid,'retained-digest'))
+    page=client.get('/hosts/'+mid+'/settings')
+    assert page.status_code==200 and b'Online / running' in page.data
+    assert b'Guest running' not in page.data
+    response=client.post('/hosts/'+mid+'/proxmox-link',data={'csrf':csrf,'object_id':obj['id'],'expected':expected,'confirm':'yes'})
+    assert response.status_code==302
+    cfg=json.loads(store.rows("SELECT config FROM checks WHERE machine_id=? AND kind='proxmox_linked'",(mid,))[0]['config'])
+    assert cfg['expected']==state
+    assert store.rows('SELECT credential_digest FROM agents WHERE machine_id=?',(mid,))[0]['credential_digest']=='retained-digest'
+
+
 def test_edit_preserves_identity_and_rejects_cycles(signed_in):
     client,store,_,csrf=signed_in
     client.post('/hosts',data={'csrf':csrf,'name':'Agent first'})

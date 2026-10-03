@@ -214,6 +214,8 @@ def link(store, object_id, machine_id, expected, create_name=None):
         if obj['template']:
             raise ValueError('Templates are excluded from monitoring')
         states = {'node':('online','offline'),'qemu':('running','stopped'),'lxc':('running','stopped'),'storage':('available','unavailable')}
+        if expected in ('active','inactive'):
+            expected=states[obj['kind']][expected=='inactive']
         if expected not in states[obj['kind']]:
             raise ValueError('Invalid expected state for this resource type')
         if create_name:
