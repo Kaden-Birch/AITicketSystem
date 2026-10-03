@@ -77,6 +77,8 @@ def detail(store,machine_id):
     from .overview_ui import host_list
     host=next((m for m in host_list(store) if m['id']==machine_id),None)
     if not host: return None
+    from .topology import context as topology_context
+    with store.connect() as c:host['topology']=topology_context(c,machine_id)
     obj=host['object']; guests=[]
     if obj and obj['kind']=='node':
         guests=store.rows("SELECT o.*,m.name AS machine FROM proxmox_objects o LEFT JOIN machines m ON m.id=o.machine_id WHERE o.cluster_id=? AND o.node=? AND o.kind IN ('qemu','lxc') AND o.present=1 ORDER BY o.kind,o.object_key",(obj['cluster_id'],obj['node']))
@@ -91,6 +93,7 @@ def object_detail(store,object_id):
     obj=objects[0]
     if obj['machine_id']: return detail(store,obj['machine_id'])
     host={'id':None,'name':obj['name'],'type':obj['kind'],'object':obj,'agent':None,'sample':sample(None,obj,time.time()),'health':'unmonitored','active_incidents':0}
+    host['topology']={'machine_type':{'node':'physical','qemu':'vm','lxc':'container'}.get(obj['kind'],'unknown'),'links':[],'hosted_on':{'name':obj['node']} if obj['kind'] in ('qemu','lxc') else None}
     guests=store.rows("SELECT * FROM proxmox_objects WHERE cluster_id=? AND node=? AND present=1 AND kind IN ('qemu','lxc') ORDER BY name",(obj['cluster_id'],obj['node'])) if obj['kind']=='node' else []
     for g in guests: g['sample']=sample(None,g,time.time())
     return {'machines':store.rows('SELECT id,name FROM machines ORDER BY name'),'host':host,'guests':guests,'checks':[],'incidents':[],'parent':[],'lifecycle':[],'power_policy':None}

@@ -30,6 +30,7 @@ sudo systemctl stop aiticket-agent
 sudo install -m 0644 agent/agent.py /opt/aiticket-agent/agent.py
 sudo install -m 0644 agent/diagnostics.py /opt/aiticket-agent/diagnostics.py
 sudo install -m 0644 agent/monitoring.py /opt/aiticket-agent/monitoring.py
+sudo install -m 0644 agent/network.py /opt/aiticket-agent/network.py
 sudo install -m 0644 agent/actions.py /opt/aiticket-agent/actions.py
 sudo install -m 0644 agent/commands.py /opt/aiticket-agent/commands.py
 ```
@@ -298,3 +299,7 @@ Update only the main application for check editing; no agent or Hermes update is
 ## Simplified agent installation
 
 Use the [one-command installer](agent.md#recommended-one-command-installation-or-upgrade) for new hosts and upgrades. It enables local shell execution and installs a root service automatically; no separate command-policy edit or root override is needed. Enrollment is followed by automatic service restart. Application host access mode continues to control command admission. Legacy manual local-policy instructions above remain useful for troubleshooting custom deployments.
+
+## Network context and read-only refresh
+
+Host identity tags, multiple switch/router uplinks, interface/port histories, VM placement and AI topology context are described in [network topology](network-topology.md). Update the main application and Hermes bridge; rerun the agent installer for agent 0.8.0 interface reporting. The new operational `network` action uses fixed read-only UniFi endpoints and linked Proxmox node interface GET queries. It grants no UniFi write capability.

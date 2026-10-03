@@ -15,7 +15,7 @@ if (( ! verify_only )); then
   [[ $EUID == 0 ]] || { echo 'Run this installer with sudo.' >&2; exit 1; }
   command -v systemctl >/dev/null || { echo 'systemd is required.' >&2; exit 1; }
   apt-get update
-  apt-get install -y python3 curl ca-certificates tar
+  apt-get install -y python3 curl ca-certificates tar iproute2
 fi
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
@@ -31,7 +31,7 @@ if sys.version_info < (3,11): raise SystemExit('Python 3.11+ is required.')
 root=Path(sys.argv[1]); sums={}
 for line in (root/'SHA256SUMS').read_text().splitlines():
     digest,path=line.split('  ',1);sums[path]=digest
-for name in ('agent.py','diagnostics.py','monitoring.py','actions.py','commands.py','install_verify.py','aiticket-agent.service'):
+for name in ('agent.py','diagnostics.py','monitoring.py','network.py','actions.py','commands.py','install_verify.py','aiticket-agent.service'):
     path='agent/'+name
     if sums.get(path)!=hashlib.sha256((root/path).read_bytes()).hexdigest():raise SystemExit('Checksum mismatch: '+path)
 print('Agent source checksums verified.')
@@ -43,7 +43,7 @@ fi
 systemctl stop aiticket-agent 2>/dev/null || true
 install -d -o root -g root -m 0755 /opt/aiticket-agent /etc/aiticket-agent
 install -d -o root -g root -m 0700 /var/lib/aiticket-agent
-for file in agent.py diagnostics.py monitoring.py actions.py commands.py install_verify.py; do
+for file in agent.py diagnostics.py monitoring.py network.py actions.py commands.py install_verify.py; do
   install -o root -g root -m 0644 "$source_dir/agent/$file" "/opt/aiticket-agent/$file"
 done
 install -o root -g root -m 0644 "$source_dir/agent/aiticket-agent.service" /etc/systemd/system/aiticket-agent.service

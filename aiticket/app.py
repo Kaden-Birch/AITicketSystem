@@ -286,10 +286,27 @@ def create_app(data_dir=None, testing=False):
             flash('Host access saved: '+{'readonly':'Read only commands','guarded':'Ask before potentially dangerous commands','immediate':'Full access — commands run without per-command approval'}[mode]+'.')
             return redirect(url_for('host_settings',machine_id=machine_id))
         with store.connect() as c: access=access_context(c,machine_id)
+        from .topology import context as topology_context,choices as port_choices
+        with store.connect() as c:data.update(topology=topology_context(c,machine_id),network_ports=port_choices(c))
         from .health_rules import cards,sync
         sync(store)
         data.update(health_cards=cards(store,machine_id),health_scope=machine_id,health_action='/hosts/'+machine_id+'/health',command_policy=old,access=access,access_mode=old['approval'] if old and old['enabled'] else 'readonly')
         return render_template('host-settings.html',**data)
+
+    @app.post('/hosts/<machine_id>/network-links')
+    @login_required
+    def host_network_link(machine_id):
+        from .topology import save,remove
+        if not store.rows('SELECT id FROM machines WHERE id=?',(machine_id,)):abort(404)
+        if request.form.get('operation')=='refresh':
+            from .topology import refresh as refresh_network
+            result=refresh_network(store,vault,machine_id)
+            flash('Read-only network refresh complete.' if not result['refresh_errors'] and not result['proxmox_errors'] else 'Some observations could not be refreshed. Last known information is retained.')
+            return redirect(url_for('host_settings',machine_id=machine_id)+'#network')
+        if request.form.get('operation')=='remove':remove(store,machine_id,request.form.get('id'))
+        else:save(store,machine_id,request.form.get('interface','').strip(),request.form.get('port',''))
+        flash('Network connections updated.')
+        return redirect(url_for('host_settings',machine_id=machine_id)+'#network')
 
     @app.post('/hosts/<machine_id>/command-policy')
     @login_required
@@ -382,8 +399,13 @@ def create_app(data_dir=None, testing=False):
             if ai_job: targets=store.rows('SELECT id,name FROM machines WHERE id=?',(machine,))
             with store.connect() as c:
                 from .machine_context import context as machine_context
-                targets=[{**machine_context(c,target['id'],external=external),'proxmox':pxops.context(c,target['id'])} for target in targets]
+                from .topology import context as topology_context,bounded as bounded_topology
+                targets=[{**machine_context(c,target['id'],external=external),'proxmox':pxops.context(c,target['id']),'network_topology':bounded_topology(topology_context(c,target['id']))} for target in targets]
             return {'targets':targets}
+        if action=='network':
+            if external and not store.rows('SELECT 1 FROM command_policies WHERE machine_id=? AND external=1 AND enabled=1',(machine,)):abort(403)
+            from .topology import refresh as refresh_network
+            return refresh_network(store,vault,machine)
         if action=='proxmox':
             identifier=pxops.queue(store,vault,machine,payload,ai_job,external)
             return pxops.view(store,vault,identifier)
@@ -974,6 +996,8 @@ def create_app(data_dir=None, testing=False):
         host_info=payload.get('host_info',{})
         if not isinstance(host_info,dict) or set(host_info)-{'hostname','os','kernel','architecture'} or any(not isinstance(v,str) or len(v)>200 for v in host_info.values()):
             abort(400)
+        from .topology import validate as validate_network
+        network=validate_network(payload.get('network',{}))
         capabilities=payload.get('capabilities',{})
         if not isinstance(capabilities,dict) or set(capabilities)-{'operations','services','actions','action_services','power_operations','shell_commands'} or any(not isinstance(capabilities.get(k,[]),list) for k in ('operations','services')):
             abort(400)
@@ -1007,6 +1031,10 @@ def create_app(data_dir=None, testing=False):
             c.execute('UPDATE agents SET last_seen=?,address=?,version=?,telemetry=?,capabilities=?,sampled_at=? WHERE id=?', (now, request.remote_addr, str(payload.get('version', ''))[:32], json.dumps(telemetry), json.dumps(capabilities),sampled_at,row['id']))
             from .metric_history import record
             record(c,row['machine_id'],'agent',sampled_at or now,telemetry)
+            from .topology import retain as retain_network
+            c.execute('INSERT INTO network_inventory VALUES(?,?,?) ON CONFLICT(machine_id) DO UPDATE SET at=excluded.at,data=excluded.data',(row['machine_id'],sampled_at if sampled_at is not None else now,json.dumps(network)))
+            for interface in network.get('interfaces',[]):
+                retain_network(c,'interface:'+row['machine_id']+':'+interface['name'],sampled_at if sampled_at is not None else now,{'state':interface.get('state','unknown'),'carrier':interface['carrier']})
             from .diagnostics import poll
             jobs=poll(c,row['id'],now)
             from .actions import poll as action_poll

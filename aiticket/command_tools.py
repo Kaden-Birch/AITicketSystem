@@ -5,7 +5,7 @@ import requests
 from .security import hermes_headers,validate_url
 
 NAME='aiticket_host'
-SCHEMA={'name':NAME,'description':'Remote shell on authorized hosts. targets lists machine IDs, observed agent connection addresses, freshness and shell availability. run queues one arbitrary command; status returns exit/stdout/stderr; cancel stops local work. Approval policy and OS privileges apply. proxmox requests any token-permitted API endpoint on a linked connection; proxmox_status inspects the durable request. block records a need for human clarification/permission and notifies the administrator. resolve requests verified incident closure and recovery notification. Unknown outcomes must never be replayed.','parameters':{'type':'object','properties':{'action':{'type':'string','enum':['targets','run','status','cancel','proxmox','proxmox_status','resolve','block']},'summary':{'type':'string','description':'Brief repair explanation for resolve. Closure waits for fresh healthy monitoring after this run; AI text alone never proves recovery.'},'connection_id':{'type':'string'},'method':{'type':'string','enum':['GET','POST','PUT','DELETE']},'path':{'type':'string','description':'Relative Proxmox API path, e.g. /nodes/node/qemu/100/status/start. Token controls all API permissions.'},'params':{'type':'object','additionalProperties':True},'machine_id':{'type':'string'},'command':{'type':'string'},'id':{'type':'string','description':'Stable command UUID; reuse only for the exact same run. Required for status/cancel.'},'offset':{'type':'integer','minimum':0,'maximum':65536}},'required':['action'],'additionalProperties':False}}
+SCHEMA={'name':NAME,'description':'Remote shell on authorized hosts. targets lists machine identity, network topology, interface/port histories and freshness. network refreshes relevant UniFi observations through fixed read-only endpoints. run queues one arbitrary command; status returns exit/stdout/stderr; cancel stops local work. Approval policy and OS privileges apply. proxmox requests any token-permitted API endpoint on a linked connection; proxmox_status inspects the durable request. block records a need for human clarification/permission and notifies the administrator. resolve requests verified incident closure and recovery notification. Unknown outcomes must never be replayed.','parameters':{'type':'object','properties':{'action':{'type':'string','enum':['targets','run','status','cancel','proxmox','proxmox_status','network','resolve','block']},'summary':{'type':'string','description':'Brief repair explanation for resolve. Closure waits for fresh healthy monitoring after this run; AI text alone never proves recovery.'},'connection_id':{'type':'string'},'method':{'type':'string','enum':['GET','POST','PUT','DELETE']},'path':{'type':'string','description':'Relative Proxmox API path, e.g. /nodes/node/qemu/100/status/start. Token controls all API permissions.'},'params':{'type':'object','additionalProperties':True},'machine_id':{'type':'string'},'command':{'type':'string'},'id':{'type':'string','description':'Stable command UUID; reuse only for the exact same run. Required for status/cancel.'},'offset':{'type':'integer','minimum':0,'maximum':65536}},'required':['action'],'additionalProperties':False}}
 
 
 def invoke(server,args,credential=None,job=None,secret=None,ca=None):
@@ -19,7 +19,7 @@ def invoke(server,args,credential=None,job=None,secret=None,ca=None):
     try:
       while True:
         if not job: headers=hermes_headers(secret,body,args.get('id',str(uuid.uuid4())))
-        with requests.post(server.rstrip('/')+path,data=body,headers=headers,timeout=(3,10),verify=ca or True,allow_redirects=False,stream=True) as response:
+        with requests.post(server.rstrip('/')+path,data=body,headers=headers,timeout=(3,100 if args.get('action')=='network' else 10),verify=ca or True,allow_redirects=False,stream=True) as response:
             raw=response.raw.read(512001)
             if len(raw)>512000: raise ValueError('Command API returned an oversized response.')
             if response.status_code!=200:
@@ -31,7 +31,7 @@ def invoke(server,args,credential=None,job=None,secret=None,ca=None):
         if result.get('state') not in ('pending','dispatched','running') or time.monotonic()>=deadline: break
         time.sleep(1)
     except Exception as exc:
-        lookup=args.get('action') in ('status','proxmox_status','targets')
+        lookup=args.get('action') in ('status','proxmox_status','targets','network')
         return json.dumps({'state':'lookup_failed' if lookup else 'unknown','error_type':type(exc).__name__,'error':'Status/target lookup failed; this does not establish whether an operation was dispatched.' if lookup else 'Request failed or delivery is ambiguous. Do not replay the command. Check its UUID/status in the host workspace.','id':args.get('id')})
     if result.get('result') and 'stdout' in result['result']:
         full=result['result'];result['result']={**full,**{k:full[k][offset:offset+2048] for k in ('stdout','stderr')}}

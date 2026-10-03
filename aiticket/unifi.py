@@ -11,7 +11,7 @@ from .security import validate_url
 NETWORK = '/proxy/network/integration/v1'
 DRIVE = {'storage':'/proxy/drive/api/v2/storage', 'device':'/proxy/drive/api/v2/systems/device-info', 'throughput':'/proxy/drive/api/v2/systems/network-io'}
 # Deliberately discard unknown fields, credentials, client names and raw error bodies.
-FIELDS = set('idx index portIndex speedMbps maxSpeedMbps connector media poe standard txBytes rxBytes txPackets rxPackets txErrors rxErrors errors dropped nativeNetworkId taggedNetworkIds networkName ipv4Configuration subnet gateway dhcpConfiguration address clientId uplinkPortIndex lastHeartbeatAt nextHeartbeatAt radios frequency channel channelWidth txPower utilizationPct signalDbm traffic rxBytesPerSecond txBytesPerSecond'.split()) | set('id name model macAddress ipAddress state status firmwareVersion firmwareUpdatable uptime uptimeSec cpuUtilizationPct memoryUtilizationPct loadAverage interfaces ports uplink speed maxSpeed linkSpeed connected enabled vlanId networkId type connectionType deviceId portIdx management default data offset limit totalCount count pools disks cacheSlots number capacity usage raidGroups currentLevel configLevel currentProtection expectedProtection slotId poolId size temperature powerOnHours badSectorCount uncorrectableSectorCount readErrorRate healthScore cpu currentload memory free total available networkInterfaces interfaceName version receiveKBPS transmitKBPS timestamp txRateBps rxRateBps'.split())
+FIELDS = {'uplinkDeviceId','portId','chassisId','lldp','neighbors','portIdSubtype','ifname'} | set('idx index portIndex speedMbps maxSpeedMbps connector media poe standard txBytes rxBytes txPackets rxPackets txErrors rxErrors errors dropped nativeNetworkId taggedNetworkIds networkName ipv4Configuration subnet gateway dhcpConfiguration address clientId uplinkPortIndex lastHeartbeatAt nextHeartbeatAt radios frequency channel channelWidth txPower utilizationPct signalDbm traffic rxBytesPerSecond txBytesPerSecond'.split()) | set('id name model macAddress ipAddress state status firmwareVersion firmwareUpdatable uptime uptimeSec cpuUtilizationPct memoryUtilizationPct loadAverage interfaces ports uplink speed maxSpeed linkSpeed connected enabled vlanId networkId type connectionType deviceId portIdx management default data offset limit totalCount count pools disks cacheSlots number capacity usage raidGroups currentLevel configLevel currentProtection expectedProtection slotId poolId size temperature powerOnHours badSectorCount uncorrectableSectorCount readErrorRate healthScore cpu currentload memory free total available networkInterfaces interfaceName version receiveKBPS transmitKBPS timestamp txRateBps rxRateBps'.split())
 
 
 def clean(value, depth=0):
@@ -85,6 +85,14 @@ def collect(connection,vault):
                     read('device:'+identifier,lambda identifier=identifier:client.get(NETWORK+'/sites/'+site+'/devices/'+identifier))
                     read('statistics:'+identifier,lambda identifier=identifier:client.get(NETWORK+'/sites/'+site+'/devices/'+identifier+'/statistics/latest'))
             if len(devices)>8: warnings.append('Only the first eight devices have detail/statistics coverage.')
+            clients=readings.get('clients',{}).get('items',[])
+            candidates=[item for item in clients if isinstance(item.get('id'),str) and re.fullmatch(r'[A-Za-z0-9-]{1,100}',item['id'])]
+            for item in candidates[:16]:
+                key='client:'+item['id']
+                read(key,lambda identifier=item['id']:client.get(NETWORK+'/sites/'+site+'/clients/'+identifier))
+                detail=readings.pop(key,None)
+                if isinstance(detail,dict):item.update(detail)
+            if len(candidates)>16:warnings.append('Only the first 16 clients have attachment-detail coverage.')
     return {'sampled_at':time.time(),'kind':connection['kind'],'read_only':True,'experimental':connection['kind']=='drive','readings':readings,'errors':errors,'warnings':warnings}
 
 
@@ -104,7 +112,7 @@ def refresh(store,vault,identifier):
 
 def probe(store,vault,config):
     result=refresh(store,vault,config['connection_id'])
-    required_errors={k:v for k,v in result['errors'].items() if not k.startswith('statistics:')}
+    required_errors={k:v for k,v in result['errors'].items() if not k.startswith(('statistics:','client:'))}
     healthy=not bool(required_errors) and bool(result['readings'])
     alerts=[]
     for pool in result['readings'].get('storage',{}).get('pools',[]):
@@ -112,7 +120,7 @@ def probe(store,vault,config):
         if pool.get('capacity',0)>0 and pool.get('usage',0)/pool['capacity']>=.9: alerts.append('Storage pool at least 90% full')
     for disk in result['readings'].get('storage',{}).get('disks',[]):
         if disk.get('state') and disk['state']!='optimal': alerts.append('Disk '+str(disk.get('slotId',''))+': '+disk['state'])
-    return healthy and not alerts, {'sampled_at':result['sampled_at'],'reason':'UniFi telemetry available' if healthy and not alerts else 'UniFi telemetry requires attention','alerts':alerts,'endpoint_errors':required_errors,'optional_telemetry_errors':{k:v for k,v in result['errors'].items() if k.startswith('statistics:')}}
+    return healthy and not alerts, {'sampled_at':result['sampled_at'],'reason':'UniFi telemetry available' if healthy and not alerts else 'UniFi telemetry requires attention','alerts':alerts,'endpoint_errors':required_errors,'optional_telemetry_errors':{k:v for k,v in result['errors'].items() if k.startswith(('statistics:','client:'))}}
 
 
 def ai_context(c,machine):
@@ -197,6 +205,7 @@ def retain(c,connection,snapshot):
         metrics=numeric_metrics(readings)
         if metrics:c.execute('INSERT OR IGNORE INTO metric_samples VALUES(?,?,?,?)',(entity,'unifi',at,json.dumps(metrics)))
     record(connection['machine_id'],snapshot['readings'])
+    from .topology import ports,retain as retain_network,port_entity
     if connection['kind']!='network':return
     policy=c.execute('SELECT interval,severity,fail_after,recover_after FROM checks WHERE id=?',(connection['check_id'],)).fetchone()
     for item in snapshot['readings'].get('devices',{}).get('items',[]):
@@ -207,6 +216,7 @@ def retain(c,connection,snapshot):
         machine=old['machine_id'] if old else 'unifi-device:'+uid(); check=old['check_id'] if old else uid()
         detail=snapshot['readings'].get('device:'+identifier,item)
         data={**item,**detail}; statistics=snapshot['readings'].get('statistics:'+identifier,{})
+        for port in ports(data):retain_network(c,port_entity(connection['id'],identifier,port['port']),at,{'state':port['state']})
         name=str(data.get('name') or data.get('model') or identifier)[:100]
         c.execute('INSERT INTO machines(id,name,created) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name',(machine,name,at))
         c.execute('INSERT INTO unifi_devices(connection_id,device_id,machine_id,check_id,data,last_seen) VALUES(?,?,?,?,?,?) ON CONFLICT(connection_id,device_id) DO UPDATE SET data=excluded.data,last_seen=excluded.last_seen',(connection['id'],identifier,machine,check,json.dumps({'device':data,'statistics':statistics}),at))

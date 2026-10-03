@@ -1,4 +1,4 @@
-400 passed in 39.05s
+410 passed in 40.04s
 
 HTTP opt-in tests cover cookie configuration, URL restrictions, persisted agent enrollment, nonredirecting credential delivery, continued HTTPS verification and isolated Hermes configuration.
 Local Python 3.14.6; temporary databases, fake Hermes adapters and mocked external providers/subprocesses.
@@ -85,3 +85,5 @@ Host association expected-state regression: generic active/inactive form selecti
 Dashboard/Fleet redesign: all existing tasks, SSH-key routes, review/launch confirmation, task reuse, host command permissions and metric/trend data retained. Result regression verifies escaped output, truncation, retained request references and honest unknown outcomes. Browser checks cover light/dark desktop and 390px mobile, six dashboard charts, no horizontal overflow, task-specific fields, group selection/count, key disclosures, review/blocked fixture launch and populated task reuse. JavaScript syntax checks passed. No production host command, AI call or private-key disclosure performed.
 
 Fleet host groups: dynamic Linux/Windows enrollment, linked Proxmox node/guest membership, revoked/unknown OS handling, offline membership retention, overlapping custom groups, atomic validation, confirmed deletion, notification isolation, authentication and CSRF verified. Browser fixture checks verify exact built-in/custom selection, empty-group clearing, group creation and light/dark layouts with no horizontal overflow at 390px. No production host commands dispatched.
+
+Network topology: validated/backward-compatible agent inventory, optional partial interface/LLDP collection, exact identifiers versus MAC-path candidates, ambiguous shared MAC rejection, overlapping multi-console uplinks, confirmed-link MAC changes, retained state transitions, deleted/stale device handling, guest/physical-node inheritance, credential-free Proxmox interface configuration fallback, ticket-bound read-only refresh, cancellation fencing, CSRF and scoped link removal verified. Browser fixture checks cover link confirmation, host tags in light/dark appearance and 390px mobile without horizontal overflow. No production network/host/model/Discord request made.

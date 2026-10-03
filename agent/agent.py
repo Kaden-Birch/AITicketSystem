@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unprivileged outbound-only Linux telemetry agent; no shell; recovery is locally disabled by default."""
+"""Outbound Linux monitoring agent with centrally authorized command execution."""
 import argparse
 import getpass
 import json
@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-VERSION = '0.7.0'
+VERSION = '0.8.0'
 
 
 def endpoint(value,allow_http=False):
@@ -89,6 +89,14 @@ def host_info():
         values=dict(line.split('=',1) for line in path.read_text().splitlines() if '=' in line)
         os_name=values.get('PRETTY_NAME','Linux').strip('"')
     return {'hostname':platform.node()[:200],'os':os_name[:200],'kernel':platform.release()[:200],'architecture':platform.machine()[:80]}
+
+
+def network_info():
+    try:
+        from network import inventory
+        return inventory()
+    except Exception:
+        return {"interfaces":[],"neighbors":[],"machine_type":"unknown"}
 
 
 def process_jobs(state,path,jobs,policy):
@@ -229,7 +237,7 @@ def main():
                     advertised.pop('power_operations',None)
                     advertised.pop('actions',None)
                     advertised.pop('action_services',None)
-                pending = {'event_id': str(uuid.uuid4()), 'version': VERSION, 'telemetry': telemetry(state), 'sampled_at':time.time(), 'capabilities':advertised,'host_info':host_info()}
+                pending = {'event_id': str(uuid.uuid4()), 'version': VERSION, 'telemetry': telemetry(state), 'sampled_at':time.time(), 'capabilities':advertised,'host_info':host_info(),'network':network_info()}
                 state['pending'] = pending
                 write_state(path, state)
             response=send(base, '/api/agent/heartbeat', pending, state.get('ca'), state['credential'])

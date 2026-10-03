@@ -64,3 +64,7 @@ Incident history remains in the main application. These commands remove the loca
 For main VM installation, see [HTTP installation](installation-http.md) or [HTTPS installation](installation.md).
 
 Resource thresholds are configured centrally under **Agent health**, with optional per-host overrides in Host settings. See [health preferences](resource-diagnostics.md). No local rule creation or agent update is needed for these preferences.
+
+## Network interface inventory
+
+Agent 0.8.0 includes optional read-only interface, bridge, bond and existing LLDP discovery. Rerun the installer to install every required file, including `network.py`, and restart automatically while preserving enrollment. No new enrollment token is required for an upgrade. Missing optional discovery tools do not stop heartbeats. See [host network topology](network-topology.md) for switch-port associations, multiple uplinks and AI context.

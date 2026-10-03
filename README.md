@@ -105,3 +105,5 @@ Fleet management: [SSH keys, users, packages and scripts](docs/fleet.md), with p
 [Dashboard, Hosts, Tickets and navigation](docs/ui-overview.md): aggregate graphs, compact inventory, live ticket timers, category filters, global search and intentional-offline controls.
 
 [Agent health defaults and host overrides](docs/resource-diagnostics.md): slider preferences, disabled-by-default fleet rules, host-specific settings and percentage/GB free-space thresholds.
+
+Host [network topology](docs/network-topology.md) connects interface inventory and multiple switch/router ports with VM placement, recent link transitions, colored host tags and read-only AI troubleshooting context.

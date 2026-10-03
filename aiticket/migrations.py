@@ -1,6 +1,13 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 33
+CURRENT_VERSION = 34
 MIGRATIONS = {
+    34: (
+        "CREATE TABLE IF NOT EXISTS network_proxmox(object_id TEXT PRIMARY KEY REFERENCES proxmox_objects(id),at REAL NOT NULL,data TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS network_inventory(machine_id TEXT PRIMARY KEY REFERENCES machines(id),at REAL NOT NULL,data TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS network_links(id TEXT PRIMARY KEY,machine_id TEXT NOT NULL REFERENCES machines(id),interface TEXT NOT NULL,mac TEXT NOT NULL DEFAULT '',connection_id TEXT NOT NULL REFERENCES unifi_connections(id),device_id TEXT NOT NULL,port INTEGER NOT NULL,created REAL NOT NULL,UNIQUE(machine_id,interface,connection_id,device_id,port))",
+        "CREATE TABLE IF NOT EXISTS network_samples(entity TEXT NOT NULL,at REAL NOT NULL,data TEXT NOT NULL,PRIMARY KEY(entity,at))",
+        "CREATE INDEX IF NOT EXISTS network_samples_at ON network_samples(at)",
+    ),
     33: (
         "CREATE TABLE IF NOT EXISTS fleet_groups(id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE COLLATE NOCASE)",
         "CREATE TABLE IF NOT EXISTS fleet_group_members(group_id TEXT NOT NULL REFERENCES fleet_groups(id) ON DELETE CASCADE,machine_id TEXT NOT NULL REFERENCES machines(id) ON DELETE CASCADE,PRIMARY KEY(group_id,machine_id))",

@@ -164,6 +164,13 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
             document['unifi_read_only']=unifi_facts
             evidence=json.dumps(document)
             if len(evidence)>16000: raise ValueError('Selected context including UniFi exceeds limits.')
+        from .topology import context as topology_context,bounded as bounded_topology
+        document=json.loads(evidence)
+        document['network_topology']=bounded_topology(topology_context(c,incident['machine_id']),max(500,min(3500,15000-len(evidence))))
+        evidence=json.dumps(document)
+        if len(evidence)>16000:
+            document['network_topology']={'coverage':'Topology omitted due to context size; use targets/network for current read-only facts.'}
+            evidence=json.dumps(document)
         if codex and bridge.get('command_tools'):
             document=json.loads(evidence)
             report=json.loads(incident['report'])
