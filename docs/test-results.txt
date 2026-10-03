@@ -75,3 +75,5 @@ Agent health preferences: disabled-by-default fleet settings, future-agent inher
 Individual ticket refresh: all 16 existing submission routes retained; fixture tests cover focused tool sections, acknowledgement, handling-mode IDs and direct AI cancellation. Browser checks cover light/dark desktop and 390px mobile, expanded tools, and unsent draft/disclosure/mode preservation through live refresh. No production actions were submitted.
 
 Multi-endpoint Proxmox: tests cover atomic endpoint creation, IPv4/IPv6 normalization, duplicate/invalid URL rejection, shared credential replacement, single cluster scheduling, existing linked monitoring fallback and discovery fallback with the first endpoint unavailable. Fixture browser checks cover adding optional addresses, persisted cluster grouping and live-update preservation. No live Proxmox request was sent.
+
+Installer empty-filter regression: 5 installer tests passed; an empty SystemCallFilter deny list is accepted while real allow/deny filters remain rejected. No production service settings changed.

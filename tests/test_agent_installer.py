@@ -53,3 +53,14 @@ def test_postflight_rejects_wrong_service_command_and_missing_process():
     failures=errors(props,{},['/bin/sleep','infinity'],policy)
     assert any('not active' in f for f in failures)
     assert any('installed agent command' in f for f in failures)
+
+
+def test_postflight_accepts_empty_systemd_deny_list_but_rejects_real_filters():
+    from agent.install_verify import errors
+    props,status,args,policy=verified_fixture()
+    for value in ('', '~', ' ~ '):
+        props['SystemCallFilter']=value
+        assert not errors(props,status,args,policy)
+    for value in ('@system-service', '~@mount', '~reboot'):
+        props['SystemCallFilter']=value
+        assert 'SystemCallFilter restriction is still configured' in errors(props,status,args,policy)

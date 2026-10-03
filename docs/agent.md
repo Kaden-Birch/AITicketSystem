@@ -25,6 +25,8 @@ The agent has no inbound listener. Enrollment identity and command history persi
 
 ### Permission verification
 
+`SystemCallFilter=~` is an empty systemd deny list and does not restrict commands. The installer accepts it; actual syscall filters still fail verification. If an older installer flags this value, rerun the current installer to update the checker while preserving enrollment.
+
 A successful installation prints **Permission check passed**. If the check fails, inspect the reported properties and all service drop-ins:
 
 ```bash

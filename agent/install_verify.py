@@ -16,9 +16,13 @@ def errors(properties, status, cmdline, policy):
     for name, wanted in EXPECTED.items():
         if properties.get(name) != wanted:
             failures.append(f'{name}={properties.get(name, "missing")} (expected {wanted})')
-    for name in ('RootDirectory', 'RootImage', 'ReadOnlyPaths', 'InaccessiblePaths', 'SystemCallFilter'):
+    for name in ('RootDirectory', 'RootImage', 'ReadOnlyPaths', 'InaccessiblePaths'):
         if properties.get(name):
             failures.append(f'{name} restriction is still configured')
+    # systemd can serialize an unset filter as "~": an empty deny list
+    # blocks no calls. Actual allow/deny lists must still fail verification.
+    if properties.get('SystemCallFilter', '').strip() not in ('', '~'):
+        failures.append('SystemCallFilter restriction is still configured')
     if properties.get('ActiveState') != 'active':
         failures.append('Agent service is not active')
     if status.get('Uid', '').split() != ['0'] * 4 or status.get('Gid', '').split() != ['0'] * 4:
