@@ -132,3 +132,8 @@ submission route and permission check is preserved; notes still do not trigger A
 The tools panels preserve their open state and unsent forms during live updates.
 On narrow screens, the sidebar, reply forms, and tools stack into a single column.
 Only the main application needs rebuilding for this visual update.
+
+The individual workspace now shares Agent Health’s softer grouped-card styling:
+rounded surfaces, subtle separators, right-aligned sidebar values, segmented
+handling controls, quiet action buttons, and inset message editors. This styling
+is scoped to ticket details and does not change the ticket list or permissions.

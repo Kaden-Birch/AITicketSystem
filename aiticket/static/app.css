@@ -29,3 +29,71 @@ body{background:var(--page)}header,section,.cards article,.table,.metric,.host-c
 :root:not([data-theme=dark]) .health-actions .primary{color:#fff}
 /* Focused individual ticket workspace. */
 .ticket-detail-heading{margin-bottom:18px}.ticket-detail-heading h1{font-size:28px;margin-bottom:8px}.ticket-detail-heading p{margin:8px 0}.ticket-detail-layout{grid-template-columns:280px minmax(0,1fr);gap:20px}.ticket-detail-layout section{padding:20px;border-radius:16px}.ticket-detail-layout .ticket-sidebar h2{margin-bottom:14px}.ticket-detail-layout dl{display:grid;grid-template-columns:100px minmax(0,1fr);gap:9px 12px;margin:14px 0}.ticket-detail-layout dt{font-size:12px;text-transform:none;align-self:start}.ticket-detail-layout dd{margin:0;font-size:13px;overflow-wrap:anywhere}.ticket-detail-layout .mode-buttons{gap:6px}.ticket-detail-layout .mode-buttons button{border-radius:10px;padding:9px 12px}.ticket-admission{margin:0 0 12px}.ticket-detail-layout .ticket-summary{border-left:1px solid var(--line)}.ticket-summary .row h2{margin:0}.ticket-summary .eyebrow{font-size:10px;letter-spacing:1px}.ticket-detail-layout .ticket-main>section{margin-bottom:16px}.ticket-detail-layout .table th,.ticket-detail-layout .table td{padding:12px;font-size:13px}.ticket-detail-layout .conversation-entry{padding:14px 0}.ticket-detail-layout .conversation-entry p{font-size:14px;margin:8px 0}.ticket-conversation>form,.ticket-reply{display:inline-block;vertical-align:top;width:calc(50% - 9px)}.ticket-conversation>form{margin-right:12px}.ticket-reply h3{font-size:14px;margin:16px 0 6px}.ticket-reply label{margin-top:6px}.ticket-conversation textarea{min-height:115px}.ticket-conversation button{margin-bottom:8px}.ticket-tools{padding:4px 0 16px}.ticket-tools>h2{margin:0;font-size:19px}.ticket-tool-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start}.ticket-tool{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:0;min-width:0}.ticket-tool>summary{padding:16px;font-size:14px}.ticket-tool>summary small{margin:5px 0 0 18px}.ticket-tool[open]{grid-column:1/-1}.ticket-tool-content{padding:0 16px 16px;overflow-wrap:anywhere}.ticket-tool-content section{padding:16px;margin-bottom:12px}.ticket-tool-content h2,.ticket-tool-content h3{font-size:16px;margin:14px 0 10px}.ticket-tool-content p{font-size:13px}.ticket-tool-content pre{font-size:12px;max-height:360px;overflow:auto}.ticket-tool-content form{max-width:720px}.ticket-detail-layout .blocker form{margin-top:12px}.ticket-detail-layout .blocker textarea{min-height:80px}@media(max-width:850px){.ticket-detail-layout{grid-template-columns:1fr}.ticket-detail-layout .ticket-sidebar{grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}.ticket-detail-layout .ticket-sidebar section{margin:0}}@media(max-width:560px){.ticket-tool-grid{grid-template-columns:1fr}.ticket-conversation>form,.ticket-reply{width:100%;margin-right:0}.ticket-detail-layout section{padding:16px}.ticket-detail-heading h1{font-size:24px}.ticket-detail-layout .ticket-summary .row{align-items:flex-start}.ticket-detail-layout .sidebar-metrics strong{font-size:18px}}
+/* Ticket workspace shares the quiet, grouped appearance of Health preferences. */
+.ticket-workspace{--ticket-radius:20px;max-width:1400px;margin:0 auto}
+.ticket-workspace .ticket-detail-heading{padding:8px 4px 6px;margin-bottom:20px;align-items:flex-end}
+.ticket-workspace .ticket-detail-heading h1{font-size:30px;font-weight:650;letter-spacing:-.8px;margin:10px 0}
+.ticket-workspace .ticket-detail-heading .eyebrow{font-size:11px;letter-spacing:.8px;color:var(--muted);margin-top:16px}
+.ticket-workspace .ticket-heading>div>a{font-size:13px;text-decoration:none}
+.ticket-workspace .badge{font-size:11px;font-weight:500;padding:4px 9px}
+.ticket-workspace .ticket-detail-layout{gap:24px;grid-template-columns:290px minmax(0,1fr)}
+.ticket-workspace section,.ticket-workspace .ticket-tool{background:var(--surface);border:1px solid var(--line);border-radius:var(--ticket-radius);box-shadow:none}
+.ticket-workspace .ticket-sidebar section{padding:20px}
+.ticket-workspace .ticket-sidebar h2{font-size:16px;font-weight:650;letter-spacing:-.2px;margin-bottom:18px}
+.ticket-workspace .ticket-sidebar h3{font-weight:550;color:var(--muted);font-size:12px;margin:22px 0 8px}
+.ticket-workspace .ticket-sidebar dl{gap:0;margin:12px 0}
+.ticket-workspace .ticket-sidebar dt,.ticket-workspace .ticket-sidebar dd{padding:10px 0;border-bottom:1px solid var(--line);align-self:stretch;display:flex;flex-direction:column;justify-content:center}
+.ticket-workspace .ticket-sidebar dt:last-of-type,.ticket-workspace .ticket-sidebar dd:last-of-type{border-bottom:0}
+.ticket-workspace .ticket-sidebar dd{text-align:right;font-size:13px;font-weight:500}
+.ticket-workspace button,.ticket-workspace .button{border-radius:10px;font-size:12px;padding:9px 13px;border-color:transparent;background:var(--page);font-weight:550;min-height:36px}
+.ticket-workspace .primary{background:var(--accent);color:#062b27}
+:root:not([data-theme=dark]) .ticket-workspace .primary{color:#fff}
+.ticket-workspace .mode-buttons{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:3px;padding:4px;border-radius:12px;background:var(--page)}
+.ticket-workspace .mode-buttons form{min-width:0}
+.ticket-workspace .mode-buttons button{height:46px;min-height:46px;font-size:11px;line-height:1.25;padding:4px 6px;text-align:center;border:0;background:transparent;color:var(--muted);box-shadow:none;border-radius:8px}
+.ticket-workspace .mode-buttons button.selected{background:var(--surface);color:var(--ink);box-shadow:0 1px 4px #0002;opacity:1}
+.ticket-workspace .ticket-sidebar .hint{font-size:12px;line-height:1.5;margin:12px 0 8px}
+.ticket-workspace .ticket-main h2{font-size:18px;font-weight:650;letter-spacing:-.3px}
+.ticket-workspace .ticket-summary{padding:24px;border:1px solid var(--line)}
+.ticket-workspace .ticket-summary .eyebrow{font-size:10px;font-weight:550;letter-spacing:.6px;color:var(--muted);margin-top:20px}
+.ticket-workspace .ticket-summary>p:last-of-type{font-size:15px;line-height:1.6}
+.ticket-workspace .ticket-admission{font-size:12px;padding:0 4px;margin-bottom:14px;color:var(--muted)}
+.ticket-workspace .ticket-main>section{padding:22px;margin-bottom:20px}
+.ticket-workspace .sidebar-metrics{gap:0;padding-top:18px;margin-top:12px}
+.ticket-workspace .sidebar-metrics>div{text-align:center;border-right:1px solid var(--line)}
+.ticket-workspace .sidebar-metrics>div:last-child{border-right:0}
+.ticket-workspace .sidebar-metrics small{font-size:10px;margin-bottom:4px}
+.ticket-workspace .sidebar-metrics strong{font-size:21px;font-weight:550;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+.ticket-workspace input,.ticket-workspace select,.ticket-workspace textarea{border:1px solid transparent;border-radius:12px;background:var(--page);font-size:13px;padding:12px;color:var(--ink)}
+.ticket-workspace input:hover,.ticket-workspace select:hover,.ticket-workspace textarea:hover{border-color:var(--line)}
+.ticket-workspace label{font-size:12px;font-weight:550;color:var(--muted)}
+.ticket-workspace .ticket-conversation>form,.ticket-workspace .ticket-reply{background:var(--page);border-radius:16px;padding:14px;width:calc(50% - 8px)}
+.ticket-workspace .ticket-conversation>form{margin-right:10px}
+.ticket-workspace .ticket-conversation label{margin:0 0 12px}
+.ticket-workspace .ticket-reply h3{margin:0 0 10px;font-size:12px;font-weight:550;color:var(--muted)}
+.ticket-workspace .ticket-reply label{font-size:11px}
+.ticket-workspace .ticket-conversation textarea{background:var(--surface);min-height:110px;margin-top:8px}
+.ticket-workspace .ticket-conversation>form>button,.ticket-workspace .ticket-reply button{margin-bottom:0}
+.ticket-workspace .conversation-entry{padding:18px 2px;border-top:1px solid var(--line)}
+.ticket-workspace .conversation-entry:first-of-type{margin-top:22px}
+.ticket-workspace .conversation-entry small{font-size:11px}
+.ticket-workspace .conversation-entry p{line-height:1.6}
+.ticket-workspace .table{border:0;border-radius:14px;background:var(--page)}
+.ticket-workspace .table th{background:transparent;font-size:10px;color:var(--muted);font-weight:550;text-transform:none}
+.ticket-workspace .table td{font-size:12px}
+.ticket-workspace .table tr:last-child td{border-bottom:0}
+.ticket-workspace .ticket-tools>h2{font-size:16px;margin:8px 4px}
+.ticket-workspace .ticket-tools>.hint{font-size:12px;margin:0 4px 16px}
+.ticket-workspace .ticket-tool-grid{gap:12px}
+.ticket-workspace .ticket-tool>summary{list-style:none;position:relative;font-size:14px;font-weight:550;padding:18px 38px 18px 20px}
+.ticket-workspace .ticket-tool>summary::-webkit-details-marker{display:none}
+.ticket-workspace .ticket-tool>summary::after{content:'›';position:absolute;right:18px;top:20px;font-size:22px;line-height:1;color:var(--muted)}
+.ticket-workspace .ticket-tool[open]>summary::after{transform:rotate(90deg)}
+.ticket-workspace .ticket-tool>summary small{margin:5px 0 0;line-height:1.5;font-size:11px}
+.ticket-workspace .ticket-tool-content{padding:0 18px 18px}
+.ticket-workspace .ticket-tool-content section{background:var(--page);border:0;border-radius:14px}
+.ticket-workspace .ticket-tool-content .columns{gap:12px}
+.ticket-workspace .blocker{background:var(--warning);border-color:#bc964b}
+.ticket-workspace summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:12px}
+@media(max-width:850px){.ticket-workspace .ticket-detail-layout{grid-template-columns:1fr;gap:18px}}
+@media(max-width:560px){.ticket-workspace .ticket-detail-heading{padding:0;align-items:flex-start}.ticket-workspace .ticket-detail-heading h1{font-size:25px}.ticket-workspace .ticket-main>section{padding:18px}.ticket-workspace .ticket-conversation>form,.ticket-workspace .ticket-reply{width:100%;margin:0 0 12px}.ticket-workspace .ticket-tool>summary{padding-left:18px}.ticket-workspace .ticket-summary .row{gap:12px}}
