@@ -76,12 +76,79 @@ def normalize(resources):
     return result
 
 
+def endpoint_url(value):
+    """Accept a node IP or an explicit HTTPS endpoint; never accept credentials."""
+    import ipaddress
+    from urllib.parse import urlsplit
+    from .security import validate_url
+    value=value.strip()
+    if not value:
+        raise ValueError('Supply the primary Proxmox IP address or HTTPS URL.')
+    if '://' not in value:
+        try:
+            address=ipaddress.ip_address(value.strip('[]'))
+        except ValueError:
+            raise ValueError('Enter an IP address or a full HTTPS URL.')
+        value='https://'+('['+str(address)+']' if address.version==6 else str(address))+':8006'
+    value=validate_url(value.rstrip('/'),('https',))
+    parts=urlsplit(value)
+    if parts.path or parts.query:
+        raise ValueError('Use the Proxmox server address without an API path or query.')
+    return value
+
+
+def add_endpoints(store,vault,name,urls,cluster_id='',cluster_name='',token_id='',secret='',ca=None):
+    """Validate the whole set before saving; endpoints share their cluster credentials."""
+    urls=[endpoint_url(value) for value in urls if value.strip()]
+    if not urls or len(set(urls))!=len(urls):
+        raise ValueError('Supply at least one endpoint; each address must be unique.')
+    if not 1<=len(name)<=100 or (not cluster_id and not 1<=len(cluster_name)<=100):
+        raise ValueError('Supply a name and cluster name.')
+    with store.connect() as c:
+        c.execute('BEGIN IMMEDIATE')
+        for url in urls:
+            if c.execute('SELECT 1 FROM proxmox_connections WHERE url=?',(url,)).fetchone():
+                raise ValueError('An endpoint is already configured. No addresses were added.')
+        if cluster_id:
+            if not c.execute('SELECT 1 FROM proxmox_clusters WHERE id=?',(cluster_id,)).fetchone():
+                raise ValueError('Unknown cluster.')
+            shared=c.execute('SELECT * FROM proxmox_connections WHERE cluster_id=? ORDER BY id LIMIT 1',(cluster_id,)).fetchone()
+            if shared:
+                token_id,encrypted,ca=shared['token_id'],shared['token_secret'],shared['ca']
+            else:
+                if not token_id or not 1<=len(secret)<=2048: raise ValueError('Supply the cluster API token and secret.')
+                encrypted=vault.encrypt(secret)
+        else:
+            if not token_id or not 1<=len(secret)<=2048: raise ValueError('Supply the cluster API token and secret.')
+            encrypted=vault.encrypt(secret)
+            cluster_id=uid()
+            c.execute('INSERT INTO proxmox_clusters VALUES(?,?)',(cluster_id,cluster_name))
+        identifiers=[]
+        for index,url in enumerate(urls):
+            identifier=uid();identifiers.append(identifier)
+            c.execute('INSERT INTO proxmox_connections VALUES(?,?,?,?,?,?,?,NULL,NULL)',(identifier,cluster_id,name if index==0 else name+' · endpoint '+str(index+1),url,token_id,encrypted,ca))
+            store.audit(c,'proxmox.connection_created',identifier,{'cluster_id':cluster_id})
+        return identifiers
+
+
+def cluster_inventory(store,vault,connection):
+    """Fall back only for read-only discovery, preserving cluster identity."""
+    endpoints=[connection]+store.rows('SELECT * FROM proxmox_connections WHERE cluster_id=? AND id!=? ORDER BY id',(connection['cluster_id'],connection['id']))
+    last_error=None
+    for endpoint in endpoints:
+        try:
+            return normalize(Client(endpoint,vault).get('/cluster/resources')),endpoint['id']
+        except Exception as exc:
+            last_error=exc
+    raise last_error or ValueError('No cluster endpoints are available.')
+
+
 def discover(store, vault, connection_id, lease_token=None):
     rows = store.rows('SELECT * FROM proxmox_connections WHERE id=?',(connection_id,))
     if not rows:
         raise ValueError('Unknown connection')
     connection = rows[0]
-    objects = normalize(Client(connection,vault).get('/cluster/resources'))
+    objects,used_endpoint = cluster_inventory(store,vault,connection)
     now = time.time()
     with store.connect() as c:
         c.execute('BEGIN IMMEDIATE')
@@ -106,7 +173,7 @@ def discover(store, vault, connection_id, lease_token=None):
             record(c,obj['id'],'proxmox',now,item['metrics'])
         # Absence in a permission-filtered response is not proof of deletion. An
         # administrator explicitly retires old objects before reusing their IDs.
-        c.execute('UPDATE proxmox_connections SET last_discovery=? WHERE id=?',(now,connection_id))
+        c.execute('UPDATE proxmox_connections SET last_discovery=? WHERE id IN (?,?)',(now,connection_id,used_endpoint))
         refresh_parents(c,store,connection['cluster_id'])
         store.audit(c,'proxmox.discovered',connection_id,{'visible_resources':len(objects)})
     return len(objects)
@@ -235,3 +302,18 @@ def scheduled_refresh(store,vault,now=None):
         if changed.rowcount and error:
             store.audit(c,'proxmox.discovery_failed',connection_id,{'error_type':error},actor='monitor')
     return True
+
+
+def schedule_cluster(store, connection_id, interval):
+    """One refresh schedule for a cluster; every refresh can use its fallback nodes."""
+    if type(interval) is not int or (interval!=0 and not 60<=interval<=86400):
+        raise ValueError('Refresh interval must be zero (disabled) or 60–86400 seconds.')
+    with store.connect() as c:
+        c.execute('BEGIN IMMEDIATE')
+        row=c.execute('SELECT cluster_id FROM proxmox_connections WHERE id=?',(connection_id,)).fetchone()
+        if not row: raise ValueError('Unknown connection.')
+        endpoints=c.execute('SELECT id FROM proxmox_connections WHERE cluster_id=?',(row['cluster_id'],)).fetchall()
+        for endpoint in endpoints:
+            value=interval if endpoint['id']==connection_id else 0
+            c.execute('INSERT INTO discovery_schedules(connection_id,interval,next_run) VALUES(?,?,?) ON CONFLICT(connection_id) DO UPDATE SET interval=excluded.interval,next_run=excluded.next_run,lease_token=NULL,lease_until=NULL',(endpoint['id'],value,time.time()))
+        store.audit(c,'proxmox.cluster_schedule_changed',row['cluster_id'],{'interval':interval})

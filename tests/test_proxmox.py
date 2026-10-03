@@ -123,3 +123,39 @@ def test_migration_to_unlinked_node_clears_old_parent(environment):
     with patch.object(Client,'get',return_value=inventory('b')):
         discover(store,vault,'p2')
     assert store.rows('SELECT parent_id FROM machines WHERE id=?',(mid,))[0]['parent_id'] is None
+
+
+def test_multiple_endpoints_shared_credentials_and_atomic_validation(signed_in):
+    client,store,vault,csrf=signed_in
+    data={'csrf':csrf,'operation':'connection','name':'Lab','url':'192.0.2.10','additional_url':['192.0.2.11','', '2001:db8::1'],'cluster_name':'Lab','token_id':'monitor@pve!monitor','token_secret':'fixture-secret'}
+    assert client.post('/proxmox',data=data).status_code==302
+    rows=store.rows('SELECT * FROM proxmox_connections ORDER BY name')
+    assert len(rows)==3 and len({r['cluster_id'] for r in rows})==1
+    assert {r['url'] for r in rows}=={'https://192.0.2.10:8006','https://192.0.2.11:8006','https://[2001:db8::1]:8006'}
+    assert all(vault.decrypt(r['token_secret'])=='fixture-secret' for r in rows)
+    assert b'fixture-secret' not in client.get('/proxmox').data
+    # Additional endpoints use saved cluster settings, not new credentials.
+    assert client.post('/proxmox',data={'csrf':csrf,'operation':'endpoints','connection_id':rows[0]['id'],'additional_url':['192.0.2.12']}).status_code==302
+    assert len(store.rows('SELECT * FROM proxmox_connections'))==4
+    assert client.post('/proxmox',data={'csrf':csrf,'operation':'endpoints','connection_id':rows[0]['id'],'additional_url':['192.0.2.13','192.0.2.10']}).status_code==400
+    assert len(store.rows('SELECT * FROM proxmox_connections'))==4
+    assert client.post('/proxmox',data={'csrf':csrf,'operation':'credentials','connection_id':rows[0]['id'],'token_id':'admin@pve!ops','token_secret':'replacement'}).status_code==302
+    assert all(r['token_id']=='admin@pve!ops' and vault.decrypt(r['token_secret'])=='replacement' for r in store.rows('SELECT * FROM proxmox_connections'))
+    assert client.post('/proxmox',data={'csrf':csrf,'operation':'schedule','connection_id':rows[0]['id'],'interval':'120'}).status_code==302
+    schedules=store.rows('SELECT * FROM discovery_schedules')
+    assert len(schedules)==4 and sum(r['interval']>0 for r in schedules)==1
+    page=client.get('/proxmox').get_data(as_text=True)
+    assert 'Add IP' in page and page.count('Cluster credentials / restore imported connection')==1
+    for invalid in ('http://192.0.2.20','https://user:secret@192.0.2.20','https://192.0.2.20/api2/json','https://192.0.2.20#fragment'):
+        assert client.post('/proxmox',data=dict(data,url=invalid,additional_url=[])).status_code==400
+    assert len(store.rows('SELECT * FROM proxmox_clusters'))==1
+
+
+def test_discovery_uses_another_cluster_endpoint(environment):
+    _,store,vault=environment
+    setup(store,vault)
+    with patch.object(Client,'get',side_effect=[OSError('node down'),inventory()]) as call:
+        assert discover(store,vault,'p1')==len(inventory())
+        assert call.call_count==2
+    assert len(store.rows('SELECT * FROM proxmox_objects'))==len(inventory())
+    assert all(r['last_discovery'] for r in store.rows('SELECT * FROM proxmox_connections'))

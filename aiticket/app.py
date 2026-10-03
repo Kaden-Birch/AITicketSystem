@@ -1104,7 +1104,7 @@ def create_app(data_dir=None, testing=False):
     @app.route('/proxmox', methods=['GET','POST'])
     @login_required
     def proxmox_inventory():
-        from .proxmox import Client, discover, link, unlink, schedule
+        from .proxmox import Client, discover, link, unlink, schedule, add_endpoints, schedule_cluster
         if request.method == 'POST':
             f=request.form
             operation=f.get('operation')
@@ -1112,27 +1112,16 @@ def create_app(data_dir=None, testing=False):
                 name=f.get('name','').strip()
                 cluster=f.get('cluster_id','')
                 cluster_name=f.get('cluster_name','').strip()
-                url=validate_url(f.get('url','').rstrip('/'),('https',))
-                token_id=f.get('token_id','').strip()
-                secret=f.get('token_secret','')
-                if not 1<=len(name)<=100 or not token_id or not secret or (not cluster and not 1<=len(cluster_name)<=100):
-                    raise ValueError('Supply a connection name, cluster namespace and read-only credentials.')
+                urls=[f.get('url','')]+f.getlist('additional_url')
+                if not f.get('url','').strip(): raise ValueError('Supply the primary endpoint.')
                 ca=f.get('ca','').strip() or None
                 if ca and (not Path(ca).is_absolute() or not Path(ca).is_file()):
                     raise ValueError('CA must be an existing absolute path on the application server.')
-                with store.connect() as c:
-                    c.execute('BEGIN IMMEDIATE')
-                    if c.execute('SELECT 1 FROM proxmox_connections WHERE url=?',(url,)).fetchone():
-                        raise ValueError('Endpoint is already configured.')
-                    if cluster:
-                        if not c.execute('SELECT 1 FROM proxmox_clusters WHERE id=?',(cluster,)).fetchone():
-                            raise ValueError('Unknown cluster namespace.')
-                    else:
-                        cluster=uid()
-                        c.execute('INSERT INTO proxmox_clusters VALUES(?,?)',(cluster,cluster_name))
-                    connection_id=uid()
-                    c.execute('INSERT INTO proxmox_connections VALUES(?,?,?,?,?,?,?,NULL,NULL)',(connection_id,cluster,name,url,token_id,vault.encrypt(secret),ca))
-                    store.audit(c,'proxmox.connection_created',connection_id,{'cluster_id':cluster})
+                add_endpoints(store,vault,name,urls,cluster,cluster_name,f.get('token_id','').strip(),f.get('token_secret',''),ca)
+            elif operation=='endpoints':
+                rows=store.rows('SELECT * FROM proxmox_connections WHERE id=?',(f.get('connection_id'),))
+                if not rows: abort(404)
+                add_endpoints(store,vault,rows[0]['name'],f.getlist('additional_url'),rows[0]['cluster_id'])
             elif operation=='credentials':
                 identifier=f.get('connection_id')
                 secret=f.get('token_secret','')
@@ -1140,11 +1129,11 @@ def create_app(data_dir=None, testing=False):
                 if not 1<=len(secret)<=2048 or (ca and (not Path(ca).is_absolute() or not Path(ca).is_file())):
                     raise ValueError('Supply a read-only secret and an optional existing absolute CA path.')
                 with store.connect() as c:
-                    changed=c.execute('UPDATE proxmox_connections SET token_secret=?,ca=?,last_test=NULL WHERE id=?',(vault.encrypt(secret),ca,identifier))
+                    changed=c.execute('UPDATE proxmox_connections SET token_id=coalesce(?,token_id),token_secret=?,ca=?,last_test=NULL WHERE cluster_id=(SELECT cluster_id FROM proxmox_connections WHERE id=?)',(f.get('token_id','').strip() or None,vault.encrypt(secret),ca,identifier))
                     if not changed.rowcount: abort(404)
                     store.audit(c,'proxmox.credentials_replaced',identifier)
             elif operation=='schedule':
-                schedule(store,f.get('connection_id'),int(f.get('interval','0')))
+                schedule_cluster(store,f.get('connection_id'),int(f.get('interval','0')))
             elif operation in ('test','discover'):
                 connection_id=f.get('connection_id')
                 rows=store.rows('SELECT * FROM proxmox_connections WHERE id=?',(connection_id,))
@@ -1152,6 +1141,13 @@ def create_app(data_dir=None, testing=False):
                     abort(404)
                 if operation=='test':
                     results=Client(rows[0],vault).test()
+                    if results.get('authentication')!='accepted':
+                        for alternate in store.rows('SELECT * FROM proxmox_connections WHERE cluster_id=? AND id!=? ORDER BY id',(rows[0]['cluster_id'],connection_id)):
+                            candidate=Client(alternate,vault).test()
+                            if candidate.get('authentication')=='accepted':
+                                results=candidate
+                                results['endpoint_used']=alternate['url']
+                                break
                     with store.connect() as c:
                         c.execute('UPDATE proxmox_connections SET last_test=? WHERE id=?',(json.dumps(results),connection_id))
                         store.audit(c,'proxmox.connection_tested',connection_id)
@@ -1178,10 +1174,15 @@ def create_app(data_dir=None, testing=False):
             else:
                 raise ValueError('Unknown inventory operation.')
             return redirect(url_for('proxmox_inventory'))
-        connections=store.rows('SELECT p.id,p.cluster_id,p.name,p.url,p.ca,p.last_test,p.last_discovery,s.interval,s.next_run,s.last_error FROM proxmox_connections p LEFT JOIN discovery_schedules s ON s.connection_id=p.id ORDER BY p.name')
+        connections=store.rows('SELECT p.id,p.cluster_id,p.name,p.url,p.token_id,p.ca,p.last_test,p.last_discovery,s.interval,s.next_run,s.last_error FROM proxmox_connections p LEFT JOIN discovery_schedules s ON s.connection_id=p.id ORDER BY p.name')
+        grouped={}
+        for connection in connections:
+            grouped.setdefault(connection['cluster_id'],[]).append(connection)
+        for items in grouped.values():
+            items.sort(key=lambda item: (not bool(item['interval']),item['name']))
         for connection in connections:
             connection['test']=json.loads(connection['last_test']) if connection['last_test'] else None
-        return render_template('proxmox.html',connections=connections,
+        return render_template('proxmox.html',connections=[dict(items[0],endpoints=items) for items in grouped.values()],
             clusters=store.rows('SELECT * FROM proxmox_clusters ORDER BY name'),
             objects=store.rows('SELECT o.*,m.name AS machine FROM proxmox_objects o LEFT JOIN machines m ON m.id=o.machine_id ORDER BY o.cluster_id,o.kind,o.object_key,o.generation'),
             machines=store.rows('SELECT * FROM machines ORDER BY name'))

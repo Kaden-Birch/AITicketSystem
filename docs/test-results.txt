@@ -1,4 +1,4 @@
-387 passed in 35.98s
+389 passed in 36.14s
 
 HTTP opt-in tests cover cookie configuration, URL restrictions, persisted agent enrollment, nonredirecting credential delivery, continued HTTPS verification and isolated Hermes configuration.
 Local Python 3.14.6; temporary databases, fake Hermes adapters and mocked external providers/subprocesses.
@@ -73,3 +73,5 @@ Installer permission postflight: effective root service configuration, running U
 Agent health preferences: disabled-by-default fleet settings, future-agent inheritance, host overrides/delete/disable, global per-metric pause, stable check identities and lease fencing, legacy rule migration, percentage and decimal GB/MB/TB input, hysteresis/missing/stale metrics, disabled-rule automatic AI/notification suppression, reviewed inventory import, CSRF and readable slider forms verified. Light/dark and mobile layouts, typed TB conversion and automatic recovery adjustment visually checked with local fixtures. No live infrastructure/AI/notification action performed.
 
 Individual ticket refresh: all 16 existing submission routes retained; fixture tests cover focused tool sections, acknowledgement, handling-mode IDs and direct AI cancellation. Browser checks cover light/dark desktop and 390px mobile, expanded tools, and unsent draft/disclosure/mode preservation through live refresh. No production actions were submitted.
+
+Multi-endpoint Proxmox: tests cover atomic endpoint creation, IPv4/IPv6 normalization, duplicate/invalid URL rejection, shared credential replacement, single cluster scheduling, existing linked monitoring fallback and discovery fallback with the first endpoint unavailable. Fixture browser checks cover adding optional addresses, persisted cluster grouping and live-update preservation. No live Proxmox request was sent.
