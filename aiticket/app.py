@@ -902,11 +902,13 @@ def create_app(data_dir=None, testing=False):
     @app.get('/audit')
     @login_required
     def audit_log():
-        page = int(request.args.get('page', 1))
-        if not 1 <= page <= 100000:
-            raise ValueError('Invalid page.')
-        rows = store.rows('SELECT * FROM audit ORDER BY at DESC,id LIMIT 51 OFFSET ?', ((page-1)*50,))
-        return render_template('audit.html', entries=rows[:50], page=page, more=len(rows)>50)
+        from .audit_view import listing
+        page=int(request.args.get('page',1));view=request.args.get('view','highlights');period=request.args.get('period','week');query=request.args.get('q','').strip()
+        entries,more,total=listing(store,view,period,query,page)
+        links={'view':view,'period':period,'q':query}
+        return render_template('audit.html',entries=entries,page=page,more=more,total=total,view=view,period=period,query=query,
+                               previous=url_for('audit_log',**links,page=page-1) if page>1 else None,
+                               following=url_for('audit_log',**links,page=page+1) if more else None)
 
     @app.get('/queue')
     @login_required
@@ -1304,6 +1306,8 @@ def create_app(data_dir=None, testing=False):
     @login_required
     def maintenance_policies():
         from .policies import add_window,DEFAULTS,active,override,group_create,group_assign,effective
+        view=request.args.get('view','maintenance')
+        if view not in ('maintenance','defaults','groups','effective'):raise ValueError('Invalid policy section.')
         if request.method=='POST':
             f=request.form
             if f.get('operation')=='window':
@@ -1325,7 +1329,9 @@ def create_app(data_dir=None, testing=False):
                 values=None
                 if f['operation']=='override':
                     values={'enabled':f.get('enabled')=='yes','minimum':f.get('minimum','medium'),'recovery':f.get('recovery')=='yes','reminder_seconds':int(f.get('reminder_seconds','0')),'escalate_after_seconds':int(f.get('escalate_after_seconds','0')),'escalate_to':f.get('escalate_to','high')}
-                override(store,f.get('scope_kind'),f.get('scope_id'),values)
+                scope_kind,scope_id=f.get('scope_kind'),f.get('scope_id')
+                if f.get('scope_target'):scope_kind,scope_id=f['scope_target'].split(':',1)
+                override(store,scope_kind,scope_id,values)
             elif f.get('operation')=='notifications':
                 reminder=int(f.get('reminder_seconds',0))
                 delay=int(f.get('escalate_after_seconds',0))
@@ -1335,13 +1341,13 @@ def create_app(data_dir=None, testing=False):
                 store.save_many({'notification_policy':{'reminder_seconds':reminder,'escalate_after_seconds':delay,'escalate_to':severity}},actor='user')
             else:
                 raise ValueError('Unknown policy operation.')
-            return redirect(url_for('maintenance_policies'))
+            return redirect(url_for('maintenance_policies',view=view))
         windows=store.rows('SELECT w.*,m.name AS machine FROM maintenance_windows w LEFT JOIN machines m ON m.id=w.machine_id ORDER BY w.name')
         for window in windows:
             window['active_now']=active(window,time.time())
         with store.connect() as c:
             effective_policies=[{**dict(m),'policy':effective(c,m['id'])} for m in c.execute('SELECT * FROM machines ORDER BY name').fetchall()]
-        return render_template('policies.html',groups=store.rows('SELECT * FROM notification_groups ORDER BY name'),overrides=[{**r,'data':json.loads(r['policy'])} for r in store.rows('SELECT * FROM notification_overrides')],effective_policies=effective_policies,windows=windows,machines=store.rows('SELECT * FROM machines ORDER BY name'),policy=store.setting('notification_policy',DEFAULTS))
+        return render_template('policies.html',view=view,groups=store.rows('SELECT * FROM notification_groups ORDER BY name'),overrides=[{**r,'data':json.loads(r['policy'])} for r in store.rows('SELECT * FROM notification_overrides')],effective_policies=effective_policies,windows=windows,machines=store.rows('SELECT * FROM machines ORDER BY name'),policy=store.setting('notification_policy',DEFAULTS))
 
     @app.post('/incidents/<incident_id>/silence')
     @login_required

@@ -1,4 +1,4 @@
-412 passed in 40.73s
+414 passed in 41.88s
 
 HTTP opt-in tests cover cookie configuration, URL restrictions, persisted agent enrollment, nonredirecting credential delivery, continued HTTPS verification and isolated Hermes configuration.
 Local Python 3.14.6; temporary databases, fake Hermes adapters and mocked external providers/subprocesses.
@@ -89,3 +89,5 @@ Fleet host groups: dynamic Linux/Windows enrollment, linked Proxmox node/guest m
 Network topology: validated/backward-compatible agent inventory, optional partial interface/LLDP collection, exact identifiers versus MAC-path candidates, ambiguous shared MAC rejection, overlapping multi-console uplinks, confirmed-link MAC changes, retained state transitions, deleted/stale device handling, guest/physical-node inheritance, credential-free Proxmox interface configuration fallback, ticket-bound read-only refresh, cancellation fencing, CSRF and scoped link removal verified. Browser fixture checks cover link confirmation, host tags in light/dark appearance and 390px mobile without horizontal overflow. No production network/host/model/Discord request made.
 
 Delivery queue redesign: readable notification types and ticket links, status filters/counts, 50-message pagination, scoped retry controls with unchanged CSRF/state enforcement. Dark/light desktop and 390-pixel mobile layouts reviewed with fixture data; filters and expanded delivery details verified. No live Discord messages sent.
+
+Audit/policies redesign: seven-day Highlights hides routine successful automated events and Proxmox discovery while preserving full audit history; 25-event pages retain category/time/search filters. Tests verify literal search escaping, pagination, failure visibility, unchanged records, policy scope/inheritance, legacy forms and invalid sections. Focused audit checks pass after presentation refinements. Light/dark desktop and 390-pixel mobile layouts reviewed; weekly schedule fields and audit filters verified in a fixture preview.

@@ -55,3 +55,9 @@ Schema 23 adds durable server-owned work sessions, explicit ticket handling mode
 Schema 24 records immutable per-command approval requirements. Unified host settings apply read-only, guarded and full access consistently to shell and general Proxmox requests. Recognized diagnostics bypass approval in read-only/guarded modes; full access bypasses classification and per-command approval. Successful AI completion can release ownership without revoking already preapproved work; explicit cancellation/takeover still fences it.
 
 Host performance history uses schema 25: source-separated agent/machine and Proxmox/object metric samples, indexed by timestamp and retained for seven days. Host charts use at most 120 time buckets per metric with explicit gaps and interval averages; raw extrema are shown separately. History starts with post-upgrade telemetry; previous snapshots are not fabricated into history.
+
+### Audit and policy presentation
+
+Audit defaults to seven-day Highlights with 25 events per page. Routine successful automated activity, including Proxmox discovery and UniFi telemetry collection, remains in All activity. Filters do not change storage or retention. Security events, failures and administrative changes stay visible; explicit event details retain technical references. Category, time range and literal reference/action/actor search persist in pagination.
+
+Policies separates maintenance, notification defaults, groups/overrides and effective host preferences. Maintenance forms show only the selected schedule fields. Notification overrides retain host-over-group-over-default precedence; Use inherited settings removes the override. No monitoring, authorization, notification delivery or stored schedule semantics change.

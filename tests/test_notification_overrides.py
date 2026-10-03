@@ -68,4 +68,4 @@ def test_group_and_override_ui(signed_in):
     assert client.post('/policies',data={'csrf':csrf,'operation':'membership','machine_id':'m','group_id':group}).status_code==302
     data={'csrf':csrf,'operation':'override','scope_kind':'group','scope_id':group,'enabled':'yes','recovery':'yes','minimum':'high','escalate_to':'critical','reminder_seconds':'600','escalate_after_seconds':'3600'}
     assert client.post('/policies',data=data).status_code==302
-    assert b'Effective policy per machine' in client.get('/policies').data
+    assert b'Effective host policies' in client.get('/policies?view=effective').data
