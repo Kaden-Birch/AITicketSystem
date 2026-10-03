@@ -1,5 +1,7 @@
 # Host network topology
 
+Host tags sit to the right of the health indicator. Identity tags show Virtual machine or Physical machine when known; unknown types show no identity tag. Container details remain available to AI troubleshooting.
+
 Host pages show compact, colored tags for physical machines, virtual machines, containers, their Proxmox host, and confirmed/discovered switch ports. Unknown machine types remain unknown. An unlinked machine is not assumed to be physical. A VM inherits its linked Proxmox node's known uplinks rather than being described as physically plugged into a switch.
 
 ## Enable collection
