@@ -129,97 +129,17 @@ The application currently records the reverse proxy's observed connection addres
 
 ## B. Agent on the monitored Linux host
 
-### 1. Install Python and obtain matching agent files
+Create an enrollment token in Hosts & checks, then run the one-command installer on the monitored Ubuntu/Debian host:
 
-```sh
-sudo apt update
-sudo apt install -y python3 ca-certificates git
-python3 --version
-git clone https://github.com/Kaden-Birch/AITicketSystem.git aiticket-agent-source
-cd aiticket-agent-source
+```bash
+curl -fsSL https://raw.githubusercontent.com/Kaden-Birch/AITicketSystem/main/agent/install.sh -o /tmp/aiticket-agent-install.sh && sudo bash /tmp/aiticket-agent-install.sh --server https://YOUR_APPLICATION_IP --ca /absolute/path/to/trusted-ca.pem
 ```
 
-Python 3.11 or newer is required. Check out the same recorded commit as the application (`git checkout COMMIT_ID`, replacing `COMMIT_ID`), then verify:
+Use your actual endpoint and CA file already copied onto this host. Omit `--ca` when the certificate is trusted by the system. For HTTP, use an `http://` endpoint; the installer saves HTTP opt-in automatically.
 
-```sh
-sha256sum -c SHA256SUMS
-```
+Enter the token at the hidden prompt. Installation, local root command access, enrollment, service enablement and restart are automatic. Upgrades preserve enrollment without a new token. The main application's Host settings control read-only, approval-required or Full access permissions.
 
-The agent uses Python's standard library; no pip installation or Hermes installation is required. Alternatively, securely copy the matching `agent/` directory from the reviewed application release and verify its hashes against that release's checksum file.
-
-### 2. Install the service files
-
-These commands are for a first installation. If the account already exists, keep it and skip `useradd`.
-
-```sh
-sudo useradd --system --home /var/lib/aiticket-agent --shell /usr/sbin/nologin aiticket-agent
-sudo install -d -m 0755 /opt/aiticket-agent
-sudo install -m 0644 agent/agent.py /opt/aiticket-agent/agent.py
-sudo install -m 0644 agent/diagnostics.py /opt/aiticket-agent/diagnostics.py
-sudo install -m 0644 agent/monitoring.py /opt/aiticket-agent/monitoring.py
-sudo install -m 0644 agent/actions.py /opt/aiticket-agent/actions.py
-sudo install -m 0644 agent/commands.py /opt/aiticket-agent/commands.py
-sudo install -d -o aiticket-agent -g aiticket-agent -m 0700 /var/lib/aiticket-agent
-sudo install -m 0644 agent/aiticket-agent.service /etc/systemd/system/aiticket-agent.service
-sudo install -d -m 0755 /etc/aiticket-agent
-sudo install -m 0644 /path/to/issuing-ca.pem /etc/aiticket-agent/ca.pem
-```
-
-Replace the last source path with the securely delivered public CA certificate/chain. It must be readable by `aiticket-agent`. No server private key belongs here.
-
-Confirm HTTPS works as the service account before enrolling:
-
-```sh
-sudo -u aiticket-agent python3 -c "import ssl,urllib.request; print(urllib.request.urlopen('https://192.0.2.10/health',context=ssl.create_default_context(cafile='/etc/aiticket-agent/ca.pem'),timeout=10).read().decode())"
-```
-
-### 3. Enroll the agent
-
-In the application's **Hosts & checks**, select **Create agent enrollment token** for the exact machine you created. The token is single-use and expires in ten minutes.
-
-On the monitored host:
-
-```sh
-sudo -u aiticket-agent python3 /opt/aiticket-agent/agent.py enroll --server https://192.0.2.10 --ca /etc/aiticket-agent/ca.pem
-```
-
-Paste the token into the hidden prompt. Do not put it in command arguments or shell history. If the CA is already trusted system-wide, omit `--ca` instead of creating a custom file.
-
-Enrollment stores the application endpoint, CA path, stable identity and credential in `/var/lib/aiticket-agent/identity.json`, with mode 0600. Leave this file intact across restarts, upgrades and DHCP changes.
-
-```sh
-sudo systemctl daemon-reload
-sudo systemctl enable --now aiticket-agent
-sudo systemctl status aiticket-agent --no-pager
-sudo journalctl -u aiticket-agent -n 50 --no-pager
-```
-
-Allow about 30–60 seconds for the agent to report and its last address to update in Hosts & checks. The application stores its telemetry; configured resource checks use those samples. The heartbeat check uses failure/recovery thresholds, so its health may take additional samples to settle. The first CPU sample establishes a baseline; CPU utilization appears on a subsequent sample.
-
-### 4. Optional read-only service diagnostics
-
-To allow status checks for an application service, create a local root-managed policy:
-
-```sh
-sudo nano /etc/aiticket-agent/policy.json
-```
-
-Example; replace `nginx.service` with the actual unit on this host:
-
-```json
-{
-  "services": {"web": "nginx.service"},
-  "logs": false,
-  "recovery": {"enabled": false, "validated": false, "services": []}
-}
-```
-
-```sh
-sudo chown root:root /etc/aiticket-agent/policy.json
-sudo chmod 0644 /etc/aiticket-agent/policy.json
-```
-
-The policy reloads each heartbeat. `web` is the alias shown in the application's diagnostic controls. Process summaries and allowlisted service status are read-only. Logs require explicit local opt-in and existing journal permissions. Initial monitoring does not need a separate action credential or OS service-control privileges. Leave recovery disabled; see [the agent guide](agent.md) and [approval broker guide](action-broker.md) for the separate validated opt-in workflow.
+See [the agent guide](agent.md) for verification and credential rotation. No manual account creation or agent-file copying is required.
 
 ## C. Verify and troubleshoot
 
@@ -256,6 +176,6 @@ sudo docker compose up -d
 
 Startup applies transactional database migrations. If an upgrade fails, older code may reject a newer database: rollback requires the corresponding pre-upgrade database and key, not just a Git checkout. Keep the same Compose directory/project name so existing named volumes remain attached. Do not initialize again or delete volumes.
 
-For an agent upgrade, stop its service, replace all three matching Python files and the service unit using the installation commands, then run `sudo systemctl daemon-reload` and `sudo systemctl start aiticket-agent`. Keep its identity file and execution ledgers. No reenrollment is needed for a normal upgrade.
+For an agent upgrade, rerun the installer in section B. It replaces all modules and restarts the service while preserving identity and execution ledgers; no reenrollment is needed.
 
 For metric host workspaces, Proxmox guest status, optional manual power controls and the matching agent upgrade, see [the host dashboard guide](host-dashboard.md).

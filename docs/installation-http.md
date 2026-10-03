@@ -1,26 +1,5 @@
 # Install using HTTP: application VM and monitored hosts
 
-## Recommended one-command installation or upgrade
-
-Run on the monitored Ubuntu/Debian host (curl must be available):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Kaden-Birch/AITicketSystem/main/agent/install.sh -o /tmp/aiticket-agent-install.sh && sudo bash /tmp/aiticket-agent-install.sh --server http://10.128.2.203:8080
-```
-
-For a new host, create an enrollment token in the main application first, then enter it at the installer's hidden prompt. The installer downloads and verifies the agent bundle, installs all modules, enables local shell execution, enrolls and restarts the service automatically. Upgrades preserve enrollment and execution history and do not require another token. HTTPS servers can add `--ca /absolute/path/to/ca.pem`. Run without `--server` to be prompted for the application URL on a fresh installation.
-
-Every installation runs as root with local command execution enabled and access to the system Docker daemon when installed. The application host access mode controls which remote commands are admitted; choosing Full access requires no additional local policy edits. Existing unrelated custom systemd restrictions may still limit execution. The installer adds a full-access drop-in to override the old standard restrictions. It does not install Docker or alter the main application's permissions. Local limits allow up to one hour and 65536 bytes; application limits still apply. Read-only and approval modes are configured in Host settings on the main application.
-
-The manual instructions below are retained for reference; the installer is the supported setup path.
-
-
-This is the explicit HTTP option for your setup. No certificate, local Nginx or reverse proxy is required. Your existing reverse proxy can still provide optional HTTPS browser access to the same HTTP backend.
-
-HTTP sends administrator passwords, agent tokens, diagnostics and integration credentials without transport encryption. On a WAN, they can be intercepted or altered. Login, CSRF checks, agent credentials, action approval, signatures and encrypted storage remain enabled, but do not provide transport confidentiality. This mode is opt-in; HTTPS remains the default.
-
-Replace `192.0.2.10` below with the main VM's static IP. Agent host IPs are never configured.
-
 ## 1. Main Ubuntu 24.04 VM
 
 Install Git and Docker Engine with the Compose plugin. Use [Docker's official Ubuntu apt-repository installation](https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository) if Docker is not already installed.
@@ -68,49 +47,15 @@ Add the machine under **Hosts & checks**. Leave AI and recovery disabled for ini
 
 ## 2. Monitored Ubuntu/Debian Linux host
 
-The agent monitors the Linux OS where it is installed. Install inside a guest to monitor that guest.
+Create an enrollment token for the host in the main application's Hosts & checks page. On the monitored host, run:
 
-```sh
-sudo apt update
-sudo apt install -y python3 git
-python3 --version
-git clone https://github.com/Kaden-Birch/AITicketSystem.git aiticket-agent-source
-cd aiticket-agent-source
-sha256sum -c SHA256SUMS
+```bash
+curl -fsSL https://raw.githubusercontent.com/Kaden-Birch/AITicketSystem/main/agent/install.sh -o /tmp/aiticket-agent-install.sh && sudo bash /tmp/aiticket-agent-install.sh --server http://10.128.2.203:8080
 ```
 
-Python 3.11+ is required; no pip dependencies are needed. Use matching application/agent releases, or securely copy their reviewed files. Create the account once; skip `useradd` if it already exists:
+Replace the server IP if needed. Enter the token at the hidden prompt. The installer installs all files, enables local root command execution, enrolls and restarts automatically. Existing installations retain enrollment and require no new token. Configure Read only, Ask permission or Full access in the main application's Host settings; no separate local shell policy edit is needed. Allow one reporting interval for the host to update.
 
-```sh
-sudo useradd --system --home /var/lib/aiticket-agent --shell /usr/sbin/nologin aiticket-agent
-sudo install -d -m 0755 /opt/aiticket-agent
-sudo install -m 0644 agent/agent.py /opt/aiticket-agent/agent.py
-sudo install -m 0644 agent/diagnostics.py /opt/aiticket-agent/diagnostics.py
-sudo install -m 0644 agent/monitoring.py /opt/aiticket-agent/monitoring.py
-sudo install -m 0644 agent/actions.py /opt/aiticket-agent/actions.py
-sudo install -m 0644 agent/commands.py /opt/aiticket-agent/commands.py
-sudo install -d -o aiticket-agent -g aiticket-agent -m 0700 /var/lib/aiticket-agent
-sudo install -m 0644 agent/aiticket-agent.service /etc/systemd/system/aiticket-agent.service
-```
-
-In **Hosts & checks**, generate an enrollment token for the exact machine. Within ten minutes, run on the monitored host:
-
-```sh
-sudo -u aiticket-agent python3 /opt/aiticket-agent/agent.py enroll --server http://192.0.2.10:8080 --allow-http
-```
-
-Paste the token at the hidden prompt. No CA file is needed. `--allow-http` is saved with the endpoint in the mode-0600 identity file, so the installed systemd service can use HTTP on subsequent starts without extra flags.
-
-```sh
-sudo systemctl daemon-reload
-sudo systemctl enable --now aiticket-agent
-sudo systemctl status aiticket-agent --no-pager
-sudo journalctl -u aiticket-agent -n 50 --no-pager
-```
-
-Allow about 30–60 seconds for the agent to report. Monitoring thresholds may need additional samples. Add resource threshold checks through **Resources**. DHCP changes need no configuration update; keep the identity file across restarts and upgrades.
-
-Optional read-only service policy and credential rotation are described in [the agent guide](agent.md). Recovery remains a separate disabled-by-default capability with explicit approval.
+See [the agent guide](agent.md) for verification, upgrades and credential rotation. No manual `useradd`, file-copy or service-start steps are required.
 
 ## 3. Existing HTTPS agent installations
 
@@ -129,7 +74,7 @@ sudo chmod 0600 /var/lib/aiticket-agent/identity.json
 sudo systemctl start aiticket-agent
 ```
 
-Update all three agent Python files to this release first. No reenrollment is needed just to change transport.
+Run the agent installer above to update all agent files first. No reenrollment is needed just to change transport.
 
 ## 4. Optional existing reverse proxy and Hermes
 
