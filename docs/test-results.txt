@@ -1,4 +1,4 @@
-378 passed in 33.96s
+386 passed in 35.52s
 
 HTTP opt-in tests cover cookie configuration, URL restrictions, persisted agent enrollment, nonredirecting credential delivery, continued HTTPS verification and isolated Hermes configuration.
 Local Python 3.14.6; temporary databases, fake Hermes adapters and mocked external providers/subprocesses.
@@ -69,3 +69,5 @@ Agent installer: shell syntax checked and complete agent checksum validation/tam
 Overview UI milestone: fleet metric averaging/source isolation, ticket filters and intervention/resolution statistics, authenticated global search, intentional-offline reachability suppression/resolution, CSRF protection, mixed-source preservation and fresh stopped-guest heartbeat suppression verified. Dashboard, Hosts, Tickets, drawer navigation, search shortcut and responsive layouts visually checked with local fixtures. No live infrastructure changes or notifications sent.
 
 Installer permission postflight: effective root service configuration, running UID/GID, required account/file capabilities, local policy, process command and restart fencing verified. Fixtures reject nonroot processes, conflicting drop-ins, disabled policy and wrong service commands. Source checksum and shell syntax validation passed. No privileged live installation performed.
+
+Agent health preferences: disabled-by-default fleet settings, future-agent inheritance, host overrides/delete/disable, global per-metric pause, stable check identities and lease fencing, legacy rule migration, percentage and decimal GB/MB/TB input, hysteresis/missing/stale metrics, disabled-rule automatic AI/notification suppression, reviewed inventory import, CSRF and readable slider forms verified. Light/dark and mobile layouts, typed TB conversion and automatic recovery adjustment visually checked with local fixtures. No live infrastructure/AI/notification action performed.

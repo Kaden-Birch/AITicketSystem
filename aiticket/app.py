@@ -267,7 +267,9 @@ def create_app(data_dir=None, testing=False):
             flash('Host access saved: '+{'readonly':'Read only commands','guarded':'Ask before potentially dangerous commands','immediate':'Full access — commands run without per-command approval'}[mode]+'.')
             return redirect(url_for('host_settings',machine_id=machine_id))
         with store.connect() as c: access=access_context(c,machine_id)
-        data.update(command_policy=old,access=access,access_mode=old['approval'] if old and old['enabled'] else 'readonly')
+        from .health_rules import cards,sync
+        sync(store)
+        data.update(health_cards=cards(store,machine_id),health_scope=machine_id,health_action='/hosts/'+machine_id+'/health',command_policy=old,access=access,access_mode=old['approval'] if old and old['enabled'] else 'readonly')
         return render_template('host-settings.html',**data)
 
     @app.post('/hosts/<machine_id>/command-policy')
@@ -1205,23 +1207,21 @@ def create_app(data_dir=None, testing=False):
     @app.route('/resources',methods=['GET','POST'])
     @login_required
     def resource_rules():
-        from .diagnostics import METRICS
+        from .health_rules import cards,save,sync
         if request.method=='POST':
-            f=request.form
-            agents=store.rows('SELECT * FROM agents WHERE id=? AND revoked=0',(f.get('agent_id'),))
-            if not agents or f.get('metric') not in METRICS:
-                raise ValueError('Choose an enrolled agent and supported resource metric.')
-            fail,recover=float(f.get('fail_above',90)),float(f.get('recover_below',80))
-            duration=int(f.get('sustain_seconds',120))
-            if not 0<=recover<fail<=100 or not 30<=duration<=86400:
-                raise ValueError('Thresholds must satisfy 0 ≤ recovery < failure ≤ 100; duration 30–86400 seconds.')
-            config={'agent_id':agents[0]['id'],'metric':f['metric'],'fail_above':fail,'recover_below':recover,'sustain_seconds':duration}
-            with store.connect() as c:
-                check_id=uid()
-                c.execute('INSERT INTO checks(id,machine_id,name,kind,config,interval,fail_after,recover_after) VALUES(?,?,?,?,?,?,1,2)',(check_id,agents[0]['machine_id'],f['metric'],'agent_metric',json.dumps(config),store.setting('agent_interval',30)))
-                store.audit(c,'resource_rule.created',check_id,{'metric':f['metric']})
+            save(store,'*',request.form)
+            flash('Health defaults saved.')
             return redirect(url_for('resource_rules'))
-        return render_template('resources.html',metrics=METRICS,agents=store.rows('SELECT a.id,m.name,a.capabilities FROM agents a JOIN machines m ON m.id=a.machine_id WHERE revoked=0'),rules=store.rows("SELECT c.name,c.config,m.name AS machine FROM checks c JOIN machines m ON m.id=c.machine_id WHERE kind='agent_metric'"))
+        sync(store)
+        return render_template('resources.html',health_cards=cards(store),health_scope='*',health_action='/resources')
+
+    @app.post('/hosts/<machine_id>/health')
+    @login_required
+    def host_health(machine_id):
+        from .health_rules import save
+        save(store,machine_id,request.form)
+        flash('Host health setting saved.')
+        return redirect('/hosts/'+machine_id+'/settings#health')
 
     @app.route('/policies',methods=['GET','POST'])
     @login_required

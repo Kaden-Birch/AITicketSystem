@@ -93,3 +93,5 @@ To use your Codex subscription without an API key, follow [Hermes Codex setup](h
 General command execution is an explicit opt-in. Follow [remote command setup](remote-commands.md) for agent OS permissions, host policy and operational/independent Hermes tools.
 
 The agent installer verifies effective root service permissions, runtime capabilities and local shell policy after restart. A failed check exits with an explanation; inspect conflicting drop-ins as described in [agent permission verification](agent.md#permission-verification). Main application access modes remain under Host settings.
+
+Configure optional resource alerts under **Agent health**. New defaults are disabled; hosts inherit enabled defaults unless overridden under **Host settings → Agent health**. See [health preferences](resource-diagnostics.md). Existing host rules are preserved during upgrade.

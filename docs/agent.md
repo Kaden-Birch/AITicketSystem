@@ -60,3 +60,5 @@ sudo rm -rf /opt/aiticket-agent /var/lib/aiticket-agent /etc/aiticket-agent
 Incident history remains in the main application. These commands remove the local enrollment and execution history.
 
 For main VM installation, see [HTTP installation](installation-http.md) or [HTTPS installation](installation.md).
+
+Resource thresholds are configured centrally under **Agent health**, with optional per-host overrides in Host settings. See [health preferences](resource-diagnostics.md). No local rule creation or agent update is needed for these preferences.

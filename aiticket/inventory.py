@@ -26,7 +26,7 @@ CONFIG={
  'proxmox':{'url','token_id','resource','expected'},
  'proxmox_linked':{'object_id','cluster_id','resource','expected'},
  'agent':{'agent_id','max_age'},
- 'agent_metric':{'agent_id','metric','fail_above','recover_below','sustain_seconds'},
+ 'agent_metric':{'agent_id','metric','fail_above','recover_below','sustain_seconds','threshold','recovery','direction','unit','severity','health_rule'},
 }
 
 
@@ -82,9 +82,13 @@ def config(kind,cfg):
         else:
             if cfg.get('metric') not in METRICS:
                 raise ValueError('Unsupported agent metric.')
-            low,high=cfg.get('recover_below'),cfg.get('fail_above')
-            if any(type(v) not in (int,float) or not math.isfinite(v) for v in (low,high)) or not 0<=low<high<=100:
-                raise ValueError('Invalid resource thresholds.')
+            if 'threshold' in cfg:
+                from .health_rules import validate
+                validate(cfg['metric'],cfg)
+            else:
+                low,high=cfg.get('recover_below'),cfg.get('fail_above')
+                if any(type(v) not in (int,float) or not math.isfinite(v) for v in (low,high)) or not 0<=low<high<=100:
+                    raise ValueError('Invalid resource thresholds.')
             integer(cfg.get('sustain_seconds'),30,86400)
     else:
         for key in ('object_id','cluster_id','resource'):
@@ -204,6 +208,10 @@ def import_inventory(store,vault,document):
                             row['config']['token_secret']=vault.encrypt('')
                         row['config']=json.dumps(row['config'])
                         row.update(enabled=0,health='unknown',failures=0,successes=0,first_failure_at=None,lease_token=None,lease_until=None,next_run=0)
+                    if name=='checks' and row['kind']=='agent_metric':
+                        from .health_rules import normalize
+                        cfg=normalize(original['config']['metric'],original['config'])
+                        c.execute('INSERT OR REPLACE INTO health_rules VALUES(?,?,?,?,0)',(row['machine_id'],cfg['metric'],json.dumps(cfg),0))
                     if name=='proxmox_objects':
                         row.update(last_seen=0,review_required=1,missing_since=time.time())
                     if name=='discovery_schedules':

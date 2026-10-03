@@ -163,6 +163,7 @@ def test_migration_detaches_existing_connection_preserving_history(environment):
         c.execute('DELETE FROM machines WHERE id=?',(row['machine_id'],))
         c.execute('DROP TABLE unifi_devices')
         c.execute('ALTER TABLE unifi_connections DROP COLUMN deleted')
+        c.execute('DROP TABLE health_rules')
         c.execute('DROP TABLE fleet_targets')
         c.execute('DROP TABLE fleet_jobs')
         c.execute('DROP TABLE fleet_keys')

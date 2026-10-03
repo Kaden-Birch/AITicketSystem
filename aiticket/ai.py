@@ -470,6 +470,9 @@ def automatic_tick(store,vault):
     candidates=store.rows("SELECT id FROM incidents WHERE closed IS NULL AND status!='Resolved' AND severity IN ("+placeholders+") AND NOT EXISTS (SELECT 1 FROM ai_jobs WHERE incident_id=incidents.id) AND NOT EXISTS (SELECT 1 FROM incident_control WHERE incident_id=incidents.id AND owner='user') AND NOT EXISTS (SELECT 1 FROM timeline WHERE incident_id=incidents.id AND kind='ai_auto_blocked' AND at>?) ORDER BY first_seen LIMIT 100",(*eligible,time.time()-900))
     queued=0
     for incident in candidates:
+        from .health_rules import incident_paused
+        with store.connect() as c:
+            if incident_paused(c,incident['id']):continue
         try:
             if request_job(store,vault,incident['id'],automatic=True): queued+=1
         except ValueError as exc:

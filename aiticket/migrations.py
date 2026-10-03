@@ -1,6 +1,10 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 31
+CURRENT_VERSION = 32
 MIGRATIONS = {
+    32: (
+        "CREATE TABLE health_rules(scope TEXT NOT NULL,metric TEXT NOT NULL,config TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 0,paused INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(scope,metric))",
+        "INSERT OR IGNORE INTO health_rules(scope,metric,config,enabled) SELECT machine_id,json_extract(config,'$.metric'),config,enabled FROM checks WHERE kind='agent_metric' AND json_extract(config,'$.metric') IS NOT NULL ORDER BY id",
+    ),
     31: ("ALTER TABLE machines ADD COLUMN offline_expected INTEGER NOT NULL DEFAULT 0",),
     30: (
         "CREATE TABLE fleet_keys(id TEXT PRIMARY KEY,label TEXT NOT NULL,public TEXT NOT NULL,private TEXT,created REAL NOT NULL)",

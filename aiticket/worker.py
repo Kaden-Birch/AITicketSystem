@@ -13,6 +13,8 @@ def tick(store, vault):
     from .policies import notifications
     from .administration import prune
     prune(store)
+    from .health_rules import sync as sync_health
+    sync_health(store)
     from .worklog import tick as work_tick
     work_tick(store)
     from .actions import tick as action_tick
@@ -49,6 +51,10 @@ def deliver(store, vault, job):
         outcome(store, job, 'pending', 'Discord webhook has not been configured.', 60)
         return
     incident = store.rows('SELECT * FROM incidents WHERE id=?', (job['incident_id'],))[0]
+    from .health_rules import incident_paused
+    with store.connect() as c: health_paused=incident_paused(c,incident['id'])
+    if health_paused and not job['event_key'].endswith(':recovery'):
+        outcome(store,job,'superseded',None);return
     if (incident['closed'] or incident['status']=='Resolved') and not job['event_key'].endswith(':recovery'):
         outcome(store, job, 'superseded', None)
         return

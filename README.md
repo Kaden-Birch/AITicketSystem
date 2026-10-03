@@ -103,3 +103,5 @@ Network Devices separates UniFi appliances from Hosts, with readable telemetry, 
 Fleet management: [SSH keys, users, packages and scripts](docs/fleet.md), with per-host permissions and execution results.
 
 [Dashboard, Hosts, Tickets and navigation](docs/ui-overview.md): aggregate graphs, compact inventory, live ticket timers, category filters, global search and intentional-offline controls.
+
+[Agent health defaults and host overrides](docs/resource-diagnostics.md): slider preferences, disabled-by-default fleet rules, host-specific settings and percentage/GB free-space thresholds.

@@ -1,5 +1,6 @@
 """Authenticated read-only jobs. No arbitrary commands or action operations."""
 import json
+import math
 import re
 import time
 from .db import uid
@@ -86,19 +87,31 @@ def metric_probe(store,config):
     if not agent or not agent[0]['sampled_at'] or not -30<=now-agent[0]['sampled_at']<=180 or not agent[0]['last_seen'] or now-agent[0]['last_seen']>180:
         return None,{'reason':'Metric unavailable or stale; not evidence of pressure'}
     telemetry=json.loads(agent[0]['telemetry'] or '{}')
-    metric=config['metric']
+    metric=config['metric'];value=None
+    if 'threshold' in config:
+        from .health_rules import METRICS as RULES
+        if metric not in RULES:return None,{'reason':'Unsupported health metric'}
+        if config.get('direction')=='below':
+            total_key,free_key={'memory_used_percent':('memory_total_bytes','memory_available_bytes'),'disk_used_percent':('disk_total_bytes','disk_free_bytes'),'inode_used_percent':('inode_total','inode_free')}[metric]
+            total,free=telemetry.get(total_key),telemetry.get(free_key)
+            if type(free) in (int,float):
+                value=free if config['unit']=='bytes' else 100*free/total if type(total) in (int,float) and total>0 else None
+        else:value=telemetry.get(metric)
+        rows=store.rows('SELECT health FROM checks WHERE id=?',(config.get('_check_id'),))
+        threshold=config['recovery'] if rows and rows[0]['health']=='down' else config['threshold']
+        if type(value) not in (int,float) or not math.isfinite(value) or value<0 or (config['unit']=='percent' and value>100):return None,{'reason':'Metric unavailable; not evidence of pressure','metric':metric}
+        healthy=value>threshold if config['direction']=='below' else value<threshold
+        return healthy,{'metric':metric,'value':round(value,2),'unit':config['unit'],'threshold':threshold,'sampled_at':agent[0]['sampled_at']}
     if metric=='memory_used_percent':
-        total=telemetry.get('memory_total_bytes',0)
-        value=100*(1-telemetry.get('memory_available_bytes',total)/total) if total else None
+        total=telemetry.get('memory_total_bytes',0);free=telemetry.get('memory_available_bytes')
+        value=100*(1-free/total) if total and free is not None else None
     elif metric in ('disk_used_percent','inode_used_percent'):
         prefix='disk' if metric.startswith('disk') else 'inode'
         total=telemetry.get(prefix+'_total_bytes' if prefix=='disk' else 'inode_total',0)
-        free=telemetry.get(prefix+'_free_bytes' if prefix=='disk' else 'inode_free',total)
-        value=100*(1-free/total) if total else None
-    else:
-        value=telemetry.get(metric)
-    if value is None:
-        return None,{'reason':'Metric not supported by this agent','metric':metric}
+        free=telemetry.get(prefix+'_free_bytes' if prefix=='disk' else 'inode_free')
+        value=100*(1-free/total) if total and free is not None else None
+    else:value=telemetry.get(metric)
+    if value is None:return None,{'reason':'Metric not supported by this agent','metric':metric}
     rows=store.rows('SELECT health FROM checks WHERE id=?',(config.get('_check_id'),))
     threshold=config['recover_below'] if rows and rows[0]['health']=='down' else config['fail_above']
     return value<threshold,{'metric':metric,'value_percent':round(value,2),'fail_above':config['fail_above'],'recover_below':config['recover_below'],'sustain_seconds':config['sustain_seconds'],'sampled_at':agent[0]['sampled_at'],'definition':'Memory uses MemAvailable (cache reclaimable); disk and inodes cover root filesystem; pressure uses PSI full avg10; CPU uses /proc/stat deltas.'}
