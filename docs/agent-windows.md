@@ -50,3 +50,7 @@ Rerun the installer to upgrade the stable launcher/updater or trust anchor. They
 For credential rotation, revoke the enrollment in the application, stop both tasks, deliberately remove `state\identity.json`, and rerun the installer with a new token. Never remove enrollment during a normal upgrade. For uninstall, revoke in the application, stop/unregister both tasks, then remove `C:\ProgramData\AITicketAgent`; this deletes local credentials and execution history. Central ticket history remains.
 
 For Windows fleet account, SSH key and package tasks, see [Fleet](fleet.md#windows-hosts). Windows OpenSSH's shared administrator key file is excluded from per-user key jobs; standard-account keys are supported.
+
+## Container and process discovery
+
+Agent 0.11.0+ reports process working sets and CPU deltas, plus Docker inventory when the CLI/daemon are accessible to LocalSystem. Expand **Containers & processes** on the host and select **Monitor** to add an exact-name check. Docker Desktop scoped to a signed-in user might not be available to LocalSystem. See [storage and service monitoring](storage-services.md).

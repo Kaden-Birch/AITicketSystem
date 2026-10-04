@@ -100,3 +100,7 @@ Only release bundles are fetched from GitHub. Application enrollment credentials
 ## Automatic manual power controls
 
 Root installations advertise host restart and shutdown automatically (agent 0.10.1 or newer). The main application uses the existing enrollment identity for exact, administrator-confirmed power jobs. No separate power credential or enablement page is needed. Explicit local power restrictions remain effective. Linked Proxmox resources use their existing cluster token instead; see [host power controls](host-dashboard.md#automatic-power-controls).
+
+## Container and process discovery
+
+Agent 0.11.0+ sends bounded Docker and process inventories with heartbeats. Expand **Containers & processes** on a host to search names, inspect resource use and add a check with **Monitor**. Discovery does not automatically create checks. See [storage and service monitoring](storage-services.md) for limits and TrueNAS/Plex setup.

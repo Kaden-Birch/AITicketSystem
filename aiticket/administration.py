@@ -104,6 +104,8 @@ def rotate_key(store, old_vault, destination):
         for row in c.execute("SELECT key,value FROM settings WHERE key IN ('session_secret','discord_secret','hermes_secret','ai_provider_secret')").fetchall():
             encrypted = new_vault.encrypt(old_vault.decrypt(json.loads(row['value'])))
             c.execute('UPDATE settings SET value=? WHERE key=?', (json.dumps(encrypted), row['key']))
+        for row in c.execute('SELECT id,secret FROM integrations').fetchall():
+            c.execute('UPDATE integrations SET secret=? WHERE id=?',(new_vault.encrypt(old_vault.decrypt(row['secret'])),row['id']))
         for row in c.execute('SELECT id,secret FROM unifi_connections').fetchall():
             c.execute('UPDATE unifi_connections SET secret=? WHERE id=?',(new_vault.encrypt(old_vault.decrypt(row['secret'])),row['id']))
         for row in c.execute('SELECT id,token_secret FROM proxmox_connections').fetchall():

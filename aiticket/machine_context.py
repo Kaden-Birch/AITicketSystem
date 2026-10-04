@@ -28,6 +28,11 @@ def context(c,machine,now=None,external=False):
         if len(json.dumps(evidence))>600:evidence={'coverage':'Large result; inspect the check evidence for details','reason':evidence.get('reason'),'status':evidence.get('status')}
         checks.append({'id':row['id'],'name':row['name'],'kind':row['kind'],'enabled':bool(row['enabled']),'health':row['health'],'last_result':row['latest_health'],'observed_at':row['at'],'fresh':bool(row['at'] is not None and 0<=now-row['at']<=max(180,row['interval']*3)),'interval_seconds':row['interval'],'failures':row['failures'],'recovery_successes':row['successes'],'evidence':evidence})
     result['checks']=checks
+    from .integrations import context as integration_context
+    result['services']=integration_context(c,machine)
+    discovery=c.execute('SELECT * FROM agent_discovery WHERE machine_id=?',(machine,)).fetchone()
+    if discovery:
+        inventory=json.loads(discovery['data']);result['discovery']={'sampled_at':discovery['at'],'fresh':fresh and 0<=now-discovery['at']<=180,'containers':inventory.get('containers',[]),'processes':inventory.get('processes',[])[:40],'processes_truncated':len(inventory.get('processes',[]))>40 or inventory.get('processes_truncated',False),'containers_truncated':inventory.get('containers_truncated',False),'warnings':inventory.get('warnings',[])}
     result['coverage']={'checks_truncated':len(rows)>30,'telemetry':'All reported metric values; unavailable values are not healthy results.'}
     from .applications import context as applications_context
     result['applications']=applications_context(c,machine,now)

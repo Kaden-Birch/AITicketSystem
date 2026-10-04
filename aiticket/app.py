@@ -237,12 +237,62 @@ def create_app(data_dir=None, testing=False):
                 if len(children)!=len(parents):raise ValueError('Choose both sides of each dependency.')
                 save(store,request.form.get('name',''),request.form.getlist('checks'),[(x,y) for x,y in zip(children,parents) if x or y],identifier)
             flash('Application settings saved.');return redirect('/applications')
-        return render_template('applications.html',applications=view(store),checks=store.rows("SELECT c.id,c.name,m.name AS host FROM checks c JOIN machines m ON m.id=c.machine_id WHERE c.kind NOT IN ('manual','workflow_test') ORDER BY m.name,c.name"))
+        return render_template('applications.html',applications=view(store),services=__import__('aiticket.integrations',fromlist=['views']).views(store),checks=store.rows("SELECT c.id,c.name,m.name AS host FROM checks c JOIN machines m ON m.id=c.machine_id WHERE c.kind NOT IN ('manual','workflow_test') ORDER BY m.name,c.name"))
 
     @app.get('/hosts/new')
     @login_required
     def new_host():
         return render_template('host-new.html',machines=store.rows("SELECT * FROM machines WHERE id NOT LIKE 'unifi:%' AND id NOT LIKE 'unifi-device:%' ORDER BY name"))
+
+    @app.route('/services/new',methods=['GET','POST'])
+    @app.route('/services/<identifier>',methods=['GET','POST'])
+    @login_required
+    def service_page(identifier=None):
+        from .integrations import views,config,read,save,connection_error
+        from .metric_history import series
+        row=next((r for r in views(store) if r['id']==identifier and r['kind']=='plex'),None)
+        if identifier and not row:abort(404)
+        values={**row['config'],'name':row['name'],'machine_id':row['machine_id']} if row else {'machine_id':request.args.get('host',''),'name':'Plex','interval':60}
+        error=None;notice=None;preview=row['data'] if row else {}
+        if request.method=='POST':
+            values=request.form
+            try:
+                cfg=config(values,'plex');machine=row['machine_id'] if row else values.get('machine_id')
+                if not store.rows('SELECT id FROM machines WHERE id=?',(machine,)):raise ValueError('Select the host that runs Plex.')
+                if not 1<=len(values.get('name','').strip())<=100:raise ValueError('Enter a service name, up to 100 characters.')
+                token=values.get('token','') or (vault.decrypt(store.rows('SELECT secret FROM integrations WHERE id=?',(identifier,))[0]['secret']) if row else '')
+                if not token:raise ValueError('Enter your Plex server token.')
+                preview=read('plex',cfg,token)
+                if not preview.get('responsive'):raise ValueError('Plex is not responding. Check its address and network access.')
+                if values.get('operation')=='test':notice='Plex connected. Choose a library to check media access.'
+                else:
+                    identifier=save(store,vault,machine,'plex',values.get('name',''),cfg,values.get('token',''),identifier,preview)
+                    flash('Plex service saved.');return redirect('/services/'+identifier)
+            except Exception as exc:error=str(exc) if isinstance(exc,ValueError) else connection_error(exc)
+        history=series(store,identifier,'plex',request.args.get('window','6h'),definitions=[('response_ms','Response time',' ms',None),('active_sessions','Active streams','',None),('transcoding_sessions','Transcoding','',None)])
+        return render_template('service.html',service=row,values=values,preview=preview,error=error,notice=notice,machines=store.rows('SELECT id,name FROM machines ORDER BY name'),history=history)
+
+    @app.post('/integrations/<identifier>/checks')
+    @login_required
+    def integration_check(identifier):
+        from .integrations import add_check,views
+        row=next((r for r in views(store) if r['id']==identifier),None)
+        if not row:abort(404)
+        add_check(store,identifier,request.form.get('scope'),request.form.get('target'))
+        flash('Monitoring check added.');return redirect('/services/'+identifier if row['kind']=='plex' else '/hosts/'+row['machine_id'])
+
+    @app.post('/integrations/<identifier>/delete')
+    @login_required
+    def integration_delete(identifier):
+        from .integrations import remove
+        remove(store,identifier);flash('Connection removed. Its checks are disabled; ticket history is retained.');return redirect('/applications')
+
+    @app.post('/hosts/<machine_id>/discovery-check')
+    @login_required
+    def discovery_check(machine_id):
+        from .discovery import add_check
+        add_check(store,machine_id,request.form.get('kind'),request.form.get('target'))
+        flash('Monitoring check added.');return redirect('/hosts/'+machine_id)
 
     @app.post('/hosts/<machine_id>/presence')
     @login_required
@@ -302,6 +352,13 @@ def create_app(data_dir=None, testing=False):
         data['history']=charts(store,data['host'],request.args.get('window','6h'))
         from .power import availability
         data['power_available']=availability(store,vault,machine_id)
+        from .integrations import views
+        from .discovery import view as discovery_view
+        data['connections']=views(store,machine_id);data['discovery']=discovery_view(store,machine_id)
+        from .metric_history import series
+        for connection in data['connections']:
+            for pool in connection['data'].get('pools',[]):pool['history']=series(store,connection['id']+':pool:'+str(pool['id']),'storage',request.args.get('window','6h'),definitions=[('used_percent','Storage used','%',100)])
+            for application in connection['data'].get('apps',[]):application['history']=series(store,connection['id']+':app:'+application['name'],'application',request.args.get('window','6h'),definitions=[('cpu_percent','CPU','%',None),('memory_gib','Memory',' GiB',None),('receive_kib_s','Network received',' KiB/s',None),('transmit_kib_s','Network sent',' KiB/s',None)])
         return render_template('host-detail.html',**data)
 
     @app.get('/hosts/<machine_id>/checks/new')
@@ -319,6 +376,22 @@ def create_app(data_dir=None, testing=False):
         from .machine_context import context as access_context
         data=detail(store,machine_id)
         if not data: abort(404)
+        from .integrations import views,config,read,save,connection_error
+        nas=next((r for r in views(store,machine_id) if r['kind']=='truenas'),None)
+        if nas:
+            error=None;notice=None;values={**nas['config'],'name':nas['name']}
+            if request.method=='POST':
+                values=request.form
+                try:
+                    cfg=config(values,'truenas');secret=values.get('token','') or vault.decrypt(store.rows('SELECT secret FROM integrations WHERE id=?',(nas['id'],))[0]['secret'])
+                    snapshot=read('truenas',cfg,secret)
+                    if values.get('operation')=='test':notice='Connected. Storage and application readings are available.'
+                    else:
+                        save(store,vault,machine_id,'truenas',values.get('name',''),cfg,values.get('token',''),nas['id'],snapshot)
+                        with store.connect() as c:c.execute('UPDATE machines SET name=? WHERE id=?',(values.get('name','').strip(),machine_id))
+                        flash('TrueNAS settings saved.');return redirect(request.path)
+                except Exception as exc:error=str(exc) if isinstance(exc,ValueError) else connection_error(exc)
+            return render_template('host-truenas-settings.html',host=data['host'],checks=data['checks'],values=values,error=error,notice=notice)
         old=next(iter(store.rows('SELECT * FROM command_policies WHERE machine_id=?',(machine_id,))),None)
         if request.method=='POST':
             mode=request.form.get('access_mode')
@@ -577,17 +650,26 @@ def create_app(data_dir=None, testing=False):
     @login_required
     def hosts():
         if request.method == 'POST':
-            name = request.form.get('name', '').strip()
-            if not 1 <= len(name) <= 100:
-                raise ValueError('Machine name must contain 1–100 characters.')
-            parent = request.form.get('parent') or None
-            with store.connect() as c:
-                if parent and not c.execute('SELECT 1 FROM machines WHERE id=?', (parent,)).fetchone():
-                    raise ValueError('Unknown parent machine.')
-                machine_id = uid()
-                c.execute('INSERT INTO machines(id,name,parent_id,created) VALUES(?,?,?,?)', (machine_id, name, parent, time.time()))
-                store.audit(c, 'machine.created', machine_id, {'parent_id': parent})
-            return redirect(url_for('hosts'))
+            from .integrations import config,read,save,connection_error
+            try:
+                name=request.form.get('name','').strip();kind=request.form.get('host_kind','agent');parent=request.form.get('parent') or None
+                if not 1<=len(name)<=100:raise ValueError('Enter a host name, up to 100 characters.')
+                if kind not in ('agent','truenas'):raise ValueError('Choose Agent or TrueNAS.')
+                if parent and not store.rows('SELECT id FROM machines WHERE id=?',(parent,)):raise ValueError('Choose an existing parent host.')
+                if kind=='truenas':
+                    cfg=config(request.form,kind);secret=request.form.get('token','')
+                    if not secret:raise ValueError('Enter the TrueNAS API key.')
+                    snapshot=read(kind,cfg,secret)
+                    if request.form.get('operation')=='test':
+                        return render_template('host-new.html',machines=store.rows('SELECT id,name FROM machines ORDER BY name'),values=request.form,notice='Connected. '+str(len(snapshot.get('pools',[])))+' pools and '+str(len(snapshot.get('apps',[])))+' applications found.',warnings=snapshot.get('warnings',[]))
+                    identifier=save(store,vault,None,kind,name,cfg,secret,snapshot=snapshot,parent=parent)
+                    machine_id=store.rows('SELECT machine_id FROM integrations WHERE id=?',(identifier,))[0]['machine_id']
+                    return redirect('/hosts/'+machine_id)
+                with store.connect() as c:
+                    machine_id=uid();c.execute('INSERT INTO machines(id,name,parent_id,created) VALUES(?,?,?,?)',(machine_id,name,parent,time.time()));store.audit(c,'machine.created',machine_id,{'parent_id':parent})
+                return redirect(url_for('hosts'))
+            except Exception as exc:
+                return render_template('host-new.html',machines=store.rows('SELECT id,name FROM machines ORDER BY name'),values=request.form,error=str(exc) if isinstance(exc,ValueError) else connection_error(exc)),400
         from .overview_ui import host_list
         return render_template('hosts.html',hosts=host_list(store))
 
@@ -597,7 +679,7 @@ def create_app(data_dir=None, testing=False):
         machine = existing['machine_id'] if existing else f.get('machine_id')
         if not store.rows('SELECT id FROM machines WHERE id=?', (machine,)):
             raise ValueError('Select an existing machine.')
-        if existing and kind in ('agent','agent_metric','proxmox_linked'):
+        if existing and kind in ('agent','agent_metric','proxmox_linked','truenas','plex'):
             cfg=json.loads(existing['config'])
         elif kind == 'http':
             cfg = {'url': validate_url(f.get('url', '')), 'status': int(f.get('expected_status', 200))}
@@ -1104,6 +1186,8 @@ def create_app(data_dir=None, testing=False):
             abort(400)
         from .topology import validate as validate_network
         network=validate_network(payload.get('network',{}))
+        from .discovery import validate as validate_discovery
+        discovery=validate_discovery(payload['discovery']) if 'discovery' in payload else None
         capabilities=payload.get('capabilities',{})
         if not isinstance(capabilities,dict) or set(capabilities)-{'operations','services','actions','action_services','power_operations','shell_commands'} or any(not isinstance(capabilities.get(k,[]),list) for k in ('operations','services')):
             abort(400)
@@ -1139,6 +1223,7 @@ def create_app(data_dir=None, testing=False):
             c.execute('UPDATE agents SET last_seen=?,address=?,version=?,telemetry=?,capabilities=?,sampled_at=? WHERE id=?', (now, request.remote_addr, str(payload.get('version', ''))[:32], json.dumps(telemetry), json.dumps(capabilities),sampled_at,row['id']))
             from .metric_history import record
             record(c,row['machine_id'],'agent',sampled_at or now,telemetry)
+            if discovery is not None:c.execute('INSERT INTO agent_discovery VALUES(?,?,?) ON CONFLICT(machine_id) DO UPDATE SET at=excluded.at,data=excluded.data',(row['machine_id'],sampled_at if sampled_at is not None else now,json.dumps(discovery)))
             from .topology import retain as retain_network
             c.execute('INSERT INTO network_inventory VALUES(?,?,?) ON CONFLICT(machine_id) DO UPDATE SET at=excluded.at,data=excluded.data',(row['machine_id'],sampled_at if sampled_at is not None else now,json.dumps(network)))
             for interface in network.get('interfaces',[]):

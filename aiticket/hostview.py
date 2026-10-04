@@ -45,6 +45,7 @@ def overview(store,now=None):
         objects={}
         for r in c.execute("SELECT * FROM proxmox_objects WHERE machine_id IS NOT NULL AND present=1 ORDER BY CASE kind WHEN 'node' THEN 0 WHEN 'qemu' THEN 1 WHEN 'lxc' THEN 2 ELSE 3 END"):
             objects.setdefault(r['machine_id'],dict(r))
+        nas={r['machine_id']:dict(r) for r in c.execute("SELECT * FROM integrations WHERE kind='truenas'")}
         checks={}
         for r in c.execute('SELECT machine_id,health FROM checks WHERE enabled=1'):
             checks.setdefault(r['machine_id'],[]).append(r['health'])
@@ -52,10 +53,13 @@ def overview(store,now=None):
     for m in machines:
         m['agent']=agents.get(m['id']);m['object']=objects.get(m['id'])
         m['sample']=sample(m['agent'],m['object'],now)
+        if m['id'] in nas:
+            n=nas[m['id']];d=json.loads(n['snapshot']);pseudo={'last_seen':n['at'],'sampled_at':n['at'],'revoked':False,'telemetry':json.dumps(d.get('metrics',{})),'host_info':json.dumps(d.get('system',{}))}
+            m['sample']=sample(pseudo,None,now);m['sample'].update(source='TrueNAS API',fresh=bool(n['at'] and 0<=now-n['at']<=max(180,json.loads(n['config'])['interval']*3) and not d.get('error')),storage_scope='Combined reported storage pools');m['truenas']=n['id']
         states=checks.get(m['id'],[])
         m['health']='down' if 'down' in states else 'unknown' if 'unknown' in states else 'healthy' if states else 'unmonitored'
         m['active_incidents']=counts.get(m['id'],0)
-        m['type']=m['object']['kind'] if m['object'] else 'Windows host' if m['sample']['source']=='Windows agent' else 'Linux host' if m['agent'] else 'Machine'
+        m['type']='TrueNAS' if m.get('truenas') else m['object']['kind'] if m['object'] else 'Windows host' if m['sample']['source']=='Windows agent' else 'Linux host' if m['agent'] else 'Machine'
     for obj in store.rows("SELECT * FROM proxmox_objects WHERE machine_id IS NULL AND present=1 AND template=0 AND kind IN ('node','qemu','lxc') ORDER BY kind,name"):
         machines.append({'id':None,'name':obj['name'],'type':obj['kind'],'object':obj,'agent':None,'sample':sample(None,obj,now),'health':'unassigned','active_incidents':0})
     return machines

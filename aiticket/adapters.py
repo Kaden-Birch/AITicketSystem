@@ -6,6 +6,9 @@ from .security import validate_url
 
 
 def probe(kind, config, vault, store=None):
+    if kind in ('truenas','plex'):
+        from .integrations import probe as integration_probe
+        return integration_probe(store,kind,config)
     if kind == 'workflow_test':
         from .reliability import test_probe
         return test_probe(store,config['_check_id'])

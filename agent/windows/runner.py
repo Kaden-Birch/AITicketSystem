@@ -22,7 +22,7 @@ def prepare(bundle,root):
         kwargs.pop('env',None);return run(argv,**kwargs)
     # Avoid replacing the shared subprocess module; inject a per-module proxy.
     monitoring.subprocess=types.SimpleNamespace(run=windows_run,DEVNULL=__import__('subprocess').DEVNULL,PIPE=__import__('subprocess').PIPE,SubprocessError=__import__('subprocess').SubprocessError)
-    agent=load('agent',bundle/'agent.py');agent.host_info=backend.host_info;agent.telemetry=backend.telemetry;agent.network_info=lambda:backend.inventory()
+    agent=load('agent',bundle/'agent.py');agent.host_info=backend.host_info;agent.telemetry=backend.telemetry;agent.network_info=lambda:backend.inventory();agent.discovery=backend.discovery
     return agent
 
 

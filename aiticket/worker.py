@@ -32,7 +32,7 @@ def tick(store, vault):
             healthy, evidence = probe(job['kind'], {**json.loads(job['config']), '_check_id':job['id']}, vault, store)
         except Exception as exc:
             # Do not put URLs, tokens or raw upstream error bodies in evidence.
-            healthy, evidence = (None if job['kind'] in ('agent_metric','unifi','unifi_device') else False), {'reason': 'Check could not complete', 'error_type': type(exc).__name__}
+            healthy, evidence = (None if job['kind'] in ('agent_metric','unifi','unifi_device','truenas','plex') else False), {'reason': 'Check could not complete', 'error_type': type(exc).__name__}
         observe(store, job['id'], healthy, evidence, lease_token=job['lease_token'])
     from .engine import resolution_tick
     resolution_tick(store)
@@ -125,6 +125,16 @@ def outcome(store, job, state, error, delay=0):
 
 
 def run(store, vault, stop):
+    # API subscriptions can wait for their first event. Keep one-second ping and
+    # existing command/notification queues independent from those waits.
+    from threading import Thread
+    from .integrations import tick as integration_tick
+    def poll_integrations():
+        while not stop.is_set():
+            try:integration_tick(store,vault)
+            except Exception:log.exception('Integration polling failed; durable leases recover')
+            stop.wait(.5)
+    Thread(target=poll_integrations,name='integration-poller',daemon=True).start()
     while not stop.is_set():
         try:
             busy = tick(store, vault)

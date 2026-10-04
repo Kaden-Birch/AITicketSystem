@@ -20,15 +20,16 @@ def normalized(raw,source):
 
 def record(c,entity,source,at,metrics):
     if entity and metrics:
-        c.execute('INSERT OR IGNORE INTO metric_samples(entity_id,source,at,metrics) VALUES(?,?,?,?)',(entity,source,at,json.dumps(normalized(metrics,source))))
+        c.execute('INSERT OR IGNORE INTO metric_samples(entity_id,source,at,metrics) VALUES(?,?,?,?)',(entity,source,at,json.dumps({**normalized(metrics,source),**({k:v for k,v in metrics.items() if type(v) in (int,float) and math.isfinite(v)} if source=='truenas' else {})})))
 
 
 def charts(store,host,window='6h',now=None):
     now=time.time() if now is None else now
     window=window if window in WINDOWS else '6h';start=now-WINDOWS[window]
-    source='agent' if host.get('agent') else 'proxmox'
-    entity=host['id'] if source=='agent' else host['object']['id'] if host.get('object') else None
-    return series(store,entity,source,window,now)
+    source='truenas' if host.get('truenas') else 'agent' if host.get('agent') else 'proxmox'
+    entity=host['id'] if source in ('agent','truenas') else host['object']['id'] if host.get('object') else None
+    extra=[('cpu_temperature','CPU temperature',' °C',None),('disk_busy','Disk busy','%',100),('disk_read_bytes','Disk read',' B/s',None),('disk_write_bytes','Disk write',' B/s',None),('arc_gib','ZFS cache',' GiB',None),('receive_kib_s','Network received',' KiB/s',None),('transmit_kib_s','Network sent',' KiB/s',None)]
+    return series(store,entity,source,window,now,definitions=METRICS+extra if source=='truenas' else None)
 
 
 def series(store,entity,source,window='6h',now=None,definitions=None):

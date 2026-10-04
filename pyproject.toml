@@ -11,7 +11,7 @@ dependencies = {file = "requirements.txt"}
 [tool.setuptools.packages.find]
 include = ["aiticket*"]
 [tool.setuptools.package-data]
-aiticket = ["templates/*.html", "static/*.css"]
+aiticket = ["templates/*.html", "static/*.css", "static/*.js"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

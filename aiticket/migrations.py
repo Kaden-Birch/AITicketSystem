@@ -1,6 +1,10 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 36
+CURRENT_VERSION = 37
 MIGRATIONS = {
+    37: (
+        "CREATE TABLE IF NOT EXISTS integrations(id TEXT PRIMARY KEY,machine_id TEXT NOT NULL REFERENCES machines(id),kind TEXT NOT NULL,name TEXT NOT NULL,config TEXT NOT NULL,secret TEXT NOT NULL,snapshot TEXT NOT NULL DEFAULT '{}',at REAL,next_run REAL NOT NULL DEFAULT 0,lease_until REAL)",
+        "CREATE TABLE IF NOT EXISTS agent_discovery(machine_id TEXT PRIMARY KEY REFERENCES machines(id),at REAL NOT NULL,data TEXT NOT NULL)",
+    ),
     36: (
         "CREATE TABLE IF NOT EXISTS applications(id TEXT PRIMARY KEY,name TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS application_checks(application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE,check_id TEXT NOT NULL REFERENCES checks(id),PRIMARY KEY(application_id,check_id))",

@@ -57,6 +57,10 @@ def issues(store,now=None):
         snapshot=json.loads(connection['snapshot']);errors=snapshot.get('errors',{})
         if errors:
             result.append({'host':connection['name'],'machine_id':connection['machine_id'],'title':'API coverage is incomplete','detail':str(len(errors))+' API readings are unavailable. Device availability and missing telemetry are separate findings.'})
+    from .integrations import views
+    for connection in views(store):
+        if connection['data'].get('error') or connection['data'].get('warnings') or not connection['fresh']:
+            result.append({'host':connection['host'],'machine_id':connection['machine_id'],'title':connection['name']+' API coverage','detail':connection['data'].get('error') or 'Some readings are unavailable or stale. Check API permissions and server availability.'})
     return result
 
 

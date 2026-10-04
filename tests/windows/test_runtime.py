@@ -206,3 +206,11 @@ def test_power_defaults_use_elevated_identity_and_honor_local_restriction(runtim
     assert 'power_operations' not in backend.capabilities(backend.load_policy(policy))
     policy.write_text('{}');monkeypatch.setattr(backend.ctypes.windll.shell32,'IsUserAnAdmin',lambda:False)
     assert 'power_operations' not in backend.capabilities(backend.load_policy(policy))
+
+
+def test_process_discovery_is_read_only_and_named(runtime):
+    _,backend=runtime
+    state={};inventory=backend.discovery(state)
+    assert inventory['processes'] and len(inventory['processes'])<=200
+    assert all(p['name'] and p['target'] and p['memory_bytes']>=0 for p in inventory['processes'])
+    assert all('commandline' not in p and 'cpu_seconds' not in p for p in inventory['processes'])

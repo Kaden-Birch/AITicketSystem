@@ -116,3 +116,36 @@ def evaluate(check):
             healthy,details=docker_probe(target,check['config'].get('require_health',False))
     except Exception:details={'status':'unknown','reason':'Windows inspection unavailable; check target and LocalSystem permissions'}
     return {'id':check['id'],'config':check['config'],'healthy':healthy,'sampled_at':time.time(),'details':details}
+
+
+def discovery(state):
+    import monitoring
+    # Docker discovery is common; Linux /proc collection is replaced below.
+    result={'docker_installed':bool(shutil.which('docker')),'containers':[],'processes':[],'warnings':[]}
+    if result['docker_installed']:
+        try:
+            reply=run(['docker','ps','-a','--format','{{json .}}'],timeout=4,limit=60000)
+            if reply['state']!='completed':raise ValueError()
+            for line in reply['stdout'][:60000].splitlines()[:100]:
+                x=json.loads(line);result['containers'].append({'target':x['Names'],'name':x['Names'],'image':x.get('Image',''),'state':x.get('State','unknown'),'status':x.get('Status',''),'ports':x.get('Ports','')})
+            reply=run(['docker','stats','--no-stream','--format','{{json .}}'],timeout=4,limit=60000)
+            stats={x['Name']:x for x in [json.loads(line) for line in reply['stdout'].splitlines()[:100]]} if reply['state']=='completed' else {}
+            for item in result['containers']:
+                row=stats.get(item['name'],{})
+                for key,out in [('CPUPerc','cpu_percent'),('MemPerc','memory_percent')]:
+                    try:item[out]=float(row[key].rstrip('%'))
+                    except (KeyError,ValueError):pass
+        except Exception:result['warnings'].append('Docker inventory is unavailable. Check the daemon and LocalSystem access.')
+    try:
+        rows=query("@(Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 200 | ForEach-Object { [pscustomobject]@{pid=$_.Id;name=$_.ProcessName;target=$_.ProcessName;memory_bytes=$_.WorkingSet64;cpu_seconds=$_.CPU;started=$(try{$_.StartTime.ToUniversalTime().Ticks}catch{0})} })",limit=60000)
+        if isinstance(rows,dict):rows=[rows]
+        previous=state.get('discovery_cpu',{});now=time.monotonic();elapsed=now-state.get('discovery_at',now);current={}
+        for p in rows:
+            identity=str(p['pid'])+':'+str(p.get('started',''));counter=p.get('cpu_seconds')
+            if counter is not None:
+                current[identity]=counter
+                if identity in previous and elapsed>0:p['cpu_percent']=round(max(0,100*(counter-previous[identity])/elapsed),1)
+            p.pop('started',None);p.pop('cpu_seconds',None);result['processes'].append(p)
+        result['processes_truncated']=len(rows)==200;state['discovery_cpu']=current;state['discovery_at']=now
+    except Exception:result['warnings'].append('Process inventory is unavailable.')
+    return result

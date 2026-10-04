@@ -13,7 +13,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-VERSION = '0.10.1'
+VERSION = '0.11.0'
 
 
 def endpoint(value,allow_http=False):
@@ -80,6 +80,11 @@ def telemetry(state=None):
             if line.startswith('full '):
                 result['memory_pressure_percent']=float(dict(field.split('=') for field in line.split()[1:])['avg10'])
     return result
+
+
+def discovery(state):
+    from monitoring import discover
+    return discover(state)
 
 
 def host_info():
@@ -246,6 +251,8 @@ def main():
                     advertised.pop('actions',None)
                     advertised.pop('action_services',None)
                 pending = {'event_id': str(uuid.uuid4()), 'version': VERSION, 'telemetry': telemetry(state), 'sampled_at':time.time(), 'capabilities':advertised,'host_info':host_info(),'network':network_info()}
+                try:pending['discovery']=discovery(state)
+                except Exception:pending['discovery']={'warnings':['Discovery is unavailable.']}
                 state['pending'] = pending
                 write_state(path, state)
             update_status=path.parent/'update-status.json'

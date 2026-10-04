@@ -113,3 +113,5 @@ Linux agents now include an [independent signed-release updater](docs/agent.md#i
 Windows hosts use the [Windows agent installer](docs/agent-windows.md), with LocalSystem command access and independent signed automatic updates.
 
 - [Investigation reliability, application health and workflow testing](docs/investigation-reliability.md)
+
+TrueNAS SCALE / HexOS can be added directly through **Hosts → Add host → TrueNAS**, without an OS agent. Host-linked Plex server and media-read checks live under **Applications**. Linux/Windows agents also discover Docker containers and processes for one-click monitoring. See [TrueNAS, Plex and discovery setup](docs/storage-services.md).

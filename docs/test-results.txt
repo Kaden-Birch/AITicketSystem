@@ -1,4 +1,4 @@
-431 passed in 41.36s
+473 passed, 12 skipped in 46.63s
 
 HTTP opt-in tests cover cookie configuration, URL restrictions, persisted agent enrollment, nonredirecting credential delivery, continued HTTPS verification and isolated Hermes configuration.
 Local Python 3.14.6; temporary databases, fake Hermes adapters and mocked external providers/subprocesses.
@@ -95,3 +95,5 @@ Audit/policies redesign: seven-day Highlights hides routine successful automated
 Operational dashboard: resource averages replaced with host/check health, human blockers, AI queue and notification review. Resolution duration, local-day ticket counts, older-ticket backlog, stale observations, retries and maintenance are covered. Light/dark desktop and 390px mobile reviewed with fixtures; no live infrastructure or notifications changed.
 
 Independent agent updater: signed release/checksum verification, archive traversal/link rejection, real module import checks, idempotent completion, active-command deferral, failed-heartbeat rollback, interrupted activation recovery, older-manifest rejection, failed-release suppression and newer corrective release recovery verified. Separate authenticated/revocation-aware updater reports do not refresh monitoring heartbeats; CSRF-protected manual requests, stale/legacy settings and probation dispatch fencing covered. Signed deterministic bundle built and verified locally; light/dark desktop/mobile settings and manual request feedback reviewed with fixture data. No production agent restarted or updated.
+
+TrueNAS/HexOS, Plex and host discovery: read-only JSON-RPC and fixed Plex endpoint fences, verified TLS, encrypted credential rotation, partial/unavailable telemetry, pool/app health and incident creation, one-byte media reads, authenticated Plex token tests, bounded process/container inventory, stale/revoked-source rejection, configuration race fencing, inline preserved-form validation, source-separated metric history and credential-free AI context verified with fixtures. NAS and Plex pages reviewed at desktop and mobile sizes using local fixture data. Native Windows tests are skipped locally and run in the signed agent release workflow. No live NAS/Plex API or host action performed; installed-release compatibility and library storage checks still need deployment validation.

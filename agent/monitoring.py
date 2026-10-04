@@ -76,3 +76,38 @@ os.statvfs(path)
     except (OSError,subprocess.SubprocessError):
         pass
     return {'sampled_at':time.time(),'id':check['id'],'config':check['config'],'healthy':healthy,'details':details}
+
+
+def discover(state):
+    """Inventory names and counters, never environment variables or command lines."""
+    import os,shutil
+    result={'docker_installed':bool(shutil.which('docker')),'containers':[],'processes':[],'warnings':[]}
+    if result['docker_installed']:
+        try:
+            reply=subprocess.run(['docker','ps','-a','--format','{{json .}}'],stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=4)
+            if reply.returncode:raise ValueError()
+            lines=reply.stdout[:60000].decode().splitlines();result['containers_truncated']=len(lines)>100
+            for line in lines[:100]:
+                x=json.loads(line);result['containers'].append({'target':x['Names'],'name':x['Names'],'image':x.get('Image',''),'state':x.get('State','unknown'),'status':x.get('Status',''),'ports':x.get('Ports','')})
+            reply=subprocess.run(['docker','stats','--no-stream','--format','{{json .}}'],stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=4)
+            stats={x['Name']:x for x in [json.loads(line) for line in reply.stdout[:60000].decode().splitlines()[:100]]} if not reply.returncode else {}
+            for item in result['containers']:
+                row=stats.get(item['name'],{})
+                for key,out in [('CPUPerc','cpu_percent'),('MemPerc','memory_percent')]:
+                    try:item[out]=float(row[key].rstrip('%'))
+                    except (KeyError,ValueError):pass
+        except (OSError,ValueError,subprocess.SubprocessError):result['warnings'].append('Docker inventory is unavailable. Check the daemon and agent permissions.')
+    now=time.monotonic();previous=state.get('discovery_cpu',{});elapsed=now-state.get('discovery_at',now);ticks=os.sysconf('SC_CLK_TCK');page=os.sysconf('SC_PAGE_SIZE');current={}
+    for directory in list(Path('/proc').glob('[0-9]*'))[:4096]:
+        try:
+            pid=int(directory.name);name=(directory/'comm').read_text().strip();raw=(directory/'stat').read_text();columns=raw[raw.rfind(')')+2:].split();counter=(int(columns[11])+int(columns[12]))/ticks
+            # Process start time prevents PID reuse from corrupting CPU deltas.
+            identity=str(pid)+':'+columns[19];current[identity]=counter
+            cpu=max(0,100*(counter-previous[identity])/elapsed) if identity in previous and elapsed>0 else None
+            item={'pid':pid,'name':name,'target':name,'memory_bytes':max(0,int(columns[21]))*page}
+            if cpu is not None:item['cpu_percent']=round(cpu,1)
+            result['processes'].append(item)
+        except (OSError,ValueError,IndexError):continue
+    result['processes'].sort(key=lambda p:(p.get('cpu_percent',0),p['memory_bytes']),reverse=True)
+    result['processes_truncated']=len(result['processes'])>200;result['processes']=result['processes'][:200];state['discovery_cpu']=current;state['discovery_at']=now
+    return result
