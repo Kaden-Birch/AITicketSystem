@@ -47,10 +47,10 @@ if($p.public){
   Add-Type -TypeDefinition 'using System;using System.Text;using System.Runtime.InteropServices;public class FleetProfile{[DllImport("userenv.dll",CharSet=CharSet.Unicode)]public static extern int CreateProfile(string sid,string name,StringBuilder path,uint length);}'
   $path=[Text.StringBuilder]::new(32768)
   if([FleetProfile]::CreateProfile($sid,$p.user,$path,32768) -ne 0){throw 'Unable to create the user profile'}
-  $home=$path.ToString()
- }else{$home=[Environment]::ExpandEnvironmentVariables($profile.ProfileImagePath)}
- $directory=Join-Path $home '.ssh';$file=Join-Path $directory 'authorized_keys'
- foreach($path in @($home,$directory,$file)){
+  $profilePath=$path.ToString()
+ }else{$profilePath=[Environment]::ExpandEnvironmentVariables($profile.ProfileImagePath)}
+ $directory=Join-Path $profilePath '.ssh';$file=Join-Path $directory 'authorized_keys'
+ foreach($path in @($profilePath,$directory,$file)){
   if((Test-Path -LiteralPath $path) -and ((Get-Item -Force -LiteralPath $path).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Refusing redirected SSH paths'}
  }
  New-Item -ItemType Directory -Path $directory -Force | Out-Null

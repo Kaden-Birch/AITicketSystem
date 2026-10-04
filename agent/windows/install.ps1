@@ -39,6 +39,11 @@ try {
    Expand-Archive -LiteralPath $archive -DestinationPath $runtime -Force
    # Isolated application runtime: no Python registrations, shared install upgrades or PATH changes.
    [IO.File]::WriteAllText((Join-Path $runtime 'python313._pth'),"python313.zip`n.`nLib\site-packages`nimport site`n")
+
+  }
+  $pipPresent=$true
+  try { Python 'import importlib.util; assert importlib.util.find_spec("pip") is not None' @() } catch { $pipPresent=$false }
+  if(!$pipPresent){
    $bootstrap=Join-Path $temp 'get-pip.py'
    Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/pypa/get-pip/af54dfe793b24685f8dc4ebba0630d9f2d77653c/public/get-pip.py' -OutFile $bootstrap
    if((Get-FileHash -LiteralPath $bootstrap -Algorithm SHA256).Hash.ToLower() -ne 'fb24e693bab954209a063d90953621412ccad4a500905a726286e038f508ddf6'){throw 'PyPA bootstrap checksum failed.'}
