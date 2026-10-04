@@ -29,10 +29,10 @@ def test_install_and_reinstall_as_system(tmp_path,monkeypatch):
     server=ThreadingHTTPServer(('127.0.0.1',0),Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
     identity={'server':'http://127.0.0.1:'+str(server.server_port),'allow_http':True,'agent_id':'fixture-agent','credential':'fixture-credential'}
     (install_root/'state'/'identity.json').write_text(json.dumps(identity))
-    argv=[powershell(),'-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',str(ROOT/'agent'/'windows'/'install.ps1'),'-Root',str(install_root),'-Source',str(ROOT),'-PythonExe',sys.executable]
+    argv=[powershell(),'-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',str(ROOT/'agent'/'windows'/'install.ps1'),'-Root',str(install_root),'-Source',str(ROOT)]
     try:
         for iteration in range(2):
-            run=subprocess.run(argv,capture_output=True,text=True,timeout=180)
+            run=subprocess.run(argv,capture_output=True,text=True,timeout=360)
             assert run.returncode==0,run.stdout+'\n'+run.stderr
             deadline=time.monotonic()+90
             while time.monotonic()<deadline and (not heartbeats or not results):time.sleep(1)

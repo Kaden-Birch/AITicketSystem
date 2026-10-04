@@ -32,8 +32,8 @@ def powershell():return str(system_directory()/'WindowsPowerShell'/'v1.0'/'power
 
 
 def ps_argv(script):
-    code="$ErrorActionPreference='Stop';$env:PSModulePath=[Environment]::GetFolderPath('System')+'\\WindowsPowerShell\\v1.0\\Modules;'+[Environment]::GetFolderPath('ProgramFiles')+'\\WindowsPowerShell\\Modules';[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);"+script
-    return [powershell(),'-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',base64.b64encode(code.encode('utf-16le')).decode()]
+    code="$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';$env:PSModulePath=[Environment]::GetFolderPath('System')+'\\WindowsPowerShell\\v1.0\\Modules;'+[Environment]::GetFolderPath('ProgramFiles')+'\\WindowsPowerShell\\Modules';[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);"+script
+    return [powershell(),'-NoLogo','-NoProfile','-NonInteractive','-OutputFormat','Text','-EncodedCommand',base64.b64encode(code.encode('utf-16le')).decode()]
 
 
 def literal(value):return "'"+str(value).replace("'","''")+"'"
@@ -127,8 +127,18 @@ def run(argv,timeout=5,limit=16000,allowed=None):
     for t in threads:t.join(timeout=2)
     output={};remaining=limit
     for name in ('stdout','stderr'):
-        encoded=buffers[name].decode('utf-8','replace').encode('utf-8');output[name]=encoded[:remaining].decode('utf-8','ignore');remaining-=len(output[name].encode('utf-8'))
+        encoded=buffers[name].decode('utf-8','replace').encode('utf-8');output[name]=readable(encoded[:remaining].decode('utf-8','ignore'));remaining-=len(output[name].encode('utf-8'))
     return {'state':state or ('completed' if code==0 else 'failed'),'exit_code':code,**output,'truncated':truncated}
+
+
+def readable(value):
+    if not value.lstrip().startswith('#< CLIXML'):return value
+    import re,xml.etree.ElementTree as ET
+    try:
+        root=ET.fromstring(value[value.index('<Objs'):])
+        strings=[item.text or '' for item in root.iter() if item.tag.rsplit('}',1)[-1]=='S' and item.get('S','').lower() in ('error','warning','information')]
+        return re.sub(r'_x([0-9a-fA-F]{4})_',lambda match:chr(int(match[1],16)),'\n'.join(strings))
+    except (ValueError,ET.ParseError):return value
 
 
 def ps(script,timeout=8,limit=16000):

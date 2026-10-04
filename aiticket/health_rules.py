@@ -76,13 +76,16 @@ def save(store,scope,values):
 
 
 def cards(store,scope='*'):
+    from .windows import is_windows
+    windows=scope!='*' and is_windows(store,scope)
     rules={(r['scope'],r['metric']):r for r in store.rows('SELECT * FROM health_rules')};result=[]
     for metric,(label,direction,_,_,size,description) in METRICS.items():
         global_rule=rules.get(('*',metric));local=rules.get((scope,metric)) if scope!='*' else global_rule
         chosen=local or global_rule;cfg=normalize(metric,json.loads(chosen['config'])) if chosen else defaults(metric)
         enabled=bool(chosen and chosen['enabled']);paused=bool(global_rule and global_rule['paused'])
         factor=1e9 if cfg['unit']=='bytes' else 1
-        result.append(dict(cfg,metric=metric,label=label,description=description,size=size,enabled=enabled,paused=paused,inherited=scope!='*' and local is None,override=scope!='*' and local is not None,scope=scope,display_threshold=round(cfg['threshold']/factor,9),display_recovery=round(cfg['recovery']/factor,9)))
+        unsupported=windows and metric in ('memory_pressure_percent','inode_used_percent')
+        result.append(dict(cfg,unsupported=unsupported,metric=metric,label=label,description=description,size=size,enabled=enabled,paused=paused,inherited=scope!='*' and local is None,override=scope!='*' and local is not None,scope=scope,display_threshold=round(cfg['threshold']/factor,9),display_recovery=round(cfg['recovery']/factor,9)))
     return result
 
 
@@ -106,7 +109,9 @@ def sync(store):
                     rule={'config':json.dumps(cfg),'enabled':row['enabled']}
                 cfg=normalize(metric,json.loads(rule['config'])) if rule else defaults(metric)
                 cfg.update(agent_id=agent['id'],health_rule=True)
-                enabled=int(bool(rule and rule['enabled'] and not agent['revoked'] and not (global_rule and global_rule['paused'])))
+                windows=json.loads(agent['host_info']).get('os','').lower().startswith('windows')
+                supported=not (windows and metric in ('memory_pressure_percent','inode_used_percent'))
+                enabled=int(bool(supported and rule and rule['enabled'] and not agent['revoked'] and not (global_rule and global_rule['paused'])))
                 if not existing and not enabled:continue
                 check=existing[0] if existing else None;encoded=json.dumps(cfg,sort_keys=True)
                 if not check:
