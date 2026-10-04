@@ -181,7 +181,10 @@ def test_independent_update_activation_and_interrupted_rollback(runtime,tmp_path
     # The app can remain unavailable: an interrupted update is rolled back before
     # consulting the feed, and the failed release is suppressed until a newer fix.
     broken=root/'releases'/'broken';broken.mkdir();support.activate(root,broken)
-    update.record('installing',previous=str(installed),previous_version=version,available=version)
+    failed_version='0.10.0+000000abcdef'
+    doc.update(version=failed_version,url='https://github.com/Kaden-Birch/AITicketSystem/releases/download/agent-'+failed_version+'/windows-agent.tar.gz')
+    payload=json.dumps(doc).encode();manifest=json.dumps({'payload':base64.b64encode(payload).decode(),'signature':base64.b64encode(key.sign(payload)).decode()}).encode()
+    update.record('installing',previous=str(installed),previous_version=version,available=failed_version)
     recovered=updater.Updater(root);recovered.run()
     assert support.current(root)==installed and recovered.status['state']=='rolled_back'
-    assert recovered.status['failed_release']==version
+    assert recovered.status['failed_release']==failed_version
