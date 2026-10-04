@@ -119,7 +119,7 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
             bound_target=target(c,incident_id,recovery_target,now)
         elif recovery_target is not None:
             raise ValueError('Recovery targets are valid only for proposal drafting.')
-        if automatic and (not bridge.get('automatic') or SEVERITIES.index(incident['severity']) < SEVERITIES.index(bridge['minimum'])):
+        if automatic and (not bridge.get('automatic') or (not json.loads(incident['report']).get('manual_ticket') and SEVERITIES.index(incident['severity']) < SEVERITIES.index(bridge['minimum']))):
             return None
         if c.execute("SELECT 1 FROM power_jobs WHERE machine_id=? AND state IN ('approved','dispatched','authorized','verifying','unknown')",(incident['machine_id'],)).fetchone():
             if automatic: return None
@@ -171,12 +171,20 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
         if len(evidence)>16000:
             document['network_topology']={'coverage':'Topology omitted due to context size; use targets/network for current read-only facts.'}
             evidence=json.dumps(document)
+        from .machine_context import context as machine_context
+        document=json.loads(evidence)
+        document['machine']=machine_context(c,incident['machine_id'],now)
+        if json.loads(incident['report']).get('workflow_test'):document['workflow_test']=True
+        evidence=json.dumps(evidence_snapshot(document))
+        if len(evidence)>16000:
+            # Preserve the primary incident/task; large inventories remain available via targets.
+            document['machine']={'id':incident['machine_id'],'coverage':'Full current host context is available through targets; snapshot omitted to preserve incident evidence.'}
+            evidence=json.dumps(evidence_snapshot(document))
         if codex and bridge.get('command_tools'):
             document=json.loads(evidence)
             report=json.loads(incident['report'])
             task=question.strip() or (report.get('description','') if report.get('manual_ticket') else 'Investigate the incident using current read-only diagnostics. Report findings; do not change systems without an explicit administrator task.')
             from .machine_context import context as machine_context
-            document['machine']=machine_context(c,incident['machine_id'])
             document['administrator_task']=task
             document['task_origin']='Administrator selected this operational investigation; checkpoint resumption restates its saved question as the current task.'
             from .proxmox_operations import context as proxmox_context
@@ -203,7 +211,7 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
         if mode != 'triage':
             c.execute('INSERT INTO ai_messages VALUES(?,?,?,?,?,?)', (uid(), incident_id, job_id, 'user', redact(question.strip()), now))
             store.timeline(c, incident_id, 'ai_question', mode+': '+redact(question.strip())+' · Execution '+job_id, actor='user', now=now)
-        store.timeline(c, incident_id, 'ai_queued', 'Read-only AI '+mode+' queued: '+job_id, actor='user' if not automatic else 'monitor', now=now)
+        store.timeline(c, incident_id, 'ai_queued', 'Investigation queued.', actor='user' if not automatic else 'monitor', now=now)
         store.audit(c, 'ai.queued', job_id, {'incident_id': incident_id, 'automatic': automatic})
         return job_id
 
@@ -383,6 +391,8 @@ def apply_status(store, job_id, document, now=None):
                 summary=str(exc)
         c.execute('UPDATE ai_jobs SET state=?,summary=?,completed=?,error=?,next_attempt=?,lease_until=NULL,lease_token=NULL WHERE id=?', (state, redact(summary), now if state in TERMINAL else None, 'Bridge interrupted; execution must not be replayed.' if state=='unknown' else None, now+30, job_id))
         from .worklog import update_job
+        if job['state']=='unknown' and state in ('running','completed'):
+            c.execute("UPDATE ticket_blockers SET cleared=? WHERE job_id=? AND cleared IS NULL AND reason=?",(now,job_id,'The investigation connection was interrupted. Its outcome is being checked; commands will not be replayed.'))
         update_job(c, store, dict(job), state, now, redact(summary))
         if state in TERMINAL:
             from .handoff import release
@@ -390,7 +400,7 @@ def apply_status(store, job_id, document, now=None):
         if state in ('completed', 'failed') and summary and job['mode'] != 'triage':
             c.execute('INSERT OR IGNORE INTO ai_messages VALUES(?,?,?,?,?,?)', (uid(), job['incident_id'], job_id, 'assistant', redact(summary), now))
         if (state in TERMINAL or state=='unknown') and state != job['state']:
-            store.timeline(c, job['incident_id'], 'ai_'+state, 'AI inference (unverified): '+redact(summary or document['state'])+' · Execution '+job_id, actor='hermes', now=now)
+            store.timeline(c, job['incident_id'], 'ai_'+state, redact(summary or document['state']), actor='hermes', now=now)
             store.audit(c, 'ai.'+state, job_id, actor='hermes')
 
 
@@ -429,6 +439,8 @@ def tick(store, vault, now=None):
             c.execute("UPDATE ai_jobs SET state='expired',completed=? WHERE id=?", (now, job['id']))
             from .handoff import release
             release(c, job)
+            from .worklog import update_job
+            update_job(c,store,dict(job),'expired',now,'The investigation timed out. Review its last result before continuing.')
             store.timeline(c, job['incident_id'], 'ai_expired', 'AI execution expired; unknown usage remains reserved.', now=now)
         active = c.execute("SELECT 1 FROM ai_jobs WHERE state IN ('dispatching','running','unknown')").fetchone()
         sql = "SELECT * FROM ai_jobs WHERE state IN ('dispatching','running','unknown') AND next_attempt<=? AND (lease_until IS NULL OR lease_until<=?) ORDER BY created LIMIT 1" if active else "SELECT * FROM ai_jobs WHERE state='pending' AND next_attempt<=? AND (lease_until IS NULL OR lease_until<=?) ORDER BY created LIMIT 1"
@@ -465,6 +477,9 @@ def tick(store, vault, now=None):
     except (requests.RequestException, ValueError):
         with store.connect() as c:
             c.execute("UPDATE ai_jobs SET state=CASE WHEN state='dispatching' THEN 'unknown' ELSE state END,error='Bridge outcome unknown; polling without replay.',next_attempt=?,lease_until=NULL,lease_token=NULL WHERE id=? AND lease_token=?", (now+min(3600, 10*2**min(job['attempts'], 8)), job['id'], token))
+            if was_pending:
+                from .worklog import update_job
+                update_job(c,store,job,'unknown',now,'The investigation connection was interrupted. Its outcome is being checked; commands will not be replayed.')
     return True
 
 
@@ -474,12 +489,20 @@ def automatic_tick(store,vault):
     if not bridge.get('enabled') or not bridge.get('automatic'): return 0
     eligible=SEVERITIES[SEVERITIES.index(bridge.get('minimum','high')):]
     placeholders=','.join('?' for _ in eligible)
-    candidates=store.rows("SELECT id FROM incidents WHERE closed IS NULL AND status!='Resolved' AND severity IN ("+placeholders+") AND NOT EXISTS (SELECT 1 FROM ai_jobs WHERE incident_id=incidents.id) AND NOT EXISTS (SELECT 1 FROM incident_control WHERE incident_id=incidents.id AND owner='user') AND NOT EXISTS (SELECT 1 FROM timeline WHERE incident_id=incidents.id AND kind='ai_auto_blocked' AND at>?) ORDER BY first_seen LIMIT 100",(*eligible,time.time()-900))
+    candidates=store.rows("SELECT id FROM incidents WHERE closed IS NULL AND status!='Resolved' AND (severity IN ("+placeholders+") OR json_extract(report,'$.manual_ticket')=1) AND NOT EXISTS (SELECT 1 FROM ai_jobs WHERE incident_id=incidents.id) AND NOT EXISTS (SELECT 1 FROM incident_control WHERE incident_id=incidents.id AND owner='user') AND NOT EXISTS (SELECT 1 FROM timeline WHERE incident_id=incidents.id AND kind='ai_auto_blocked' AND at>?) ORDER BY first_seen LIMIT 100",(*eligible,time.time()-900))
     queued=0
     for incident in candidates:
         from .health_rules import incident_paused
         with store.connect() as c:
             if incident_paused(c,incident['id']):continue
+        with store.connect() as c:
+            from .applications import upstream_incident
+            root=upstream_incident(c,incident['id'],time.time())
+            root_row=c.execute('SELECT severity FROM incidents WHERE id=?',(root,)).fetchone() if root else None
+            if root and root_row and root_row['severity'] in eligible:
+                left,right=sorted((incident['id'],root))
+                c.execute('INSERT OR IGNORE INTO incident_links VALUES(?,?,?)',(left,right,'Explicit application dependency: investigating the upstream failure first; cause unconfirmed.'))
+                continue
         try:
             if request_job(store,vault,incident['id'],automatic=True): queued+=1
         except ValueError as exc:
@@ -511,15 +534,26 @@ def automatic_status(store,incident):
     jobs=store.rows('SELECT id,state,error FROM ai_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 1',(incident['id'],))
     if jobs:
         job=jobs[0]
-        return ('Ticket resolved. Latest AI execution ' if resolved else 'AI execution ')+job['state']+' · '+job['id']+('. '+job['error'] if job['error'] else '')+'. Automatic triage queues once per ticket; use Continue investigation for another session.'
+        return 'Ticket resolved.' if resolved else {'pending':'AI investigation pending.','dispatching':'Starting the investigation.','running':'AI is investigating.','completed':'Investigation complete.','failed':'Investigation needs attention.','unknown':'Investigation interrupted; review before continuing.','cancelled':'AI investigation stopped.','expired':'Investigation timed out.'}.get(job['state'],'Waiting for AI.')
     bridge=store.setting('hermes_config',BRIDGE_DEFAULTS)
     if resolved: return 'No AI execution recorded for this ticket. It is resolved, so no automatic investigation will start now. Current ticket severity: '+incident['severity'].capitalize()+'; configured AI minimum: '+bridge.get('minimum','high').capitalize()+'.'
     if not bridge.get('enabled'): return 'Automatic AI not queued: AI is disabled. Enable it under Hermes & usage.'
     if not bridge.get('automatic'): return 'Automatic AI not queued: automatic triage is disabled under Hermes & usage.'
     minimum=bridge.get('minimum','high')
-    if SEVERITIES.index(incident['severity'])<SEVERITIES.index(minimum): return 'Automatic AI not queued: this ticket is '+incident['severity'].capitalize()+', below the '+minimum.capitalize()+' minimum under Hermes & usage.'
+    if not json.loads(incident['report']).get('manual_ticket') and SEVERITIES.index(incident['severity'])<SEVERITIES.index(minimum): return 'Automatic AI not queued: this ticket is '+incident['severity'].capitalize()+', below the '+minimum.capitalize()+' minimum under Hermes & usage.'
     control=store.rows('SELECT owner,handling_mode FROM incident_control WHERE incident_id=?',(incident['id'],))
     if control and (control[0]['owner']=='user' or control[0]['handling_mode']!='automatic'): return 'Automatic AI not queued: ticket handling is paused or under human control.'
     blocked=store.rows("SELECT text FROM timeline WHERE incident_id=? AND kind='ai_auto_blocked' ORDER BY at DESC LIMIT 1",(incident['id'],))
     if blocked: return 'Automatic AI admission blocked: '+blocked[0]['text']
     return 'Eligible for automatic AI; waiting for the dispatcher. Queueing still requires available run limits and a compatible bridge.'
+
+
+def queue_manual(store,vault,incident_id):
+    """Queue administrator work immediately, with a durable actionable blocker on failure."""
+    try:
+        return request_job(store,vault,incident_id)
+    except ValueError as exc:
+        from .worklog import block
+        with store.connect() as c:
+            block(c,store,incident_id,None,str(exc),time.time())
+        return None

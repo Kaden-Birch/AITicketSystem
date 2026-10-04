@@ -1,6 +1,11 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 35
+CURRENT_VERSION = 36
 MIGRATIONS = {
+    36: (
+        "CREATE TABLE IF NOT EXISTS applications(id TEXT PRIMARY KEY,name TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS application_checks(application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE,check_id TEXT NOT NULL REFERENCES checks(id),PRIMARY KEY(application_id,check_id))",
+        "CREATE TABLE IF NOT EXISTS application_dependencies(application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE,check_id TEXT NOT NULL REFERENCES checks(id),upstream_id TEXT NOT NULL REFERENCES checks(id),PRIMARY KEY(application_id,check_id,upstream_id))",
+    ),
     35: ("CREATE TABLE IF NOT EXISTS agent_updates(agent_id TEXT PRIMARY KEY REFERENCES agents(id),at REAL NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT '{}',request TEXT)",),
     34: (
         "CREATE TABLE IF NOT EXISTS network_proxmox(object_id TEXT PRIMARY KEY REFERENCES proxmox_objects(id),at REAL NOT NULL,data TEXT NOT NULL)",

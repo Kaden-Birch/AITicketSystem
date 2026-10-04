@@ -6,6 +6,9 @@ from .security import validate_url
 
 
 def probe(kind, config, vault, store=None):
+    if kind == 'workflow_test':
+        from .reliability import test_probe
+        return test_probe(store,config['_check_id'])
     if kind == 'unifi_device':
         from .unifi import device_probe
         return device_probe(store,config)

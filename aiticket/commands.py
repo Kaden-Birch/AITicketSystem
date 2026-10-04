@@ -53,6 +53,8 @@ def queue(store,vault,machine,command,identifier,incident=None,ai_job=None,exter
         if c.execute("SELECT 1 FROM proxmox_api_jobs WHERE machine_id=? AND state IN ('dispatched','unknown')",(machine,)).fetchone(): raise ValueError('Reconcile Proxmox API operations before shell commands.')
         if c.execute("SELECT 1 FROM power_jobs WHERE machine_id=? AND state IN ('awaiting','approved','dispatched','authorized','verifying','unknown')",(machine,)).fetchone() or c.execute("SELECT 1 FROM action_proposals p JOIN agents a ON a.id=p.agent_id WHERE a.machine_id=? AND p.state IN ('awaiting','approved','dispatched','authorized','verifying','unknown')",(machine,)).fetchone(): raise ValueError('Complete outstanding power/recovery work before shell commands.')
         if c.execute("SELECT 1 FROM command_jobs WHERE agent_id=? AND state IN ('awaiting','pending','dispatched','running','cancelling','unknown')",(agent['id'],)).fetchone(): raise ValueError('Complete or reconcile the existing command before sending another.')
+        from .reliability import repair_budget
+        repair_budget(c,vault,ai_job,command=command)
         from .host_access import requires_approval
         approval=requires_approval(policy['approval'],command=command)
         now=time.time();state='awaiting' if approval else 'pending'

@@ -83,10 +83,12 @@ def test_manual_ticket_is_not_a_probe_and_closes_independently(signed_in):
     iid=response.location.rsplit('/',1)[-1]
     row=store.rows('SELECT * FROM incidents WHERE id=?',(iid,))[0]
     assert json.loads(row['report'])['manual_ticket']
-    assert not store.rows('SELECT * FROM deliveries') and not store.rows('SELECT * FROM ai_jobs')
+    assert not store.rows('SELECT * FROM ai_jobs')
+    assert not store.rows("SELECT * FROM deliveries WHERE event_key LIKE '%:opened'")
+    assert store.rows('SELECT * FROM ticket_blockers')[0]['reason'].startswith('AI is disabled')
     assert not store.rows('SELECT * FROM checks WHERE enabled=1')
     assert export_inventory(store)['tables']['checks']==[]
-    assert b'USER-REPORTED' in client.get(response.location).data
+    assert b'update-author user' in client.get(response.location).data
     assert b'Application intermittently slow' in client.get(response.location).data
     assert client.post('/checks/'+row['check_id']+'/enabled',data={'csrf':csrf,'enabled':'yes'}).status_code==400
     client.post('/incidents/'+iid+'/note',data={'csrf':csrf,'operation':'resolve','note':'Finished testing'})

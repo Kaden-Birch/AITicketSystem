@@ -198,7 +198,46 @@ def create_app(data_dir=None, testing=False):
     @login_required
     def dashboard():
         from .overview_ui import dashboard_data
-        return render_template('dashboard.html',summary=dashboard_data(store))
+        from .reliability import issues
+        return render_template('dashboard.html',summary=dashboard_data(store),monitoring_attention=len(issues(store)))
+
+    from .ticket_updates import readable
+    app.jinja_env.filters['readable_update']=readable
+
+    @app.route('/monitoring-health',methods=['GET','POST'])
+    @login_required
+    def monitoring_health():
+        from .reliability import issues,DEFAULTS
+        if request.method=='POST':
+            values={key:int(request.form.get(key,default)) for key,default in DEFAULTS.items()}
+            if not 1<=values['repeat_limit']<=10 or not 1<=values['operation_limit']<=100 or not 60<=values['window_seconds']<=86400:
+                raise ValueError('Choose 1–10 repeat attempts, 1–100 total operations, and a window of 60–86400 seconds.')
+            store.save_many({'repair_limits':values},actor='user');flash('Repair limits saved.')
+            return redirect('/monitoring-health')
+        return render_template('monitoring-health.html',issues=issues(store),limits={**DEFAULTS,**store.setting('repair_limits',{})},machines=store.rows('SELECT id,name FROM machines ORDER BY name'))
+
+    @app.post('/monitoring-health/test')
+    @login_required
+    def workflow_test():
+        from .reliability import start_test
+        identifier=start_test(store,vault,request.form.get('machine_id'))
+        return redirect(url_for('incident',incident_id=identifier))
+
+    @app.route('/applications',methods=['GET','POST'])
+    @login_required
+    def applications():
+        from .applications import view,save
+        if request.method=='POST':
+            identifier=request.form.get('id') or None
+            if request.form.get('operation')=='delete':
+                with store.connect() as c:
+                    c.execute('DELETE FROM applications WHERE id=?',(identifier,));store.audit(c,'application.deleted',identifier)
+            else:
+                children=request.form.getlist('child');parents=request.form.getlist('upstream')
+                if len(children)!=len(parents):raise ValueError('Choose both sides of each dependency.')
+                save(store,request.form.get('name',''),request.form.getlist('checks'),[(x,y) for x,y in zip(children,parents) if x or y],identifier)
+            flash('Application settings saved.');return redirect('/applications')
+        return render_template('applications.html',applications=view(store),checks=store.rows("SELECT c.id,c.name,m.name AS host FROM checks c JOIN machines m ON m.id=c.machine_id WHERE c.kind NOT IN ('manual','workflow_test') ORDER BY m.name,c.name"))
 
     @app.get('/hosts/new')
     @login_required
@@ -361,6 +400,18 @@ def create_app(data_dir=None, testing=False):
         return complete(store,command_agent(),request.get_json() or {})
 
     def command_tool_action(payload,ai_job=None,external=False):
+        from .reliability import RepairLimit
+        try:
+            return command_tool_action_impl(payload,ai_job,external)
+        except RepairLimit as exc:
+            if ai_job:
+                from .worklog import block
+                with store.connect() as c:
+                    job=c.execute('SELECT incident_id FROM ai_jobs WHERE id=?',(ai_job,)).fetchone()
+                    if job: block(c,store,job['incident_id'],ai_job,str(exc),time.time())
+            return {'state':'blocked','error':str(exc)}
+
+    def command_tool_action_impl(payload,ai_job=None,external=False):
         from .commands import queue,view,decide
         if not isinstance(payload,dict) or set(payload)-{'action','machine_id','incident_id','command','id','connection_id','method','path','params','summary'}: raise ValueError('Invalid command tool envelope.')
         if any(k in payload and (not isinstance(payload[k],str) or len(payload[k])>100) for k in ('id','machine_id','incident_id')): raise ValueError('Invalid command target identity.')
@@ -372,6 +423,8 @@ def create_app(data_dir=None, testing=False):
                 if not job: abort(403)
                 incident=store.rows('SELECT machine_id FROM incidents WHERE id=?',(job['incident_id'],))[0]
                 machine=incident['machine_id'];incident_id=job['incident_id']
+                if json.loads(job['evidence']).get('workflow_test') and action not in ('targets','network','block','resolve'):
+                    raise ValueError('Workflow tests only inspect supplied context and request verification. Host operations are disabled.')
         else:
             machine=payload.get('machine_id');incident_id=payload.get('incident_id')
         if action=='block':
@@ -394,9 +447,12 @@ def create_app(data_dir=None, testing=False):
                 current=ai_allowed(c,ai_job)
                 if not current: abort(403)
                 c.execute('UPDATE ai_jobs SET resolution_summary=? WHERE id=?',(redact(summary.strip()),ai_job))
+                report_row=c.execute('SELECT report FROM incidents WHERE id=?',(incident_id,)).fetchone()
+                report=json.loads(report_row['report']);report['verification_requested_at']=time.time()
+                c.execute('UPDATE incidents SET report=? WHERE id=?',(json.dumps(report),incident_id))
                 c.execute('UPDATE checks SET next_run=0 WHERE machine_id=? AND enabled=1',(machine,))
-                store.timeline(c,incident_id,'resolution_requested','AI requested closure after independent monitoring verification: '+redact(summary.strip()),actor='hermes')
-            return {'state':'verification_pending','note':'Finish this investigation. After it completes, the server resolves and sends the configured recovery notification only once fresh independent monitoring is healthy. No closure from AI text alone.'}
+                store.timeline(c,incident_id,'resolution_requested',redact(summary.strip()),actor='hermes')
+            return {'state':'verification_pending','note':'Work finished. Recovery checks are running. Do not describe internal closure procedures in your final update.'}
         from . import proxmox_operations as pxops
         if action=='targets':
             targets=store.rows('SELECT m.id,m.name FROM machines m JOIN command_policies p ON p.machine_id=m.id WHERE p.enabled=1 AND '+('m.id=? AND p.hermes=1' if ai_job else 'p.external=1'),(machine,) if ai_job else ())
@@ -480,6 +536,9 @@ def create_app(data_dir=None, testing=False):
             handling=f.get('handling_mode','automatic')
             if handling not in ('automatic','human','paused'): raise ValueError('Unknown handling mode.')
             identifier=open_ticket(store,f.get('machine_id'),f.get('title',''),f.get('description',''),f.get('severity','low'),f.get('notify')=='yes',handling_mode=handling)
+            if handling=='automatic':
+                from .ai import queue_manual
+                queue_manual(store,vault,identifier)
             return redirect(url_for('incident',incident_id=identifier))
         from .hostview import overview
         return render_template('ticket-new.html',host_previews=overview(store),machines=store.rows('SELECT id,name FROM machines ORDER BY name'),selected=request.args.get('machine',''))
@@ -633,7 +692,9 @@ def create_app(data_dir=None, testing=False):
         from .handoff import view
         from .worklog import view as work_view
         from .hostview import detail
-        return render_template('incident.html',automatic_status=automatic_status(store,rows[0]), machine_detail=detail(store,rows[0]['machine_id']),work=work_view(store,incident_id),recovery_drafts=[{**d,'data':json.loads(d['payload'])} for d in store.rows('SELECT d.*,a.proposal_id FROM recovery_drafts d LEFT JOIN draft_adoptions a ON a.job_id=d.job_id WHERE d.incident_id=? ORDER BY d.created DESC LIMIT 100',(incident_id,))], merge_candidates=store.rows("SELECT id,severity,first_seen FROM incidents WHERE machine_id=? AND id<>? AND closed IS NULL AND status<>'Resolved'",(rows[0]['machine_id'],incident_id)), ownership=view(store, incident_id), handoff_request_id=uid(), proposals=[{**p,'data':json.loads(p['payload'])} for p in store.rows('SELECT * FROM action_proposals WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,))], action_agents=[{**a,'action_services':json.loads(a['capabilities']).get('action_services',{})} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))], automatic_ai_config=store.setting('hermes_config',{}),workspace_request_id=uid(), workspace_messages=store.rows('SELECT m.*,j.state,j.mode FROM ai_messages m JOIN ai_jobs j ON j.id=m.job_id WHERE m.incident_id=? ORDER BY m.created DESC LIMIT 100', (incident_id,)), workspace_sources=store.rows('SELECT s.check_id,c.name FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=?',(incident_id,)), ai_jobs=store.rows('SELECT id,state,mode,execution_mode,model,reasoning_effort,created,summary,error,resolution_summary FROM ai_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100', (incident_id,)), ai_meter=meter(store, incident_id), incident=rows[0], report=json.loads(rows[0]['report']), timeline=store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at', (incident_id,)), links=store.rows('SELECT * FROM incident_links WHERE left_id=? OR right_id=?',(incident_id,incident_id)), diagnostic_jobs=store.rows('SELECT * FROM diagnostic_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,)), diagnostic_agents=[{**a,'caps':json.loads(a['capabilities'])} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))])
+        from .ticket_updates import conversation
+        updates=conversation(store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at,id',(incident_id,)),store.rows('SELECT * FROM ai_jobs WHERE incident_id=? ORDER BY created DESC',(incident_id,)))
+        return render_template('incident.html',updates=updates,automatic_status=automatic_status(store,rows[0]), machine_detail=detail(store,rows[0]['machine_id']),work=work_view(store,incident_id),recovery_drafts=[{**d,'data':json.loads(d['payload'])} for d in store.rows('SELECT d.*,a.proposal_id FROM recovery_drafts d LEFT JOIN draft_adoptions a ON a.job_id=d.job_id WHERE d.incident_id=? ORDER BY d.created DESC LIMIT 100',(incident_id,))], merge_candidates=store.rows("SELECT id,severity,first_seen FROM incidents WHERE machine_id=? AND id<>? AND closed IS NULL AND status<>'Resolved'",(rows[0]['machine_id'],incident_id)), ownership=view(store, incident_id), handoff_request_id=uid(), proposals=[{**p,'data':json.loads(p['payload'])} for p in store.rows('SELECT * FROM action_proposals WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,))], action_agents=[{**a,'action_services':json.loads(a['capabilities']).get('action_services',{})} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))], automatic_ai_config=store.setting('hermes_config',{}),workspace_request_id=uid(), workspace_messages=store.rows('SELECT m.*,j.state,j.mode FROM ai_messages m JOIN ai_jobs j ON j.id=m.job_id WHERE m.incident_id=? ORDER BY m.created DESC LIMIT 100', (incident_id,)), workspace_sources=store.rows('SELECT s.check_id,c.name FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=?',(incident_id,)), ai_jobs=store.rows('SELECT id,state,mode,execution_mode,model,reasoning_effort,created,summary,error,resolution_summary FROM ai_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100', (incident_id,)), ai_meter=meter(store, incident_id), incident=rows[0], report=json.loads(rows[0]['report']), timeline=store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at', (incident_id,)), links=store.rows('SELECT * FROM incident_links WHERE left_id=? OR right_id=?',(incident_id,incident_id)), diagnostic_jobs=store.rows('SELECT * FROM diagnostic_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,)), diagnostic_agents=[{**a,'caps':json.loads(a['capabilities'])} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))])
 
     @app.post('/incidents/<incident_id>/archive')
     @login_required

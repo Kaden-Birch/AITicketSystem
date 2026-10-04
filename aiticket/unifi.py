@@ -120,7 +120,7 @@ def probe(store,vault,config):
         if pool.get('capacity',0)>0 and pool.get('usage',0)/pool['capacity']>=.9: alerts.append('Storage pool at least 90% full')
     for disk in result['readings'].get('storage',{}).get('disks',[]):
         if disk.get('state') and disk['state']!='optimal': alerts.append('Disk '+str(disk.get('slotId',''))+': '+disk['state'])
-    return healthy and not alerts, {'sampled_at':result['sampled_at'],'reason':'UniFi telemetry available' if healthy and not alerts else 'UniFi telemetry requires attention','alerts':alerts,'endpoint_errors':required_errors,'optional_telemetry_errors':{k:v for k,v in result['errors'].items() if k.startswith(('statistics:','client:'))}}
+    return (False if alerts else True if healthy else None), {'monitoring_issue':bool(required_errors),'sampled_at':result['sampled_at'],'reason':'UniFi telemetry available' if healthy and not alerts else 'UniFi telemetry requires attention','alerts':alerts,'endpoint_errors':required_errors,'optional_telemetry_errors':{k:v for k,v in result['errors'].items() if k.startswith(('statistics:','client:'))}}
 
 
 def ai_context(c,machine):

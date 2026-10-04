@@ -2,8 +2,9 @@
 
 The ticket creation form contains a title, searchable machine selection, priority,
 issue description, assigned AI agent (currently Hermes), and three handling modes.
-Selecting AI handling respects the existing automatic investigation switch,
-minimum severity, bridge validation and usage limits. It does not enable AI globally.
+Selecting AI handling queues administrator work immediately, independently of
+the monitoring severity threshold and automatic-triage switch. Bridge validation,
+global AI enablement and usage limits still apply; failures appear as blockers.
 Human and paused modes hold automatic investigation. Machine previews and the
 saved ticket sidebar retain the explicit Proxmox association.
 
@@ -137,3 +138,9 @@ The individual workspace now shares Agent Health’s softer grouped-card styling
 rounded surfaces, subtle separators, right-aligned sidebar values, segmented
 handling controls, quiet action buttons, and inset message editors. This styling
 is scoped to ticket details and does not change the ticket list or permissions.
+
+## Investigation reliability
+
+See [Dependable investigations and application health](investigation-reliability.md)
+for host context coverage, monitoring integrity, repair limits, recovery verification,
+application dependencies, the harmless workflow test, and readable activity cards.

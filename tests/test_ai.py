@@ -173,6 +173,8 @@ def test_ambiguous_dispatch_only_polls(environment):
         ai.tick(store,vault,now=1200)
     assert [m[0] for m in methods]==['POST','GET','GET']
     assert store.rows('SELECT state FROM ai_jobs')[0]['state']=='unknown'
+    blockers=store.rows('SELECT * FROM ticket_blockers WHERE incident_id=? AND cleared IS NULL',(incident,))
+    assert len(blockers)==1 and 'interrupted' in blockers[0]['reason']
 
 
 def test_bridge_not_found_fences_late_execution(environment):
@@ -262,6 +264,7 @@ def test_expired_and_resolved_jobs_do_not_call_bridge(environment):
         ai.tick(store,vault,now=5000)
         request.assert_not_called()
     assert store.rows('SELECT state FROM ai_jobs')[0]['state']=='expired'
+    assert store.rows('SELECT * FROM ticket_blockers WHERE incident_id=? AND cleared IS NULL',(incident,))
     job=ai.request_job(store,vault,incident)
     with store.connect() as c:
         c.execute("UPDATE incidents SET status='Resolved' WHERE id=?",(incident,))

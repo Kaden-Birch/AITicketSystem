@@ -111,3 +111,5 @@ Host [network topology](docs/network-topology.md) connects interface inventory a
 Linux agents now include an [independent signed-release updater](docs/agent.md#independent-automatic-updates), automatic rollout, heartbeat verification/rollback, and host-settings version/manual-update controls. Existing agents need one installer run to enable it.
 
 Windows hosts use the [Windows agent installer](docs/agent-windows.md), with LocalSystem command access and independent signed automatic updates.
+
+- [Investigation reliability, application health and workflow testing](docs/investigation-reliability.md)

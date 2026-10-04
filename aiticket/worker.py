@@ -32,7 +32,7 @@ def tick(store, vault):
             healthy, evidence = probe(job['kind'], {**json.loads(job['config']), '_check_id':job['id']}, vault, store)
         except Exception as exc:
             # Do not put URLs, tokens or raw upstream error bodies in evidence.
-            healthy, evidence = (None if job['kind']=='agent_metric' else False), {'reason': 'Check could not complete', 'error_type': type(exc).__name__}
+            healthy, evidence = (None if job['kind'] in ('agent_metric','unifi','unifi_device') else False), {'reason': 'Check could not complete', 'error_type': type(exc).__name__}
         observe(store, job['id'], healthy, evidence, lease_token=job['lease_token'])
     from .engine import resolution_tick
     resolution_tick(store)
@@ -51,6 +51,15 @@ def deliver(store, vault, job):
         outcome(store, job, 'pending', 'Discord webhook has not been configured.', 60)
         return
     incident = store.rows('SELECT * FROM incidents WHERE id=?', (job['incident_id'],))[0]
+    from .applications import upstream_incident
+    with store.connect() as c: root=upstream_incident(c,incident['id'],time.time())
+    from .policies import effective
+    from .engine import SEVERITIES
+    with store.connect() as c:
+        root_row=c.execute('SELECT machine_id,severity FROM incidents WHERE id=?',(root,)).fetchone() if root else None
+        root_policy=effective(c,root_row['machine_id']) if root_row else None
+    if root and root_policy['enabled'] and SEVERITIES.index(root_row['severity'])>=SEVERITIES.index(root_policy['minimum']) and job['event_key'].endswith(':opened'):
+        outcome(store,job,'pending','Grouped with an active upstream application incident.',60);return
     from .health_rules import incident_paused
     with store.connect() as c: health_paused=incident_paused(c,incident['id'])
     if health_paused and not job['event_key'].endswith(':recovery'):

@@ -179,6 +179,8 @@ def resolve_verified(c,store,incident_id,summary,now):
     report=json.loads(row['report']);report['recovery_summary']=summary[:1000]
     report['recovered_at']=now;report['observed']='healthy'
     c.execute("UPDATE incidents SET status='Resolved',closed=?,last_seen=?,report=? WHERE id=?",(now,now,json.dumps(report),incident_id))
+    if report.get('workflow_test'):
+        c.execute('UPDATE checks SET enabled=0 WHERE id=(SELECT check_id FROM incidents WHERE id=?)',(incident_id,))
     store.timeline(c,incident_id,'recovery',summary,actor='monitor',now=now)
     enqueue(c,incident_id,'recovery',now,store)
 
@@ -194,7 +196,7 @@ def resolution_tick(store,now=None):
             if c.execute("SELECT 1 FROM power_jobs WHERE machine_id=? AND state IN ('awaiting','approved','dispatched','authorized','verifying','unknown')",(job['machine_id'],)).fetchone(): continue
             if c.execute("SELECT 1 FROM action_proposals WHERE incident_id=? AND state IN ('awaiting','approved','dispatched','authorized','verifying','unknown')",(job['incident_id'],)).fetchone(): continue
             checks=c.execute("SELECT c.*,o.at AS observed_at,o.health AS latest_health FROM checks c LEFT JOIN observations o ON o.id=(SELECT id FROM observations WHERE check_id=c.id ORDER BY at DESC LIMIT 1) WHERE c.machine_id=? AND c.enabled=1",(job['machine_id'],)).fetchall()
-            if not checks or any(r['health']!='healthy' or r['latest_health']!='healthy' or r['observed_at'] is None or r['observed_at']<job['created'] or now-r['observed_at']>max(180,r['interval']*3) for r in checks): continue
+            if not checks or any(r['health']!='healthy' or r['latest_health']!='healthy' or r['observed_at'] is None or r['observed_at']<json.loads(job['report']).get('verification_requested_at',job['created']) or now-r['observed_at']>max(180,r['interval']*3) for r in checks): continue
             sources=c.execute('SELECT c.enabled,s.report FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=?',(job['incident_id'],)).fetchall()
             if any(not r['enabled'] or json.loads(r['report']).get('observed')!='healthy' or now-json.loads(r['report']).get('observed_at',0)>180 for r in sources): continue
             summary=job['resolution_summary'][:700]+' Recovery confirmed by fresh monitoring.'

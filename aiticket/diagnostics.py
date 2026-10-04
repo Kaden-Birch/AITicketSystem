@@ -85,7 +85,7 @@ def metric_probe(store,config):
     now=time.time()
     agent=store.rows('SELECT * FROM agents WHERE id=? AND revoked=0',(config['agent_id'],))
     if not agent or not agent[0]['sampled_at'] or not -30<=now-agent[0]['sampled_at']<=180 or not agent[0]['last_seen'] or now-agent[0]['last_seen']>180:
-        return None,{'reason':'Metric unavailable or stale; not evidence of pressure'}
+        return None,{'reason':'Metric collection needs attention. Check the agent clock and connection.','monitoring_issue':True,'sampled_at':agent[0]['sampled_at'] if agent else None,'received_at':agent[0]['last_seen'] if agent else None}
     telemetry=json.loads(agent[0]['telemetry'] or '{}')
     metric=config['metric'];value=None
     if 'threshold' in config:
