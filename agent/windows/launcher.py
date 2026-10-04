@@ -1,6 +1,7 @@
 """Stable Windows task launcher; outside automatically updated agent code."""
 import json,subprocess,sys,time,os
 from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parent))
 from platform_support import Job,resume
 ROOT=Path(__file__).resolve().parent
 

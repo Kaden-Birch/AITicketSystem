@@ -1,6 +1,7 @@
 """Independent Windows signed updater, running as its own SYSTEM scheduled task."""
 import base64,hashlib,io,json,os,re,shutil,sys,tarfile,tempfile,time,urllib.request,ssl
 from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parent))
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 from platform_support import locks,current,activate,ps,literal
 
@@ -44,7 +45,7 @@ def extract(body,path):
         for member in members:(path/member.name).write_bytes(archive.extractfile(member).read())
     import subprocess
     subprocess.run([sys.executable,'-m','compileall','-q',str(path)],check=True,timeout=30)
-    subprocess.run([sys.executable,'-c','import backend,platform_support,runner'],cwd=path/'windows',check=True,timeout=30,capture_output=True)
+    subprocess.run([sys.executable,'-c','import sys;sys.path.insert(0,sys.argv[1]);import backend,platform_support,runner',str(path/'windows')],cwd=path/'windows',check=True,timeout=30,capture_output=True)
 
 
 class Updater:

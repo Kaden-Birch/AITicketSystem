@@ -1,6 +1,7 @@
 """Adapt the shared durable agent protocol to Windows; run only through launcher."""
 import importlib.util,os,sys,types
 from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parent))
 from platform_support import locks
 
 

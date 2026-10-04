@@ -32,12 +32,17 @@ try {
  if(!$PythonExe){
   $PythonExe=Join-Path $Root 'runtime\python.exe'
   if(!(Test-Path -LiteralPath $PythonExe)){
-   $installer=Join-Path $temp 'python.exe'
-   Invoke-WebRequest -UseBasicParsing 'https://www.python.org/ftp/python/3.13.16/python-3.13.16-amd64.exe' -OutFile $installer
-   $signature=Get-AuthenticodeSignature -LiteralPath $installer
-   if($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Python Software Foundation'){throw 'Python installer signature failed.'}
-   $result=Start-Process -FilePath $installer -ArgumentList @('/quiet','InstallAllUsers=1','Include_launcher=0','Include_test=0','PrependPath=0',('TargetDir="'+(Join-Path $Root 'runtime')+'"')) -Wait -PassThru
-   if($result.ExitCode -notin @(0,3010)){throw 'Python installation failed.'}
+   $archive=Join-Path $temp 'python.zip'
+   Invoke-WebRequest -UseBasicParsing 'https://www.python.org/ftp/python/3.13.16/python-3.13.16-embed-amd64.zip' -OutFile $archive
+   if((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLower() -ne '97dae5274cc54867065e8d5a3226e48c35017ed332a0fdb0e27d5b5821961297'){throw 'Python runtime checksum failed.'}
+   $runtime=Join-Path $Root 'runtime'
+   Expand-Archive -LiteralPath $archive -DestinationPath $runtime -Force
+   # Isolated application runtime: no Python registrations, shared install upgrades or PATH changes.
+   [IO.File]::WriteAllText((Join-Path $runtime 'python313._pth'),"python313.zip`n.`nLib\site-packages`nimport site`n")
+   $bootstrap=Join-Path $temp 'get-pip.py'
+   Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/pypa/get-pip/af54dfe793b24685f8dc4ebba0630d9f2d77653c/public/get-pip.py' -OutFile $bootstrap
+   if((Get-FileHash -LiteralPath $bootstrap -Algorithm SHA256).Hash.ToLower() -ne 'fb24e693bab954209a063d90953621412ccad4a500905a726286e038f508ddf6'){throw 'PyPA bootstrap checksum failed.'}
+   Native $PythonExe @($bootstrap,'--disable-pip-version-check')
   }
  }
  Python 'import sys; assert sys.version_info >= (3,11) and sys.maxsize > 2**32' @()

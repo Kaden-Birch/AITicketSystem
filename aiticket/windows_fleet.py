@@ -30,8 +30,9 @@ def command(store,values):
 SCRIPT=r'''$ErrorActionPreference='Stop'
 $admin=Get-LocalGroup -SID 'S-1-5-32-544'
 $user=Get-LocalUser -Name $p.user -ErrorAction SilentlyContinue
-foreach($g in $p.groups){Get-LocalGroup -Name $g | Out-Null}
-if($p.public -and (($p.kind -eq 'user' -and $p.administrator) -or ($user -and @(Get-LocalGroupMember -Group $admin.Name | Where-Object {$_.SID.Value -eq $user.SID.Value}).Count))){throw 'Windows OpenSSH shares administrator keys across accounts. Use a standard account for per-user key deployment; no shared administrator key file was changed.'}
+$groups=@($p.groups | ForEach-Object {Get-LocalGroup -Name $_})
+$becomesAdmin=$p.administrator -or @($groups | Where-Object {$_.SID.Value -eq 'S-1-5-32-544'}).Count -gt 0
+if($p.public -and (($p.kind -eq 'user' -and $becomesAdmin) -or ($user -and @(Get-LocalGroupMember -Group $admin.Name | Where-Object {$_.SID.Value -eq $user.SID.Value}).Count))){throw 'Windows OpenSSH shares administrator keys across accounts. Use a standard account for per-user key deployment; no shared administrator key file was changed.'}
 if($p.kind -eq 'user'){
  if($user){throw 'Account already exists; preserved without modification'}
  $user=New-LocalUser -Name $p.user -NoPassword

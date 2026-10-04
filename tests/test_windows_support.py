@@ -59,3 +59,19 @@ def test_mixed_fleet_uses_correct_interpreter(environment,monkeypatch):
     assert 'New-LocalUser' in command(store,{'kind':'user','username':'fixture','access':'administrator'})
     for values in ({'kind':'packages','packages':'x;Restart-Computer'},{'kind':'user','username':'x;evil'}):
         with pytest.raises(ValueError):command(store,values)
+
+
+def test_windows_does_not_inherit_linux_only_health_alerts(environment):
+    from aiticket import health_rules as health
+    _,store,_=environment;machine,_,_=enrolled(store)
+    linux=uid();linux_agent=uid()
+    with store.connect() as c:
+        c.execute('INSERT INTO machines(id,name,created) VALUES(?,?,0)',(linux,'Linux'))
+        c.execute('INSERT INTO agents(id,machine_id,credential_digest,host_info) VALUES(?,?,?,?)',(linux_agent,linux,'linux-fixture',json.dumps({'os':'Ubuntu'})))
+    for metric in ('memory_pressure_percent','inode_used_percent','cpu_percent'):
+        cfg=health.defaults(metric)
+        health.save(store,'*',{'metric':metric,'unit':'percent','threshold':str(cfg['threshold']),'recovery':str(cfg['recovery']),'sustain_seconds':'120','severity':'medium','enabled':'yes'})
+    assert all(json.loads(c['config'])['metric']=='cpu_percent' for c in store.rows('SELECT config FROM checks WHERE machine_id=? AND enabled=1',(machine,)))
+    assert len(store.rows('SELECT id FROM checks WHERE machine_id=? AND enabled=1',(linux,)))==3
+    cards=health.cards(store,machine)
+    assert {c['metric'] for c in cards if c['unsupported']}=={'memory_pressure_percent','inode_used_percent'}
