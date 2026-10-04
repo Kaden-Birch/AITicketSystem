@@ -1,4 +1,6 @@
-# Linux agent installation
+# Agent installation
+
+Choose [Linux](#recommended-one-command-installation-or-upgrade) or the [Windows installer](agent-windows.md). Both report to the same application and use the same host access modes, checks, ticket workflows and independent signed update channel.
 
 ## Recommended one-command installation or upgrade
 
@@ -91,6 +93,6 @@ Automatic updates default enabled. To pause them locally, set `automatic` to `fa
 
 ## Publishing agent releases (maintainers)
 
-`.github/workflows/agent-release.yml` validates updater tests and publishes when agent files change on main, or on manual dispatch. It signs manifests using the repository's encrypted `AGENT_RELEASE_SIGNING_KEY` secret. The public key is committed in `agent/release-public.pem`; private key material must never be committed. An immutable `agent-VERSION+COMMIT` release contains the archive; `agent-stable` contains the signed channel manifest. Publication refuses a signing-key mismatch and never overwrites an existing version's archive. Retain a protected backup of the signing key. Replacing the signing key requires deliberate trust-anchor deployment to installed updaters.
+`.github/workflows/agent-release.yml` validates Linux updater tests and native Windows runtime/installation tests and publishes when agent files change on main, or on manual dispatch. It signs manifests using the repository's encrypted `AGENT_RELEASE_SIGNING_KEY` secret. The public key is committed in `agent/release-public.pem`; private key material must never be committed. An immutable `agent-VERSION+COMMIT` release contains separate Linux and Windows archives; `agent-stable` contains separate signed Linux and Windows channel manifests. Publication refuses a signing-key mismatch and never overwrites an existing version's archive. Retain a protected backup of the signing key. Replacing the signing key requires deliberate trust-anchor deployment to installed updaters.
 
 Only release bundles are fetched from GitHub. Application enrollment credentials are sent to the configured application endpoint, never to GitHub. A stopped VM, lost network connection, broken Python/OpenSSL installation or failed updater requires infrastructure recovery; an independent updater cannot repair a host it cannot run on.

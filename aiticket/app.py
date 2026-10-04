@@ -117,16 +117,16 @@ def create_app(data_dir=None, testing=False):
     @app.post('/fleet/preview')
     @login_required
     def fleet_preview():
-        from .fleet import command
+        from .fleet import plan
         values={key:request.form.get(key,'') for key in ('label','kind','username','key_id','access','groups','packages','script')}
         if not values['access']:values['access']='standard'
-        text=command(store,values)
         values['fleet_id']=uid()
         targets=list(dict.fromkeys(request.form.getlist('targets')))
         if not targets or len(targets)>200:raise ValueError('Select between 1 and 200 hosts.')
         machines=store.rows("SELECT m.*,p.approval FROM machines m LEFT JOIN command_policies p ON p.machine_id=m.id AND p.enabled=1 WHERE m.id NOT LIKE 'unifi:%' AND m.id NOT LIKE 'unifi-device:%'")
         machines=[m for m in machines if m['id'] in targets]
         if len(machines)!=len(targets):raise ValueError('Unknown fleet host.')
+        text,_=plan(store,values,targets)
         key_label=store.rows('SELECT label FROM fleet_keys WHERE id=?',(values['key_id'],))[0]['label'] if values['key_id'] else ''
         return render_template('fleet_preview.html',values=values,command=text,machines=machines,key_label=key_label)
 
@@ -552,10 +552,12 @@ def create_app(data_dir=None, testing=False):
                 raise ValueError('Invalid HTTP status.')
         elif kind in ('process','smb','docker'):
             target=f.get('target','').strip()
+            from .windows import is_windows,valid_target
+            windows=is_windows(store,machine)
             if kind in ('process','docker'):
-                if not re.fullmatch(r'[A-Za-z0-9_.@-]{1,100}',target) or target.startswith('-'):
+                if not valid_target(kind,target,windows):
                     raise ValueError('Enter a valid container name/ID, process name or systemd .service unit.')
-            elif not target.startswith('/') or len(target)>512 or '\n' in target:
+            elif not valid_target(kind,target,windows):
                 raise ValueError('Enter the absolute mounted SMB directory on the monitored host.')
             if not store.rows('SELECT id FROM agents WHERE machine_id=? AND revoked=0',(machine,)):
                 raise ValueError('Enroll an agent on this host first.')
@@ -1058,7 +1060,8 @@ def create_app(data_dir=None, testing=False):
             abort(400)
         actions=capabilities.get('actions',[])
         action_services=capabilities.get('action_services',{})
-        if not isinstance(actions,list) or any(a!='service_restart' for a in actions) or len(actions)>1 or not isinstance(action_services,dict) or len(action_services)>20 or any(not isinstance(k,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',k) or not isinstance(v,str) or not re.fullmatch(r'[A-Za-z0-9_.@-]{1,100}\.service',v) or v.startswith('-') for k,v in action_services.items()):
+        service_pattern=r'[A-Za-z0-9_.@ -]{1,100}' if host_info.get('os','').lower().startswith('windows') else r'[A-Za-z0-9_.@-]{1,100}\.service'
+        if not isinstance(actions,list) or any(a!='service_restart' for a in actions) or len(actions)>1 or not isinstance(action_services,dict) or len(action_services)>20 or any(not isinstance(k,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',k) or not isinstance(v,str) or not re.fullmatch(service_pattern,v) or v.startswith('-') for k,v in action_services.items()):
             abort(400)
         sampled_at=payload.get('sampled_at')
         if sampled_at is not None and (type(sampled_at) not in (float,int) or not math.isfinite(sampled_at) or sampled_at<0):
@@ -1126,7 +1129,8 @@ def create_app(data_dir=None, testing=False):
                     if type(details.get(key)) is bool: evidence[key]=details[key]
             observe(store,check['id'],result.get('healthy'),evidence)
         version=rows[0]['version'] or ''
-        docker_supported=bool(re.fullmatch(r'\d+\.\d+\.\d+',version)) and tuple(int(v) for v in version.split('.'))>=(0,7,0)
+        base_version=version.split('+',1)[0]
+        docker_supported=bool(re.fullmatch(r'\d+\.\d+\.\d+',base_version)) and tuple(int(v) for v in base_version.split('.'))>=(0,7,0)
         return {'checks':[{'id':r['id'],'kind':r['kind'],'config':json.loads(r['config'])} for r in store.rows("SELECT * FROM checks WHERE machine_id=? AND enabled=1 AND kind IN ('process','smb','docker') AND (kind<>'docker' OR ?) AND next_run<=? ORDER BY next_run,id LIMIT 20",(machine,docker_supported,time.time()))]}
 
     @app.get('/network-devices')

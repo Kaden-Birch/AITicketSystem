@@ -97,3 +97,5 @@ The agent installer verifies effective root service permissions, runtime capabil
 Configure optional resource alerts under **Agent health**. New defaults are disabled; hosts inherit enabled defaults unless overridden under **Host settings → Agent health**. See [health preferences](resource-diagnostics.md). Existing host rules are preserved during upgrade.
 
 Agent installation also enables [independent automatic updates](agent.md#independent-automatic-updates). Existing hosts need one final run of the current installer to add the updater. Upgrade the main application first; then Host settings show agent versions and an Update now button when a newer release is available.
+
+For monitored Windows machines, use the [one-step Windows agent installer](agent-windows.md). Windows and Linux agents share host permissions and monitoring workflows.

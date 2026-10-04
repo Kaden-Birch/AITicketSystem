@@ -13,7 +13,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-VERSION = '0.9.0'
+VERSION = '0.10.0'
 
 
 def endpoint(value,allow_http=False):

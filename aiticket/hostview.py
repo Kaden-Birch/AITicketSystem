@@ -24,7 +24,7 @@ def sample(agent,obj,now):
     metrics={}; source='No telemetry';at=None;fresh=False;info={}
     if agent and agent['last_seen'] is not None:
         metrics=json.loads(agent['telemetry'] or '{}');info=json.loads(agent['host_info'])
-        source='Linux agent';at=agent['sampled_at'] or agent['last_seen']
+        source='Windows agent' if info.get('os','').lower().startswith('windows') else 'Linux agent';at=agent['sampled_at'] or agent['last_seen']
         fresh=not agent['revoked'] and 0<=now-at<=180 and 0<=now-agent['last_seen']<=180
     elif obj:
         raw=json.loads(obj['metrics']); source='Proxmox inventory';at=obj['last_seen']
@@ -34,7 +34,7 @@ def sample(agent,obj,now):
     disk_total=metrics.get('disk_total_bytes');disk_free=metrics.get('disk_free_bytes')
     ram_used=ram_total-ram_free if ram_total is not None and ram_free is not None else None
     disk_used=disk_total-disk_free if disk_total is not None and disk_free is not None else None
-    return {'source':source,'at':at,'fresh':bool(fresh),'raw':metrics,'info':info,'cpu':round(metrics['cpu_percent'],1) if 'cpu_percent' in metrics else None,'ram':percent(ram_used,ram_total),'disk':percent(disk_used,disk_total),'ram_used':bytes_label(ram_used),'ram_total':bytes_label(ram_total),'disk_used':bytes_label(disk_used),'disk_total':bytes_label(disk_total),'load': ' / '.join(str(metrics.get('load_'+str(n),'—')) for n in (1,5,15)), 'pressure':metrics.get('memory_pressure_percent'), 'inodes':percent(metrics.get('inode_total',0)-metrics.get('inode_free',0),metrics.get('inode_total')), 'swap_used':bytes_label(metrics['swap_total_bytes']-metrics['swap_free_bytes']) if 'swap_total_bytes' in metrics and 'swap_free_bytes' in metrics else 'Unavailable', 'swap_total':bytes_label(metrics.get('swap_total_bytes')), 'uptime':duration(metrics.get('uptime_seconds')),'storage_scope':'Root filesystem /' if source=='Linux agent' else 'Proxmox reported allocation (guest disk usage may be unavailable)'}
+    return {'source':source,'at':at,'fresh':bool(fresh),'raw':metrics,'info':info,'cpu':round(metrics['cpu_percent'],1) if 'cpu_percent' in metrics else None,'ram':percent(ram_used,ram_total),'disk':percent(disk_used,disk_total),'ram_used':bytes_label(ram_used),'ram_total':bytes_label(ram_total),'disk_used':bytes_label(disk_used),'disk_total':bytes_label(disk_total),'load': ' / '.join(str(metrics.get('load_'+str(n),'—')) for n in (1,5,15)), 'pressure':metrics.get('memory_pressure_percent'), 'inodes':percent(metrics.get('inode_total',0)-metrics.get('inode_free',0),metrics.get('inode_total')), 'swap_used':bytes_label(metrics['swap_total_bytes']-metrics['swap_free_bytes']) if 'swap_total_bytes' in metrics and 'swap_free_bytes' in metrics else 'Unavailable', 'swap_total':bytes_label(metrics.get('swap_total_bytes')), 'uptime':duration(metrics.get('uptime_seconds')),'storage_scope':'Root filesystem /' if source=='Linux agent' else 'Windows system drive' if source=='Windows agent' else 'Proxmox reported allocation (guest disk usage may be unavailable)'}
 
 
 def overview(store,now=None):
@@ -55,7 +55,7 @@ def overview(store,now=None):
         states=checks.get(m['id'],[])
         m['health']='down' if 'down' in states else 'unknown' if 'unknown' in states else 'healthy' if states else 'unmonitored'
         m['active_incidents']=counts.get(m['id'],0)
-        m['type']=m['object']['kind'] if m['object'] else 'Linux host' if m['agent'] else 'Machine'
+        m['type']=m['object']['kind'] if m['object'] else 'Windows host' if m['sample']['source']=='Windows agent' else 'Linux host' if m['agent'] else 'Machine'
     for obj in store.rows("SELECT * FROM proxmox_objects WHERE machine_id IS NULL AND present=1 AND template=0 AND kind IN ('node','qemu','lxc') ORDER BY kind,name"):
         machines.append({'id':None,'name':obj['name'],'type':obj['kind'],'object':obj,'agent':None,'sample':sample(None,obj,now),'health':'unassigned','active_incidents':0})
     return machines

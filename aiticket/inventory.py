@@ -66,7 +66,8 @@ def config(kind,cfg):
     elif kind in ('process','smb','docker'):
         import re
         target=cfg.get('target','')
-        if not isinstance(target,str) or (kind in ('process','docker') and (not re.fullmatch(r'[A-Za-z0-9_.@-]{1,100}',target) or target.startswith('-'))) or (kind=='smb' and (not target.startswith('/') or len(target)>512 or '\n' in target)):
+        from .windows import valid_target
+        if not (valid_target(kind,target,False) or valid_target(kind,target,True)):
             raise ValueError('Invalid agent check target.')
         if kind=='docker' and type(cfg.get('require_health',False)) is not bool: raise ValueError('Invalid container health setting.')
     elif kind=='tcp':

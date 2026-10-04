@@ -3,14 +3,26 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['agent/**', 'scripts/build-agent-release.py', '.github/workflows/agent-release.yml']
+    paths: ['agent/**', 'scripts/build-agent-release.py', 'tests/windows/**', '.github/workflows/agent-release.yml']
 permissions:
   contents: write
 concurrency:
   group: agent-stable-publisher
   cancel-in-progress: false
 jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Validate Windows runtime and SYSTEM installation
+        run: |
+          python -m pip install pytest cryptography
+          python -m pytest -q --confcutdir=tests/windows tests/windows
   release:
+    needs: windows
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
@@ -37,12 +49,13 @@ jobs:
           version=$(cat "$RUNNER_TEMP/agent-release/version")
           if gh release view "agent-$version" >/dev/null 2>&1; then
             mkdir "$RUNNER_TEMP/existing-agent"
-            gh release download "agent-$version" --pattern agent.tar.gz --dir "$RUNNER_TEMP/existing-agent"
+            gh release download "agent-$version" --pattern '*agent.tar.gz' --dir "$RUNNER_TEMP/existing-agent"
             cmp "$RUNNER_TEMP/existing-agent/agent.tar.gz" "$RUNNER_TEMP/agent-release/agent.tar.gz"
+            cmp "$RUNNER_TEMP/existing-agent/windows-agent.tar.gz" "$RUNNER_TEMP/agent-release/windows-agent.tar.gz"
           else
-            gh release create "agent-$version" "$RUNNER_TEMP/agent-release/agent.tar.gz" --target "$GITHUB_SHA" --title "Agent $version" --notes 'Signed Linux monitoring agent release. Independent updater verifies signature, checksum and heartbeat.' --latest=false
+            gh release create "agent-$version" "$RUNNER_TEMP/agent-release/agent.tar.gz" "$RUNNER_TEMP/agent-release/windows-agent.tar.gz" --target "$GITHUB_SHA" --title "Agent $version" --notes 'Signed Linux and Windows monitoring agent release. Independent updater verifies signature, checksum and heartbeat.' --latest=false
           fi
           if ! gh release view agent-stable >/dev/null 2>&1; then
             gh release create agent-stable --target "$GITHUB_SHA" --title 'Agent stable update channel' --notes 'Signed release manifest for the independent agent updater.' --latest=false
           fi
-          gh release upload agent-stable "$RUNNER_TEMP/agent-release/agent-manifest.json" --clobber
+          gh release upload agent-stable "$RUNNER_TEMP/agent-release/agent-manifest.json" "$RUNNER_TEMP/agent-release/windows-agent-manifest.json" --clobber

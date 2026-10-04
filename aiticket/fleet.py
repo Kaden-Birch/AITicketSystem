@@ -6,7 +6,7 @@ from .db import uid
 
 
 def name(value):
-    if not re.fullmatch(r'[a-z_][a-z0-9_-]{0,31}',value): raise ValueError('Use a Linux account/group name: lowercase letters, digits, underscore or hyphen.')
+    if not re.fullmatch(r'[a-z_][a-z0-9_-]{0,31}',value): raise ValueError('Use an account/group name: lowercase letters, digits, underscore or hyphen.')
     return value
 
 
@@ -76,6 +76,18 @@ print('Fleet task completed for',p['user'])
     return 'python3 -c '+shlex.quote("import base64; exec(base64.b64decode("+repr(encoded)+"))")
 
 
+def plan(store,values,targets):
+    from .windows import is_windows
+    from .windows_fleet import command as windows_command
+    commands={};platforms={}
+    for machine in targets:
+        platform='Windows · PowerShell' if is_windows(store,machine) else 'Linux · shell'
+        if platform not in platforms:platforms[platform]=windows_command(store,values) if platform.startswith('Windows') else command(store,values)
+        commands[machine]=platforms[platform]
+    text=next(iter(platforms.values())) if len(platforms)==1 else '\n\n'.join(platform+'\n'+script for platform,script in platforms.items())
+    return text,commands
+
+
 def launch(store,vault,values,targets):
     from .commands import queue
     if not values.get('label','').strip() or len(values['label'])>100:raise ValueError('Provide a task name up to 100 characters.')
@@ -83,7 +95,7 @@ def launch(store,vault,values,targets):
     if not targets or len(targets)>200: raise ValueError('Select between 1 and 200 hosts.')
     available={r['id'] for r in store.rows("SELECT id FROM machines WHERE id NOT LIKE 'unifi:%' AND id NOT LIKE 'unifi-device:%'")}
     if set(targets)-available: raise ValueError('Fleet targets must be enrolled hosts, not network appliances.')
-    text=command(store,values);identifier=values.get('fleet_id') or uid()
+    text,commands=plan(store,values,targets);identifier=values.get('fleet_id') or uid()
     try:uuid.UUID(identifier)
     except (ValueError,TypeError):raise ValueError('Invalid fleet submission ID.')
     with store.connect() as c:
@@ -99,7 +111,7 @@ def launch(store,vault,values,targets):
         store.audit(c,'fleet.created',identifier,{'targets':targets,'kind':values['kind']})
     for row in store.rows('SELECT * FROM fleet_targets WHERE job_id=?',(identifier,)):
         try:
-            queue(store,vault,row['machine_id'],text,row['command_id']);state='submitted';error=''
+            queue(store,vault,row['machine_id'],commands[row['machine_id']],row['command_id']);state='submitted';error=''
         except ValueError as exc:state='blocked';error=str(exc)
         with store.connect() as c:c.execute('UPDATE fleet_targets SET state=?,error=? WHERE job_id=? AND machine_id=?',(state,error,identifier,row['machine_id']))
     return identifier

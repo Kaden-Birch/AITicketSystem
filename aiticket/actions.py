@@ -22,7 +22,10 @@ def proof(c, incident_id, agent_id, service_id, unit, diagnostic_id, now):
         raise ValueError('A fresh completed service-status diagnostic is required.')
     output=json.loads(row['result'] or '{}').get('output','')
     properties=dict(line.split('=',1) for line in output.splitlines() if '=' in line)
-    if properties.get('Id')!=unit or properties.get('LoadState')!='loaded' or properties.get('ActiveState')!='failed':
+    agent=c.execute('SELECT host_info FROM agents WHERE id=?',(agent_id,)).fetchone()
+    windows=bool(agent and json.loads(agent['host_info']).get('os','').lower().startswith('windows'))
+    stopped=windows and properties.get('Platform')=='windows' and properties.get('SubState')=='Stopped' and properties.get('ActiveState')=='inactive'
+    if properties.get('Id')!=unit or properties.get('LoadState')!='loaded' or not (stopped or properties.get('ActiveState')=='failed'):
         raise ValueError('Service restart requires independent proof of this exact loaded, failed unit; network failure alone is insufficient.')
 
 

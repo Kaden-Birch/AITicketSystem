@@ -35,6 +35,8 @@ def read_segment(args):
     if '/' in args[0] and str(executable.parent) not in ('/bin','/usr/bin','/sbin','/usr/sbin'): return False
     name=executable.name;args=args[1:]
     if any(x.startswith('-') and x in ('--help',) for x in args): return False
+    if name.lower().startswith('get-'):
+        return windows_read(name,args)
     if name in ('id','uptime','uname','df','free','ps','lsblk','lscpu','ls','stat','du','whoami','date'):
         if name=='date': return not any(x.startswith(('-s','--set','-f','--file')) for x in args) and not any(not x.startswith(('-','+')) for x in args)
         return True
@@ -70,3 +72,19 @@ def requires_approval(mode,command=None,method=None):
     if mode=='readonly' and not read: raise ValueError('This host allows read-only commands. Select Full access or the approval mode in Host settings to allow this operation.')
     if mode in ('readonly','immediate'): return False
     return mode=='required' or not read
+
+
+def windows_read(name,args):
+    # Fixed built-in read cmdlets only. No remote sessions, callbacks or expressions.
+    safe={'get-service':{'-name','-displayname'},'get-process':{'-name','-id'},'get-netadapter':{'-name'},'get-netipaddress':{'-interfaceindex','-interfacealias','-addressfamily'},'get-volume':{'-driveletter'},'get-computerinfo':{'-property'},'get-date':{'-format'},'get-ciminstance':{'-classname'}}
+    name=name.lower()
+    if name not in safe:return False
+    if not args:return name!='get-ciminstance'
+    i=0
+    while i<len(args):
+        if args[i].lower() not in safe[name] or i+1>=len(args):return False
+        value=args[i+1]
+        if not re.fullmatch(r'[A-Za-z0-9_.*,: -]{1,150}',value) or value.startswith('-'):return False
+        if name=='get-ciminstance' and value.lower() not in ('win32_operatingsystem','win32_computersystem','win32_logicaldisk','win32_service','win32_processor','win32_networkadapterconfiguration'):return False
+        i+=2
+    return True
