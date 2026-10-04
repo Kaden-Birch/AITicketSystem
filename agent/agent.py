@@ -87,6 +87,27 @@ def discovery(state):
     return discover(state)
 
 
+def bounded_discovery(data):
+    """Optional inventory must never exceed the server's heartbeat schema limits."""
+    import math
+    result={'docker_installed':data.get('docker_installed') is True,'warnings':[str(x)[:200] for x in data.get('warnings',[])[:5]]}
+    for kind,limit,keys in [('containers',100,('name','target','image','state','status','ports','cpu_percent','memory_percent')),('processes',200,('name','target','pid','memory_bytes','cpu_percent'))]:
+        rows=data.get(kind,[]);result[kind]=[];result[kind+'_truncated']=bool(data.get(kind+'_truncated') or len(rows)>limit)
+        for row in rows[:limit]:
+            if not all(isinstance(row.get(k),str) and 0<len(row[k])<=500 for k in ('name','target')):
+                result[kind+'_truncated']=True;continue
+            clean={}
+            for key in keys:
+                value=row.get(key)
+                if isinstance(value,str):clean[key]=value[:500]
+                elif type(value) in (int,float) and math.isfinite(value) and value>=0:clean[key]=value
+            result[kind].append(clean)
+    while len(json.dumps(result))>90000:
+        kind=max(('containers','processes'),key=lambda k:len(json.dumps(result[k])))
+        result[kind].pop();result[kind+'_truncated']=True
+    return result
+
+
 def host_info():
     import platform
     os_name='Linux'
@@ -251,7 +272,7 @@ def main():
                     advertised.pop('actions',None)
                     advertised.pop('action_services',None)
                 pending = {'event_id': str(uuid.uuid4()), 'version': VERSION, 'telemetry': telemetry(state), 'sampled_at':time.time(), 'capabilities':advertised,'host_info':host_info(),'network':network_info()}
-                try:pending['discovery']=discovery(state)
+                try:pending['discovery']=bounded_discovery(discovery(state))
                 except Exception:pending['discovery']={'warnings':['Discovery is unavailable.']}
                 state['pending'] = pending
                 write_state(path, state)

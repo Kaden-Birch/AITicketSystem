@@ -118,3 +118,16 @@ def test_optional_checks_failure_does_not_suppress_following_heartbeats(tmp_path
     assert routes.count('/api/agent/heartbeat')==2
     assert routes[0]=='/api/agent/heartbeat'
     assert 'heartbeat continues' in capsys.readouterr().out
+
+
+def test_discovery_cannot_overflow_or_invalidate_heartbeat(monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT))
+    spec=importlib.util.spec_from_file_location('bounded_agent_fixture',ROOT/'agent.py')
+    runtime=importlib.util.module_from_spec(spec);spec.loader.exec_module(runtime)
+    from aiticket.discovery import validate
+    rows=[{'name':'container'+str(i),'target':'container'+str(i),'image':'x'*1000,'ports':'y'*10000,'state':'running','cpu_percent':float('nan')} for i in range(100)]
+    rows.append({'name':'z'*501,'target':'z'*501})
+    data=runtime.bounded_discovery({'docker_installed':True,'containers':rows,'processes':[{'pid':i,'name':'process','target':'process','memory_bytes':100} for i in range(200)]})
+    assert len(json.dumps(data))<=90000 and data['containers_truncated']
+    assert validate(data)['containers'] and all(len(x['ports'])<=500 for x in data['containers'])
+    assert all('cpu_percent' not in x for x in data['containers'])
