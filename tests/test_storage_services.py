@@ -143,6 +143,9 @@ def test_plex_service_setup_test_edit_media_check_ui(signed_in):
         assert client.post('/integrations/'+identifier+'/checks',data={'csrf':csrf,'scope':'media'}).status_code==302
         assert client.get('/applications').status_code==200
         assert client.get('/hosts/m').status_code==200
+        with store.connect() as c:c.execute('UPDATE integrations SET at=? WHERE id=?',(time.time()-1000,identifier))
+        stale=client.get(result.location).data
+        assert b'Awaiting current readings' in stale and b'>Readable</span>' not in stale
         assert client.post('/integrations/'+identifier+'/delete',data={'csrf':csrf}).status_code==302
         assert all(not r['enabled'] for r in store.rows('SELECT enabled FROM checks'))
 
