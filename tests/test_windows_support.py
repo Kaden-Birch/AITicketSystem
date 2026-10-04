@@ -16,7 +16,7 @@ def enrolled(store):
 
 def test_windows_heartbeat_network_services_and_signed_docker(environment):
     app,store,_=environment;machine,agent,headers=enrolled(store);client=app.test_client()
-    network={'machine_type':'physical','interfaces':[{'name':'Ethernet 2','mac':'aa:bb:cc:dd:ee:ff','kind':'physical','state':'up','carrier':True,'addresses':['10.0.0.2'],'members':[],'master':''}],'neighbors':[]}
+    network={'machine_type':'physical','interfaces':[{'name':name,'mac':'aa:bb:cc:dd:ee:ff','kind':'physical','state':'up','carrier':True,'addresses':['10.0.0.2'],'members':[],'master':''} for name in ('Ethernet 2','vEthernet (Default Switch)','Local Area Connection* 1','Connexion réseau')],'neighbors':[]}
     payload={'event_id':str(uuid.uuid4()),'version':'0.10.0+abcdefabcdef','sampled_at':time.time(),'telemetry':{'memory_total_bytes':1000,'memory_available_bytes':500},'host_info':{'os':'Windows 11'},'network':network,'capabilities':{'operations':['service_status'],'services':['print'],'shell_commands':True,'actions':['service_restart'],'action_services':{'print':'Spooler'}}}
     assert client.post('/api/agent/heartbeat',json=payload,headers=headers).status_code==200
     with store.connect() as c:c.execute('INSERT INTO checks(id,machine_id,name,kind,config,interval,fail_after,recover_after,severity,next_run) VALUES(?,?,?,?,?,60,3,2,?,0)',(uid(),machine,'Docker','docker',json.dumps({'target':'immich'}),'medium'))

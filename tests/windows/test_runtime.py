@@ -62,6 +62,8 @@ def test_real_telemetry_network_and_diagnostics(runtime):
     assert 'inode_total' not in first and 'load_1' not in first
     network=backend.inventory();assert network['interfaces'] and network['machine_type'] in ('physical','vm','unknown')
     assert all(isinstance(i['addresses'],list) and 'name' in i for i in network['interfaces'])
+    from aiticket.topology import validate
+    assert validate(network)==network
     p={'services':{'scheduler':'Schedule'},'logs':False}
     result=backend.diagnostic({'operation':'service_status','parameters':{'service_id':'scheduler'},'expires':time.time()+60},p)
     assert 'Id=Schedule' in result['output'] and 'ActiveState=active' in result['output']

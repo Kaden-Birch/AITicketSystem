@@ -7,7 +7,8 @@ ROOT=Path(__file__).resolve().parents[2]
 pytestmark=pytest.mark.skipif(os.name!='nt',reason='Windows scheduled tasks required')
 
 
-def test_install_and_reinstall_as_system(tmp_path,monkeypatch):
+@pytest.mark.parametrize('accept_heartbeat',[True,False])
+def test_install_and_reinstall_as_system(tmp_path,monkeypatch,accept_heartbeat):
     monkeypatch.syspath_prepend(str(ROOT/'agent'/'windows'))
     from platform_support import ps,powershell,ps_argv
     install_root=tmp_path/'Agent with spaces';(install_root/'state').mkdir(parents=True)
@@ -19,6 +20,8 @@ def test_install_and_reinstall_as_system(tmp_path,monkeypatch):
             assert self.headers['Authorization']=='Bearer fixture-credential'
             reply={}
             if self.path=='/api/agent/heartbeat':
+                if not accept_heartbeat:
+                    self.send_response(400);self.end_headers();self.wfile.write(b'fixture rejection');return
                 if not heartbeats:reply['commands']=[{'id':request_id,'dispatch_token':'fixture-token','command':'[Security.Principal.WindowsIdentity]::GetCurrent().User.Value','timeout':15,'output_limit':1024}]
                 heartbeats.append(data);reply.update(status='accepted',poll_interval_seconds=20,jobs=[],actions=[])
             elif self.path=='/api/agent/command-permission':reply={'allowed':True}
@@ -31,9 +34,17 @@ def test_install_and_reinstall_as_system(tmp_path,monkeypatch):
     (install_root/'state'/'identity.json').write_text(json.dumps(identity))
     argv=[powershell(),'-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',str(ROOT/'agent'/'windows'/'install.ps1'),'-Root',str(install_root),'-Source',str(ROOT)]
     try:
-        for iteration in range(2):
+        for iteration in range(2 if accept_heartbeat else 1):
             run=subprocess.run(argv,capture_output=True,text=True,timeout=360)
+            if not accept_heartbeat:
+                assert run.returncode!=0 and 'has not received an accepted heartbeat' in run.stderr
+                assert 'Installed and connected' not in run.stdout
+                assert json.loads((install_root/'state'/'identity.json').read_text())['credential']==identity['credential']
+                assert 'HTTP 400' in (install_root/'state'/'agent.log').read_text()
+                break
             assert run.returncode==0,run.stdout+'\n'+run.stderr
+            assert 'authenticated SYSTEM heartbeat accepted' in run.stdout
+            assert 'AssertionError' not in run.stderr
             deadline=time.monotonic()+90
             while time.monotonic()<deadline and (not heartbeats or not results):time.sleep(1)
             log=(install_root/'state'/'agent.log').read_text(errors='replace')

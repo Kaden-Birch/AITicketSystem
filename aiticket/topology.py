@@ -6,7 +6,9 @@ import time
 from .db import uid
 
 MAC=re.compile(r'(?:[0-9a-f]{2}:){5}[0-9a-f]{2}')
-NAME=re.compile(r'[A-Za-z0-9_.:@ -]{1,80}')
+# Native Windows interface aliases include parentheses, asterisks and Unicode.
+# Names are opaque inventory labels, never commands or filesystem paths.
+NAME=re.compile(r'[^/\\\x00-\x1f\x7f]{1,80}')
 
 
 def mac(value):

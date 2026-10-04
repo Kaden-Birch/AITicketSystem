@@ -258,7 +258,10 @@ def main():
             delay=requested if type(requested) is int and 20<=requested<=300 else 30
             monitor_checks(send,base,state,path)
         except Exception as exc:
-            print('Heartbeat unavailable: ' + type(exc).__name__, flush=True)
+            # Report the HTTP status without printing credentials or request bodies.
+            status=getattr(exc,'code',None)
+            detail=(' (HTTP '+str(status)+')') if status else ''
+            print('Heartbeat unavailable: ' + type(exc).__name__ + detail, flush=True)
             delay = min(delay * 2, 300)
         finally:
             execution.close()

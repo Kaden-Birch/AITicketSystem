@@ -41,17 +41,16 @@ try {
    [IO.File]::WriteAllText((Join-Path $runtime 'python313._pth'),"python313.zip`n.`nLib\site-packages`nimport site`n")
 
   }
-  $pipPresent=$true
-  try { Python 'import importlib.util; assert importlib.util.find_spec("pip") is not None' @() } catch { $pipPresent=$false }
+  $pipPresent=((Python 'import importlib.util; print(importlib.util.find_spec("pip") is not None)' @()) -eq 'True')
   if(!$pipPresent){
    $bootstrap=Join-Path $temp 'get-pip.py'
    Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/pypa/get-pip/af54dfe793b24685f8dc4ebba0630d9f2d77653c/public/get-pip.py' -OutFile $bootstrap
    if((Get-FileHash -LiteralPath $bootstrap -Algorithm SHA256).Hash.ToLower() -ne 'fb24e693bab954209a063d90953621412ccad4a500905a726286e038f508ddf6'){throw 'PyPA bootstrap checksum failed.'}
-   Native $PythonExe @($bootstrap,'--disable-pip-version-check')
+   Native $PythonExe @($bootstrap,'--disable-pip-version-check','--no-warn-script-location')
   }
  }
  Python 'import sys; assert sys.version_info >= (3,11) and sys.maxsize > 2**32' @()
- Native $PythonExe @('-m','pip','install','--disable-pip-version-check','cryptography>=43,<47')
+ Native $PythonExe @('-m','pip','install','--disable-pip-version-check','--no-warn-script-location','cryptography>=43,<47')
  if(!$Source){
   $archive=Join-Path $temp 'source.zip'
   Invoke-WebRequest -UseBasicParsing 'https://github.com/Kaden-Birch/AITicketSystem/archive/refs/heads/main.zip' -OutFile $archive
@@ -96,11 +95,22 @@ try {
  $trigger=New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) -RepetitionInterval (New-TimeSpan -Minutes 5)
  Register-ScheduledTask -TaskName 'AITicketAgentUpdater' -Action $updateAction -Trigger $trigger -Principal $principal -Settings $updateSettings -Force | Out-Null
  Python 'import pathlib,re,json,sys;root=pathlib.Path(sys.argv[1]);bundle=pathlib.Path(json.loads((root/"current.json").read_text())["path"]);v=re.search(r"VERSION = .([^\x27]+).",(bundle/"agent.py").read_text()).group(1);(root/"state"/"update-status.json").write_text(json.dumps({"installed":v,"state":"available","detail":"Independent Windows updater installed."}))' @($Root)
+ $started=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
  Start-ScheduledTask -TaskName 'AITicketAgent'
  Start-Sleep -Seconds 3
  foreach($task in @('AITicketAgent','AITicketAgentUpdater')){if((Get-ScheduledTask -TaskName $task).Principal.UserId -notin @('SYSTEM','S-1-5-18')){throw 'Task is not configured as SYSTEM.'}}
  if((Get-ScheduledTask -TaskName 'AITicketAgent').State -ne 'Running'){throw 'Agent task did not start; inspect state\agent.log.'}
  $acl=Get-Acl -LiteralPath $Root
  if(!$acl.AreAccessRulesProtected){throw 'Agent directory inheritance was not restricted.'}
- Write-Host 'Installed: LocalSystem agent, enabled command policy, protected state, independent automatic updater. Application host access mode controls commands.'
+ Write-Host 'Waiting for an authenticated heartbeat from the background agent...'
+ $deadline=(Get-Date).AddSeconds(60);$connected=$false
+ $health=Join-Path $Root 'state\health.json'
+ while((Get-Date) -lt $deadline){
+  if(Test-Path -LiteralPath $health){
+   try { $reported=Get-Content -Raw -LiteralPath $health | ConvertFrom-Json; if($reported.at -ge $started){$connected=$true;break} } catch { }
+  }
+  Start-Sleep -Seconds 1
+ }
+ if(!$connected){throw 'Installed, but the background agent has not received an accepted heartbeat. Enrollment is preserved. Inspect C:\ProgramData\AITicketAgent\state\agent.log and confirm the main application is updated and reachable.'}
+ Write-Host 'Installed and connected: authenticated SYSTEM heartbeat accepted, enabled command policy, protected state, independent automatic updater. Application host access mode controls commands.'
 } finally {Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue}
