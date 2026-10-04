@@ -1,0 +1,10 @@
+[Unit]
+Description=AITicketSystem independent signed agent updater
+Wants=network-online.target
+After=network-online.target
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 /opt/aiticket-agent/updater.py
+TimeoutStartSec=300
+UMask=0077

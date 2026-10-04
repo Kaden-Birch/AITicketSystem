@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Outbound Linux monitoring agent with centrally authorized command execution."""
 import argparse
+import fcntl
 import getpass
 import json
 import os
@@ -12,7 +13,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-VERSION = '0.8.0'
+VERSION = '0.9.0'
 
 
 def endpoint(value,allow_http=False):
@@ -207,6 +208,8 @@ def main():
     signal.signal(signal.SIGINT, stop)
     delay = 30
     while running:
+        execution = open(path.parent/'execution.lock', 'a')
+        fcntl.flock(execution, fcntl.LOCK_SH)
         try:
             policy=load_policy(args.policy)
             drain(state,path,write_state)
@@ -240,7 +243,12 @@ def main():
                 pending = {'event_id': str(uuid.uuid4()), 'version': VERSION, 'telemetry': telemetry(state), 'sampled_at':time.time(), 'capabilities':advertised,'host_info':host_info(),'network':network_info()}
                 state['pending'] = pending
                 write_state(path, state)
+            update_status=path.parent/'update-status.json'
+            trial=json.loads(update_status.read_text()).get('state')=='installing' if update_status.exists() else False
+            pending['update_trial']=trial
             response=send(base, '/api/agent/heartbeat', pending, state.get('ca'), state['credential'])
+            if pending.get('version') == VERSION:
+                write_state(path.parent/'health.json', {'version':VERSION,'at':time.time(),'pid':os.getpid()})
             state.pop('pending', None)
             write_state(path, state)
             start(state,path,response.get('commands',[]),write_state,lambda job:send(base,'/api/agent/command-permission',{'id':job['id'],'dispatch_token':job['dispatch_token']},state.get('ca'),state['credential']).get('allowed') is True,lambda:policy_config(args.policy))
@@ -252,6 +260,8 @@ def main():
         except Exception as exc:
             print('Heartbeat unavailable: ' + type(exc).__name__, flush=True)
             delay = min(delay * 2, 300)
+        finally:
+            execution.close()
         for _ in range(delay):
             if not running:
                 break

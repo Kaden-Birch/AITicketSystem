@@ -15,7 +15,7 @@ if (( ! verify_only )); then
   [[ $EUID == 0 ]] || { echo 'Run this installer with sudo.' >&2; exit 1; }
   command -v systemctl >/dev/null || { echo 'systemd is required.' >&2; exit 1; }
   apt-get update
-  apt-get install -y python3 curl ca-certificates tar iproute2
+  apt-get install -y python3 curl ca-certificates tar iproute2 openssl
 fi
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
@@ -31,7 +31,7 @@ if sys.version_info < (3,11): raise SystemExit('Python 3.11+ is required.')
 root=Path(sys.argv[1]); sums={}
 for line in (root/'SHA256SUMS').read_text().splitlines():
     digest,path=line.split('  ',1);sums[path]=digest
-for name in ('agent.py','diagnostics.py','monitoring.py','network.py','actions.py','commands.py','install_verify.py','aiticket-agent.service'):
+for name in ('agent.py','diagnostics.py','monitoring.py','network.py','actions.py','commands.py','install_verify.py','aiticket-agent.service','updater.py','release-public.pem','aiticket-agent-updater.service','aiticket-agent-updater.timer'):
     path='agent/'+name
     if sums.get(path)!=hashlib.sha256((root/path).read_bytes()).hexdigest():raise SystemExit('Checksum mismatch: '+path)
 print('Agent source checksums verified.')
@@ -40,12 +40,38 @@ PY
 if ! id aiticket-agent >/dev/null 2>&1; then
   useradd --system --home /var/lib/aiticket-agent --shell /usr/sbin/nologin aiticket-agent
 fi
+systemctl stop aiticket-agent-updater.timer aiticket-agent-updater.service 2>/dev/null || true
 systemctl stop aiticket-agent 2>/dev/null || true
 install -d -o root -g root -m 0755 /opt/aiticket-agent /etc/aiticket-agent
 install -d -o root -g root -m 0700 /var/lib/aiticket-agent
+install -d -o root -g root -m 0755 /opt/aiticket-agent/releases
+bundle_dir=$(mktemp -d /opt/aiticket-agent/releases/bootstrap-XXXXXXXX)
 for file in agent.py diagnostics.py monitoring.py network.py actions.py commands.py install_verify.py; do
+  install -o root -g root -m 0644 "$source_dir/agent/$file" "$bundle_dir/$file"
+  rm -f "/opt/aiticket-agent/$file"
+  ln -s "current/$file" "/opt/aiticket-agent/$file"
+done
+ln -s "$bundle_dir" /opt/aiticket-agent/current.install
+mv -Tf /opt/aiticket-agent/current.install /opt/aiticket-agent/current
+for file in updater.py release-public.pem; do
   install -o root -g root -m 0644 "$source_dir/agent/$file" "/opt/aiticket-agent/$file"
 done
+for unit in aiticket-agent-updater.service aiticket-agent-updater.timer; do
+  install -o root -g root -m 0644 "$source_dir/agent/$unit" "/etc/systemd/system/$unit"
+done
+if [[ ! -f /etc/aiticket-agent/updater.json ]]; then
+  printf '%s\n' '{"automatic":true}' > /etc/aiticket-agent/updater.json
+  chmod 600 /etc/aiticket-agent/updater.json
+fi
+python3 - "$bundle_dir" <<'PYINSTALL'
+import sys,json
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+from agent import VERSION
+p=Path('/var/lib/aiticket-agent/update-status.json')
+p.write_text(json.dumps({'installed':VERSION,'state':'available','detail':'Independent updater installed; release check pending.'}))
+p.chmod(0o600)
+PYINSTALL
 install -o root -g root -m 0644 "$source_dir/agent/aiticket-agent.service" /etc/systemd/system/aiticket-agent.service
 # Override older drop-ins too; retain unrelated local unit customizations.
 install -d -o root -g root -m 0755 /etc/systemd/system/aiticket-agent.service.d
@@ -90,6 +116,8 @@ systemctl restart aiticket-agent
 sleep 2
 systemctl is-active --quiet aiticket-agent || { journalctl -u aiticket-agent -n 30 --no-pager; exit 1; }
 python3 /opt/aiticket-agent/install_verify.py
+systemctl enable --now aiticket-agent-updater.timer
+echo "Independent automatic updater enabled (checks every five minutes)."
 echo 'Agent running with local root command access. Main application host policy controls remote execution.'
 command -v docker >/dev/null && docker info >/dev/null 2>&1 && echo 'Docker daemon accessible.' || echo 'Docker unavailable; other monitoring continues.'
 echo 'Check the host in the application after its next heartbeat.'

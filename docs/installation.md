@@ -183,3 +183,5 @@ For metric host workspaces, Proxmox guest status, optional manual power controls
 The agent installer verifies effective root service permissions, runtime capabilities and local shell policy after restart. A failed check exits with an explanation; inspect conflicting drop-ins as described in [agent permission verification](agent.md#permission-verification). Main application access modes remain under Host settings.
 
 Configure optional resource alerts under **Agent health**. New defaults are disabled; hosts inherit enabled defaults unless overridden under **Host settings → Agent health**. See [health preferences](resource-diagnostics.md). Existing host rules are preserved during upgrade.
+
+Agent installation also enables [independent automatic updates](agent.md#independent-automatic-updates). Existing hosts need one final run of the current installer to add the updater. Upgrade the main application first; then Host settings show agent versions and an Update now button when a newer release is available.

@@ -291,6 +291,8 @@ def create_app(data_dir=None, testing=False):
         from .health_rules import cards,sync
         sync(store)
         data.update(health_cards=cards(store,machine_id),health_scope=machine_id,health_action='/hosts/'+machine_id+'/health',command_policy=old,access=access,access_mode=old['approval'] if old and old['enabled'] else 'readonly')
+        from .agent_updates import view
+        data['agent_update']=view(store,data['host'].get('agent'))
         return render_template('host-settings.html',**data)
 
     @app.post('/hosts/<machine_id>/network-links')
@@ -1001,6 +1003,22 @@ def create_app(data_dir=None, testing=False):
             store.audit(c, 'agent.reenrolled' if existing else 'agent.enrolled', agent_id, {'machine_id': row['machine_id']}, actor='agent')
         return {'agent_id': agent_id, 'credential': credential}
 
+    @app.post('/hosts/<machine_id>/agent-update')
+    @login_required
+    def agent_update_request(machine_id):
+        from .agent_updates import request_update
+        request_update(store,machine_id)
+        flash('Update requested. The independent updater will check on its next five-minute cycle.')
+        return redirect(url_for('host_settings',machine_id=machine_id)+'#agent-updates')
+
+    @app.post('/api/agent/updater')
+    def agent_updater_status():
+        from .agent_updates import report
+        bearer=request.headers.get('Authorization','')
+        agents=store.rows('SELECT id FROM agents WHERE credential_digest=? AND revoked=0',(digest(bearer[7:]) if bearer.startswith('Bearer ') else '',))
+        if not agents: abort(401)
+        return report(store,agents[0]['id'],request.get_json())
+
     @app.post('/api/agent/heartbeat')
     def heartbeat():
         from .power import poll as power_poll
@@ -1010,6 +1028,7 @@ def create_app(data_dir=None, testing=False):
         payload = request.get_json() or {}
         if not isinstance(payload, dict):
             abort(400)
+        if type(payload.get('update_trial',False)) is not bool: abort(400)
         event = payload.get('event_id')
         if not isinstance(event, str) or not 1 <= len(event) <= 100:
             abort(400)
@@ -1050,6 +1069,7 @@ def create_app(data_dir=None, testing=False):
             if not row:
                 abort(401)
             if c.execute('SELECT 1 FROM agent_events WHERE agent_id=? AND event_id=?', (row['id'], event)).fetchone():
+                if payload.get('update_trial'): return {'status':'duplicate','poll_interval_seconds':20,'commands':[],'jobs':[],'actions':[]}
                 from .diagnostics import poll
                 from .actions import poll as action_poll
                 from .commands import poll as command_poll
@@ -1065,6 +1085,7 @@ def create_app(data_dir=None, testing=False):
             c.execute('INSERT INTO network_inventory VALUES(?,?,?) ON CONFLICT(machine_id) DO UPDATE SET at=excluded.at,data=excluded.data',(row['machine_id'],sampled_at if sampled_at is not None else now,json.dumps(network)))
             for interface in network.get('interfaces',[]):
                 retain_network(c,'interface:'+row['machine_id']+':'+interface['name'],sampled_at if sampled_at is not None else now,{'state':interface.get('state','unknown'),'carrier':interface['carrier']})
+            if payload.get('update_trial'): return {'status':'accepted','poll_interval_seconds':20,'commands':[],'jobs':[],'actions':[]}
             from .diagnostics import poll
             jobs=poll(c,row['id'],now)
             from .actions import poll as action_poll

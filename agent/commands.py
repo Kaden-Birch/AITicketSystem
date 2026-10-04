@@ -1,4 +1,5 @@
 """Explicitly enabled remote shell execution. Never replay an uncertain command."""
+import fcntl
 import json,os,queue,selectors,signal,subprocess,threading,time
 from pathlib import Path
 
@@ -92,8 +93,11 @@ def start(state,path,jobs,write_state,authorize,load_policy):
         if job['id'] in ledger: return
         ledger[job['id']]={'state':'running','dispatch_token':job['dispatch_token']}
         write_state(path,state)
+        execution=open(Path(path).parent/'execution.lock','a')
+        fcntl.flock(execution,fcntl.LOCK_SH)
         def run():
             try: result=execute(job,lambda:authorize(job),load_policy)
             except Exception: result={'state':'unknown','exit_code':None,'stdout':'','stderr':'Command runner failed; no replay.','truncated':False}
+            finally: execution.close()
             finished.put({'id':job['id'],'dispatch_token':job['dispatch_token'],'result':result})
         worker=threading.Thread(target=run,daemon=True,name='remote-command');worker.start()

@@ -107,3 +107,5 @@ Fleet management: [SSH keys, users, packages and scripts](docs/fleet.md), with p
 [Agent health defaults and host overrides](docs/resource-diagnostics.md): slider preferences, disabled-by-default fleet rules, host-specific settings and percentage/GB free-space thresholds.
 
 Host [network topology](docs/network-topology.md) connects interface inventory and multiple switch/router ports with VM placement, recent link transitions, colored host tags and read-only AI troubleshooting context.
+
+Linux agents now include an [independent signed-release updater](docs/agent.md#independent-automatic-updates), automatic rollout, heartbeat verification/rollback, and host-settings version/manual-update controls. Existing agents need one installer run to enable it.

@@ -21,7 +21,7 @@ sudo systemctl status aiticket-agent --no-pager
 sudo journalctl -u aiticket-agent -n 50 --no-pager
 ```
 
-The agent has no inbound listener. Enrollment identity and command history persist through upgrades and DHCP changes; no agent IP is configured. The installer starts the service automatically after token entry and restarts it after upgrades.
+The agent has no inbound listener. Enrollment identity and command history persist through upgrades and DHCP changes; no agent IP is configured. The installer starts the service automatically after token entry and restarts it after upgrades. It also installs the independent automatic updater described below.
 
 ### Permission verification
 
@@ -68,3 +68,29 @@ Resource thresholds are configured centrally under **Agent health**, with option
 ## Network interface inventory
 
 Agent 0.8.0 includes optional read-only interface, bridge, bond and existing LLDP discovery. Rerun the installer to install every required file, including `network.py`, and restart automatically while preserving enrollment. No new enrollment token is required for an upgrade. Missing optional discovery tools do not stop heartbeats. See [host network topology](network-topology.md) for switch-port associations, multiple uplinks and AI context.
+
+## Independent automatic updates
+
+Run the recommended installer once on each existing host after upgrading the main application. This adds `aiticket-agent-updater.service` and its five-minute timer; it preserves enrollment and credentials. New installations include them automatically. No further manual agent updates are normally needed.
+
+The updater is a separate root-owned Python program and systemd service. It does not import the monitoring agent, use its heartbeat loop, call an AI model, or depend on the ticket application's availability to download releases. It retrieves a signed stable manifest from this repository's GitHub Releases, verifies the pinned Ed25519 public key and archive checksum, stages only the agent's seven permitted modules, validates syntax/imports, and atomically switches the active release. GitHub HTTPS access, system Python, OpenSSL and a functioning host are required. Existing HTTP enrollment opt-in affects application reporting only; release downloads always verify HTTPS.
+
+Automatic rollout starts with a deterministic ten percent of agent identities. The remainder wait 30 minutes after publication, plus the next timer cycle. This is staggered deployment, not a centrally monitored canary gate. Updates wait for active commands/diagnostics to finish and command results to be saved. During probation, the main application accepts telemetry but dispatches no commands, diagnostics or power actions. A successful authenticated heartbeat from the new version must arrive within two minutes. Failed or interrupted updates restore the previous release and do not automatically retry that same failed release. A newer corrective release remains eligible, even when the monitoring agent is broken. If the main application is also down during probation, verification fails and the updater rolls back honestly.
+
+Host settings show installed and available versions, automatic update state, last updater contact, and readable progress/failure information. **Update now** requests the next independent updater cycle and bypasses rollout delay; it does not bypass signature checks, active-work deferral or failed-release suppression. Updater contact does not count as a monitoring heartbeat or establish application health. Hosts without the updater show a one-time setup instruction. A revoked enrollment cannot report status or receive manual update requests.
+
+Inspect the independent updater locally:
+
+```bash
+sudo systemctl status aiticket-agent-updater.timer --no-pager
+sudo journalctl -u aiticket-agent-updater.service -n 50 --no-pager
+sudo systemctl start aiticket-agent-updater.service
+```
+
+Automatic updates default enabled. To pause them locally, set `automatic` to `false` in `/etc/aiticket-agent/updater.json`; the updater still checks releases and reports availability. An administrator's Update now request remains usable. The updater and trust anchor themselves are deliberately outside automatically replaced agent bundles; upgrade those with the installer when required. The update process retains identity, enrollment credentials, local command policy and execution ledgers. It never replays an uncertain command. Release folders are retained for rollback.
+
+## Publishing agent releases (maintainers)
+
+`.github/workflows/agent-release.yml` validates updater tests and publishes when agent files change on main, or on manual dispatch. It signs manifests using the repository's encrypted `AGENT_RELEASE_SIGNING_KEY` secret. The public key is committed in `agent/release-public.pem`; private key material must never be committed. An immutable `agent-VERSION+COMMIT` release contains the archive; `agent-stable` contains the signed channel manifest. Publication refuses a signing-key mismatch and never overwrites an existing version's archive. Retain a protected backup of the signing key. Replacing the signing key requires deliberate trust-anchor deployment to installed updaters.
+
+Only release bundles are fetched from GitHub. Application enrollment credentials are sent to the configured application endpoint, never to GitHub. A stopped VM, lost network connection, broken Python/OpenSSL installation or failed updater requires infrastructure recovery; an independent updater cannot repair a host it cannot run on.

@@ -1,4 +1,4 @@
-416 passed in 41.13s
+431 passed in 41.36s
 
 HTTP opt-in tests cover cookie configuration, URL restrictions, persisted agent enrollment, nonredirecting credential delivery, continued HTTPS verification and isolated Hermes configuration.
 Local Python 3.14.6; temporary databases, fake Hermes adapters and mocked external providers/subprocesses.
@@ -93,3 +93,5 @@ Delivery queue redesign: readable notification types and ticket links, status fi
 Audit/policies redesign: seven-day Highlights hides routine successful automated events and Proxmox discovery while preserving full audit history; 25-event pages retain category/time/search filters. Tests verify literal search escaping, pagination, failure visibility, unchanged records, policy scope/inheritance, legacy forms and invalid sections. Focused audit checks pass after presentation refinements. Light/dark desktop and 390-pixel mobile layouts reviewed; weekly schedule fields and audit filters verified in a fixture preview.
 
 Operational dashboard: resource averages replaced with host/check health, human blockers, AI queue and notification review. Resolution duration, local-day ticket counts, older-ticket backlog, stale observations, retries and maintenance are covered. Light/dark desktop and 390px mobile reviewed with fixtures; no live infrastructure or notifications changed.
+
+Independent agent updater: signed release/checksum verification, archive traversal/link rejection, real module import checks, idempotent completion, active-command deferral, failed-heartbeat rollback, interrupted activation recovery, older-manifest rejection, failed-release suppression and newer corrective release recovery verified. Separate authenticated/revocation-aware updater reports do not refresh monitoring heartbeats; CSRF-protected manual requests, stale/legacy settings and probation dispatch fencing covered. Signed deterministic bundle built and verified locally; light/dark desktop/mobile settings and manual request feedback reviewed with fixture data. No production agent restarted or updated.

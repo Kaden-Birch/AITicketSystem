@@ -1,6 +1,7 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 34
+CURRENT_VERSION = 35
 MIGRATIONS = {
+    35: ("CREATE TABLE IF NOT EXISTS agent_updates(agent_id TEXT PRIMARY KEY REFERENCES agents(id),at REAL NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT '{}',request TEXT)",),
     34: (
         "CREATE TABLE IF NOT EXISTS network_proxmox(object_id TEXT PRIMARY KEY REFERENCES proxmox_objects(id),at REAL NOT NULL,data TEXT NOT NULL)",
         "CREATE TABLE IF NOT EXISTS network_inventory(machine_id TEXT PRIMARY KEY REFERENCES machines(id),at REAL NOT NULL,data TEXT NOT NULL)",

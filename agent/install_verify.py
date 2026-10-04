@@ -36,7 +36,7 @@ def errors(properties, status, cmdline, policy):
     missing = [name for name, bit in REQUIRED_CAPS.items() if not caps & (1 << bit)]
     if missing:
         failures.append('Running agent lacks capabilities: ' + ', '.join(missing))
-    if '/opt/aiticket-agent/agent.py' not in cmdline or 'run' not in cmdline:
+    if not any(p in cmdline for p in ('/opt/aiticket-agent/agent.py','/opt/aiticket-agent/current/agent.py')) or 'run' not in cmdline:
         failures.append('Service is not running the installed agent command')
     if policy.get('enabled') is not True or policy.get('sudo') is not False:
         failures.append('Local direct shell execution policy is not enabled')
