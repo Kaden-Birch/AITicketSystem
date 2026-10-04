@@ -45,8 +45,8 @@ if($p.public){
  $profile=Get-ItemProperty -LiteralPath ('HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\'+$sid) -ErrorAction SilentlyContinue
  if(!$profile){
   Add-Type -TypeDefinition 'using System;using System.Text;using System.Runtime.InteropServices;public class FleetProfile{[DllImport("userenv.dll",CharSet=CharSet.Unicode)]public static extern int CreateProfile(string sid,string name,StringBuilder path,uint length);}'
-  $path=[Text.StringBuilder]::new(32768)
-  $profileResult=[FleetProfile]::CreateProfile($sid,$p.user,$path,32768)
+  $path=[Text.StringBuilder]::new(260)
+  $profileResult=[FleetProfile]::CreateProfile($sid,$p.user,$path,260)
   if($profileResult -ne 0){[Runtime.InteropServices.Marshal]::ThrowExceptionForHR($profileResult)}
   $profilePath=$path.ToString()
  }else{$profilePath=[Environment]::ExpandEnvironmentVariables($profile.ProfileImagePath)}
