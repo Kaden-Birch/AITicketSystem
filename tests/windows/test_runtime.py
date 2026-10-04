@@ -117,7 +117,7 @@ def test_fleet_windows_user_key_lifecycle(runtime,tmp_path):
     task='AITicketFleetTest'
     def system(script):
         script_file=tmp_path/'fleet-step.ps1';output=tmp_path/'fleet-output.txt'
-        script_file.write_text("$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';try {\n"+script+"\n'__PASSED__' | Out-File -LiteralPath '"+str(output)+"' -Encoding utf8 } catch { $_ | Out-String | Out-File -LiteralPath '"+str(output)+"' -Encoding utf8; exit 1 }",encoding='utf-8-sig')
+        script_file.write_text("$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';try {\n"+script+"\n$result='__PASSED__' } catch { $result=$_ | Out-String };$result | Out-File -LiteralPath '"+str(output)+".tmp' -Encoding utf8;Move-Item -LiteralPath '"+str(output)+".tmp' -Destination '"+str(output)+"' -Force",encoding='utf-8-sig')
         if output.exists():output.unlink()
         path=support.literal(str(script_file))
         args=support.literal('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+str(script_file)+'"')
