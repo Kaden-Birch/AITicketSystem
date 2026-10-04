@@ -103,7 +103,7 @@ def test_windows_manifest_validation_and_archive(runtime,tmp_path):
     with pytest.raises(ValueError):updater.extract(raw.getvalue(),tmp_path/'invalid')
 
 
-def test_fleet_windows_user_key_lifecycle(runtime):
+def test_fleet_windows_user_key_lifecycle(runtime,tmp_path):
     """Create a real disposable local user; preserve/revoke one public key."""
     import uuid
     from aiticket.windows_fleet import command
@@ -114,16 +114,29 @@ def test_fleet_windows_user_key_lifecycle(runtime):
     class Store:
         def rows(self,*args):return [{'public':public}]
     store=Store();home=None
+    task='AITicketFleetTest'
+    def system(script):
+        script_file=tmp_path/'fleet-step.ps1';output=tmp_path/'fleet-output.txt'
+        script_file.write_text("$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';try {\n"+script+"\n'__PASSED__' | Out-File -LiteralPath '"+str(output)+"' -Encoding utf8 } catch { $_ | Out-String | Out-File -LiteralPath '"+str(output)+"' -Encoding utf8; exit 1 }",encoding='utf-8-sig')
+        if output.exists():output.unlink()
+        path=support.literal(str(script_file))
+        args=support.literal('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+str(script_file)+'"')
+        support.ps("$a=New-ScheduledTaskAction -Execute "+support.literal(support.powershell())+" -Argument "+args+";$p=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest;Register-ScheduledTask -TaskName '"+task+"' -Action $a -Principal $p -Force | Out-Null;Start-ScheduledTask -TaskName '"+task+"'",timeout=15)
+        deadline=time.monotonic()+45
+        while time.monotonic()<deadline and not output.exists():time.sleep(.2)
+        assert output.exists(),'SYSTEM fleet task did not finish'
+        text=output.read_text(encoding='utf-8-sig');assert '__PASSED__' in text,text
     try:
         script=command(store,{'kind':'user','username':user,'access':'standard','key_id':'key'})
-        support.ps(script,timeout=30)
+        system(script)
         info=support.query("$u=Get-LocalUser -Name '"+user+"';$p=Get-ItemProperty -LiteralPath ('HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList\\'+$u.SID.Value);[pscustomobject]@{sid=$u.SID.Value;home=$p.ProfileImagePath}")
         home=Path(info['home']);authorized=home/'.ssh'/'authorized_keys'
         assert public in authorized.read_text()
-        support.ps(command(store,{'kind':'key','username':user,'key_id':'key'}),timeout=20)
+        system(command(store,{'kind':'key','username':user,'key_id':'key'}))
         assert authorized.read_text().count(public)==1
-        support.ps(command(store,{'kind':'revoke','username':user,'key_id':'key'}),timeout=20)
+        system(command(store,{'kind':'revoke','username':user,'key_id':'key'}))
         assert public not in authorized.read_text()
-        with pytest.raises(ValueError):support.ps(script,timeout=20)
+        with pytest.raises(AssertionError):system(script)
     finally:
+        support.ps("Unregister-ScheduledTask -TaskName '"+task+"' -Confirm:$false -ErrorAction SilentlyContinue")
         support.ps("$u=Get-LocalUser -Name '"+user+"' -ErrorAction SilentlyContinue;if($u){Get-CimInstance Win32_UserProfile | Where-Object {$_.SID -eq $u.SID.Value} | Remove-CimInstance;Remove-LocalUser -Name '"+user+"'}",timeout=30)

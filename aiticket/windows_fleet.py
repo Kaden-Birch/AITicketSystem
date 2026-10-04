@@ -46,7 +46,8 @@ if($p.public){
  if(!$profile){
   Add-Type -TypeDefinition 'using System;using System.Text;using System.Runtime.InteropServices;public class FleetProfile{[DllImport("userenv.dll",CharSet=CharSet.Unicode)]public static extern int CreateProfile(string sid,string name,StringBuilder path,uint length);}'
   $path=[Text.StringBuilder]::new(32768)
-  if([FleetProfile]::CreateProfile($sid,$p.user,$path,32768) -ne 0){throw 'Unable to create the user profile'}
+  $profileResult=[FleetProfile]::CreateProfile($sid,$p.user,$path,32768)
+  if($profileResult -ne 0){[Runtime.InteropServices.Marshal]::ThrowExceptionForHR($profileResult)}
   $profilePath=$path.ToString()
  }else{$profilePath=[Environment]::ExpandEnvironmentVariables($profile.ProfileImagePath)}
  $directory=Join-Path $profilePath '.ssh';$file=Join-Path $directory 'authorized_keys'
