@@ -84,3 +84,10 @@ def test_host_power_requires_local_permission_and_fixed_argv():
     with patch.object(module.subprocess,'run',side_effect=subprocess.TimeoutExpired('systemctl',10)) as command:
         assert module.execute(request,allowed)['status']=='unknown'
         assert command.call_count==1
+
+
+def test_manual_power_uses_enrollment_even_when_old_action_key_exists():
+    state={'credential':'enrollment','action_credential':'old-recovery-key'}
+    assert runner.action_token(state,{'operation':'host_restart'})=='enrollment'
+    assert runner.action_token(state,{'operation':'host_shutdown'})=='enrollment'
+    assert runner.action_token(state,{'operation':'service_restart'})=='old-recovery-key'

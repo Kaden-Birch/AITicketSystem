@@ -124,6 +124,12 @@ def process_jobs(state,path,jobs,policy):
 
 
 
+def action_token(state,payload):
+    if payload.get('operation') in ('host_restart','host_shutdown'):
+        return state['credential']
+    return state.get('action_credential') or state['credential']
+
+
 def process_actions(state,path,jobs,policy,authorize,policy_loader=None):
     from actions import execute
     ledger=state.setdefault('action_ledger',{})
@@ -135,7 +141,7 @@ def process_actions(state,path,jobs,policy,authorize,policy_loader=None):
             ledger[identifier]={'status':'running','output':''}
             write_state(path,state)
             try:
-                authorization=authorize({'id':identifier,'dispatch_token':job['dispatch_token'],'proposal_hash':job['proposal_hash']})
+                authorization=authorize({'id':identifier,'dispatch_token':job['dispatch_token'],'proposal_hash':job['proposal_hash'],'operation':job['operation']})
                 if authorization.get('status')!='authorized' or authorization.get('proposal_hash')!=job['proposal_hash'] or authorization.get('operation')!=job['operation'] or authorization.get('parameters')!=job['parameters']:
                     raise ValueError('Action authorization failed')
                 record=execute(job,policy_loader() if policy_loader else policy)
@@ -144,7 +150,7 @@ def process_actions(state,path,jobs,policy,authorize,policy_loader=None):
         elif record['status']=='running':
             record={'status':'unknown','output':'Agent restarted during action; no automatic replay.'}
         ledger[identifier]=record
-        state['action_result']={'id':identifier,'dispatch_token':job['dispatch_token'],**record}
+        state['action_result']={'id':identifier,'operation':job['operation'],'dispatch_token':job['dispatch_token'],**record}
         # Action identities are never evicted; reenrollment requires a new broker delivery.
         write_state(path,state)
 
@@ -220,7 +226,7 @@ def main():
                     if exc.code not in (400,409): raise
                 state['command_results'].pop(0);write_state(path,state)
             if state.get('action_result'):
-                send(base,'/api/agent/action-result',state['action_result'],state.get('ca'),state.get('action_credential') or state['credential'])
+                send(base,'/api/agent/action-result',state['action_result'],state.get('ca'),action_token(state,state['action_result']))
                 state.pop('action_result',None)
                 write_state(path,state)
             if state.get('diagnostic_result'):
@@ -252,7 +258,7 @@ def main():
             write_state(path, state)
             start(state,path,response.get('commands',[]),write_state,lambda job:send(base,'/api/agent/command-permission',{'id':job['id'],'dispatch_token':job['dispatch_token']},state.get('ca'),state['credential']).get('allowed') is True,lambda:policy_config(args.policy))
             process_jobs(state,path,response.get('jobs',[]),policy)
-            process_actions(state,path,response.get('actions',[]),policy,lambda payload:send(base,'/api/agent/action-authorize',payload,state.get('ca'),state.get('action_credential') or state['credential']),policy_loader=lambda:load_policy(args.policy))
+            process_actions(state,path,response.get('actions',[]),policy,lambda payload:send(base,'/api/agent/action-authorize',payload,state.get('ca'),action_token(state,payload)),policy_loader=lambda:load_policy(args.policy))
             requested=response.get("poll_interval_seconds",30)
             delay=requested if type(requested) is int and 20<=requested<=300 else 30
             monitor_checks(send,base,state,path)
