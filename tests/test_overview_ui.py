@@ -64,15 +64,17 @@ def test_ticket_filters_intervention_and_history_metrics(signed_in):
     assert b'Application' in client.get('/tickets?view=resolved').data
 
 
-def test_fleet_averages_do_not_duplicate_linked_resources(environment):
+def test_dashboard_uses_health_not_resource_averages(environment):
     _,store,vault=environment;machine,_=monitored(store);now=time.time()
     with store.connect() as c:
         c.execute('INSERT INTO agents(id,machine_id,credential_digest,capabilities) VALUES(?,?,?,?)',(uid(),machine,'fixture','{}'))
         c.execute('INSERT INTO metric_samples VALUES(?,?,?,?)',(machine,'agent',now-1,json.dumps({'cpu_percent':40,'ram_percent':20,'disk_percent':10})))
         c.execute('INSERT INTO metric_samples VALUES(?,?,?,?)',('unassigned-unifi','unifi',now-1,json.dumps({'cpu_percent':99})))
     data=overview_ui.dashboard_data(store,now)
-    assert data['charts'][0]['latest']==40 and data['charts'][1]['latest']==20
-    assert data['agents']==1
+    assert data['charts']==[]
+    assert data['host_health']['unreachable']==1
+    assert data['check_health']['unknown']==1
+    assert len(data['ticket_charts'][0]['series'])==2
 
 def test_stopped_proxmox_explains_missing_heartbeat_without_hiding_other_checks(environment):
     from test_hosts_power import guest
@@ -93,3 +95,38 @@ def test_offline_api_requires_auth_and_preserves_mixed_incident(signed_in):
     assert client.post('/hosts/'+machine+'/presence',data={'mode':'offline'}).status_code==403
     assert client.post('/hosts/'+machine+'/presence',data={'csrf':csrf,'mode':'offline'}).status_code==302
     assert store.rows('SELECT closed FROM incidents')[0]['closed'] is None
+
+
+def test_dashboard_separates_health_retrying_stale_and_maintenance(environment):
+    _,store,_=environment;now=time.time()
+    m,down=monitored(store,'http');_,retry=monitored(store,'http',machine=m);_,passing=monitored(store,'http',machine=m)
+    _,stale=monitored(store,'http',machine=m);_,paused=monitored(store,'http',machine=m)
+    with store.connect() as c:
+        for identifier,health,failures,at in ((down,'down',3,now),(retry,'healthy',1,now),(passing,'healthy',0,now),(stale,'healthy',0,now-400),(paused,'down',3,now)):
+            c.execute('UPDATE checks SET health=?,failures=? WHERE id=?',(health,failures,identifier))
+            c.execute('INSERT INTO observations VALUES(?,?,?,?,?)',(uid(),identifier,at,health,'{}'))
+        c.execute('UPDATE checks SET maintenance_until=? WHERE id=?',(now+600,paused))
+    data=overview_ui.dashboard_data(store,now)
+    assert data['check_health']=={'healthy':1,'retrying':1,'down':1,'unknown':1,'paused':1}
+    assert data['hosts_attention']==1
+    host_presence.set_offline(store,m,True)
+    data=overview_ui.dashboard_data(store,now)
+    assert data['host_health']['offline']==1 and data['hosts_attention']==0
+    assert data['check_health']['down']==1 # Intentional shutdown does not erase application evidence.
+
+
+def test_dashboard_today_uses_local_dates_and_backlog_includes_older_tickets(environment):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    _,store,_=environment
+    now=datetime(2026,10,4,1,0,tzinfo=ZoneInfo('UTC')).timestamp() # Oct 3 in Mountain time.
+    machine,check=monitored(store,'http')
+    observe(store,check,False,{},now=now-40*86400)
+    data=overview_ui.dashboard_data(store,now)
+    assert data['recent']==0 and data['open']==1
+    assert data['ticket_charts'][1]['latest']==1
+    observe(store,check,True,{},now=now-600)
+    data=overview_ui.dashboard_data(store,now)
+    assert data['resolved_today']==1 and data['opened_today']==0 and data['resolved_count']==1
+    assert data['average_resolution']=='40.0d'
+    assert data['date_end']=='2026-10-03'

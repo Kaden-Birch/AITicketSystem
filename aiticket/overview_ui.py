@@ -1,5 +1,5 @@
 """Read-only fleet summaries and ticket list projections."""
-import json,time,math
+import json,time
 from datetime import datetime,timedelta
 from zoneinfo import ZoneInfo
 
@@ -62,25 +62,56 @@ def dashboard_data(store,now=None):
     counts=[0]*30;resolutions=[[] for _ in days];manual=[0]*30
     for row in rows:
         date=datetime.fromtimestamp(row['first_seen'],tz).date()
-        if date in days:
+        if date in days and row['first_seen']<=now:
             i=days.index(date);counts[i]+=1;manual[i]+=bool(row['intervened'])
         if row['closed'] is not None:
             date=datetime.fromtimestamp(row['closed'],tz).date()
-            if date in days:resolutions[days.index(date)].append(max(0,row['closed']-row['first_seen'])/3600)
-    samples=store.rows('SELECT * FROM metric_samples WHERE at>=? AND at<=? ORDER BY at',(now-86400,now))
-    entities={(h['id'],'agent') if h['agent'] else (h['object']['id'],'proxmox') for h in hosts if h['agent'] or h['object']}
-    buckets=[{} for _ in range(96)]
-    for sample in samples:
-        identity=(sample['entity_id'],sample['source'])
-        if identity in entities:buckets[min(95,int((sample['at']-(now-86400))/900))][identity]=json.loads(sample['metrics'])
-    charts=[]
-    for key,label in [('cpu_percent','Average CPU'),('ram_percent','Average RAM'),('disk_percent','Average storage')]:
-        means=[]
-        for bucket in buckets:
-            values=[v[key] for v in bucket.values() if type(v.get(key)) in (int,float) and math.isfinite(v[key])]
-            means.append(sum(values)/len(values) if values else None)
-        charts.append(plot(label,means,'%',100))
+            if date in days and row['closed']<=now:resolutions[days.index(date)].append(max(0,row['closed']-row['first_seen'])/3600)
+    resolved_counts=[len(v) for v in resolutions]
     mean_resolution=[sum(v)/len(v) if v else None for v in resolutions]
-    interventions=[100*m/n if n else None for m,n in zip(manual,counts)]
-    closed=[r for r in rows if r['closed'] is not None and r['closed']>=datetime.combine(days[0],datetime.min.time(),tz).timestamp()]
-    return {'hosts':len(hosts),'agents':sum(bool(h['agent'] and not h['agent']['revoked']) for h in hosts),'open':sum(not r['resolved'] for r in rows),'total':len(rows),'recent':sum(counts),'average_hours':round(sum(max(0,r['closed']-r['first_seen']) for r in closed)/len(closed)/3600,1) if closed else None,'manual_percent':round(100*sum(manual)/sum(counts),1) if sum(counts) else None,'charts':charts,'ticket_charts':[plot('Tickets created',counts),plot('Average time to resolution',mean_resolution,'h'),plot('Manual intervention',interventions,'%',100)],'start':now-86400,'end':now,'date_start':str(days[0]),'date_end':str(days[-1])}
+    start=datetime.combine(days[0],datetime.min.time(),tz).timestamp()
+    closed=[r for r in rows if r['closed'] is not None and start<=r['closed']<=now]
+    opened_today=counts[-1];resolved_today=resolved_counts[-1]
+    backlog=[]
+    for day in days:
+        cutoff=min(now,datetime.combine(day+timedelta(days=1),datetime.min.time(),tz).timestamp()-0.000001)
+        backlog.append(sum(r['first_seen']<=cutoff and (r['closed'] is None or r['closed']>cutoff) for r in rows))
+    states={'healthy':0,'warning':0,'unreachable':0,'offline':0}
+    for h in hosts:
+        state='warning' if h['state']=='unreachable' and h['state_label']!='Unreachable' else h['state']
+        states[state]+=1
+    from .policies import maintained
+    checks={'healthy':0,'retrying':0,'down':0,'unknown':0,'paused':0}
+    with store.connect() as c:
+        for check in c.execute("SELECT k.*,(SELECT max(at) FROM observations o WHERE o.check_id=k.id) last_checked FROM checks k WHERE enabled=1 AND kind<>'manual'"):
+            if check['maintenance_until']>now or maintained(c,check['machine_id'],now):state='paused'
+            elif not check['last_checked'] or now-check['last_checked']>max(180,check['interval']*3):state='unknown'
+            elif check['health']=='down':state='down'
+            elif check['failures']:state='retrying'
+            elif check['health']=='healthy':state='healthy'
+            else:state='unknown'
+            checks[state]+=1
+    notifications=store.rows("SELECT count(*) count FROM deliveries WHERE state IN ('failed','expired')")[0]['count']
+    flow=plot('Tickets opened vs resolved',counts)
+    flow['latest']=None
+    flow['series']=[{**plot('Opened',counts,ceiling=max([1]+counts+resolved_counts)*1.1),'color':'opened'},
+                    {**plot('Resolved',resolved_counts,ceiling=max([1]+counts+resolved_counts)*1.1),'color':'resolved'}]
+    flow['ceiling']=flow['series'][0]['ceiling']
+    return {'open':sum(not r['resolved'] for r in rows),'recent':sum(counts),
+            'average_hours':round(sum(max(0,r['closed']-r['first_seen']) for r in closed)/len(closed)/3600,1) if closed else None,
+            'average_resolution':duration(sum(max(0,r['closed']-r['first_seen']) for r in closed)/len(closed)) if closed else '—',
+            'manual_percent':round(100*sum(manual)/sum(counts),1) if sum(counts) else None,
+            'resolved_count':len(closed),'opened_today':opened_today,'resolved_today':resolved_today,
+            'needs_help':sum(r['category']=='manual' for r in rows),'ai_working':sum(r['category']=='ai' for r in rows),
+            'queued':sum(r['category']=='new' for r in rows),'host_health':states,'check_health':checks,
+            'hosts_attention':states['warning']+states['unreachable'],'notification_review':notifications,
+            'ai_enabled':bool(store.setting('hermes_config',{}).get('enabled')),
+            'charts':[],'ticket_charts':[flow,plot('Open ticket backlog',backlog),plot('Average time to resolution',mean_resolution,'h')],
+            'date_start':str(days[0]),'date_end':str(days[-1])}
+
+
+def duration(seconds):
+    if seconds<60:return str(round(seconds))+'s'
+    if seconds<3600:return str(round(seconds/60))+'m'
+    if seconds<86400:return str(round(seconds/3600,1))+'h'
+    return str(round(seconds/86400,1))+'d'
