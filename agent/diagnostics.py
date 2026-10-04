@@ -13,16 +13,14 @@ def redact(text):
 
 
 def load_policy(path):
-    if not Path(path).exists():
-        return {'services':{},'logs':False}
-    policy=json.loads(Path(path).read_text())
+    policy=json.loads(Path(path).read_text()) if Path(path).exists() else {}
     services=policy.get('services',{})
     if not isinstance(services,dict) or len(services)>20 or any(not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',str(k)) or not re.fullmatch(r'[A-Za-z0-9_.@-]{1,100}\.service',str(v)) or str(v).startswith('-') for k,v in services.items()):
         raise ValueError('Invalid local service allowlist')
     recovery=policy.get('recovery',{})
     if not isinstance(recovery,dict) or not isinstance(recovery.get('services',[]),list) or any(s not in services for s in recovery.get('services',[])):
         raise ValueError('Invalid recovery service allowlist')
-    power=policy.get('power',{})
+    power=policy.get('power',{'enabled':os.geteuid()==0,'validated':os.geteuid()==0,'operations':['host_restart','host_shutdown'] if os.geteuid()==0 else []})
     if not isinstance(power,dict) or not isinstance(power.get('operations',[]),list) or len(power.get('operations',[]))>2 or any(op not in ('host_restart','host_shutdown') for op in power.get('operations',[])):
         raise ValueError('Invalid local power allowlist')
     return {'power':{'enabled':power.get('enabled') is True,'validated':power.get('validated') is True,'operations':power.get('operations',[])},'services':services,'logs':policy.get('logs') is True,'recovery':{'enabled':recovery.get('enabled') is True,'validated':recovery.get('validated') is True,'services':recovery.get('services',[])}}

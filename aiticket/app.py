@@ -261,6 +261,8 @@ def create_app(data_dir=None, testing=False):
         data['proxmox_api_jobs']=[px_view(store,vault,r['id']) for r in store.rows('SELECT id FROM proxmox_api_jobs WHERE machine_id=? ORDER BY created DESC LIMIT 20',(machine_id,))]
         from .metric_history import charts
         data['history']=charts(store,data['host'],request.args.get('window','6h'))
+        from .power import availability
+        data['power_available']=availability(store,vault,machine_id)
         return render_template('host-detail.html',**data)
 
     @app.get('/hosts/<machine_id>/checks/new')
@@ -482,19 +484,11 @@ def create_app(data_dir=None, testing=False):
         from .hostview import overview
         return render_template('ticket-new.html',host_previews=overview(store),machines=store.rows('SELECT id,name FROM machines ORDER BY name'),selected=request.args.get('machine',''))
 
-    @app.post('/hosts/<machine_id>/power-policy')
-    @login_required
-    def power_policy(machine_id):
-        from .power import configure
-        f=request.form
-        configure(store,vault,machine_id,f.get('backend'),f.get('connection_id'),f.get('token_id',''),f.get('token_secret',''),enabled=f.get('enabled')=='yes',validated=f.get('validated')=='yes',confirm=f.get('confirm')=='yes')
-        return redirect(url_for('host_detail',machine_id=machine_id))
-
     @app.post('/hosts/<machine_id>/power')
     @login_required
     def request_power(machine_id):
         from .power import propose
-        propose(store,machine_id,request.form.get('operation'),request.form.get('reason',''))
+        propose(store,machine_id,request.form.get('operation'),request.form.get('reason') or 'Manual '+str(request.form.get('operation')),vault=vault)
         return redirect(url_for('host_detail',machine_id=machine_id))
 
     @app.post('/power/<job_id>/decide')
@@ -1537,10 +1531,12 @@ def create_app(data_dir=None, testing=False):
         rows=store.rows('SELECT incident_id FROM action_proposals WHERE id=?',(proposal_id,))
         return redirect(url_for('incident',incident_id=rows[0]['incident_id']))
 
-    def action_agent():
+    def action_agent(power_id=None):
         bearer=request.headers.get('Authorization','')
         if not bearer.startswith('Bearer '): abort(401)
         rows=store.rows('SELECT id FROM agents WHERE action_credential_digest=? AND revoked=0',(digest(bearer[7:]),))
+        if not rows and power_id:
+            rows=store.rows('SELECT a.id FROM agents a JOIN power_jobs p ON p.agent_id=a.id WHERE p.id=? AND a.credential_digest=? AND a.revoked=0',(power_id,digest(bearer[7:])))
         if not rows: abort(401)
         return rows[0]['id']
 
@@ -1549,7 +1545,7 @@ def create_app(data_dir=None, testing=False):
         from .actions import authorize
         payload=request.get_json()
         if not isinstance(payload,dict): raise ValueError('Invalid action envelope.')
-        agent_id=action_agent()
+        agent_id=action_agent(payload.get('id'))
         if store.rows('SELECT id FROM power_jobs WHERE id=?',(payload.get('id'),)):
             from .power import authorize as power_authorize
             return power_authorize(store,agent_id,payload)
@@ -1558,7 +1554,8 @@ def create_app(data_dir=None, testing=False):
     @app.post('/api/agent/action-result')
     def action_result():
         from .actions import complete
-        agent_id=action_agent();payload=request.get_json()
+        payload=request.get_json()
+        agent_id=action_agent(payload.get('id') if isinstance(payload,dict) else None)
         if isinstance(payload,dict) and store.rows('SELECT id FROM power_jobs WHERE id=?',(payload.get('id'),)):
             from .power import complete as power_complete
             return {'status':power_complete(store,agent_id,payload)}

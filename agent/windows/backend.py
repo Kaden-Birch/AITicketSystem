@@ -39,7 +39,7 @@ def inventory():
 def load_policy(path):
     p=read_policy(path);services=p.get('services',{})
     if not isinstance(services,dict) or len(services)>20 or any(not re.fullmatch('[A-Za-z0-9_.-]{1,80}',k) or not re.fullmatch('[A-Za-z0-9_.@ -]{1,100}',v) for k,v in services.items()):raise ValueError('Invalid Windows service allowlist')
-    recovery=p.get('recovery',{});power=p.get('power',{})
+    recovery=p.get('recovery',{});power=p.get('power',{'enabled':bool(ctypes.windll.shell32.IsUserAnAdmin()),'validated':bool(ctypes.windll.shell32.IsUserAnAdmin()),'operations':['host_restart','host_shutdown']})
     if any(v not in services for v in recovery.get('services',[])) or any(v not in ('host_restart','host_shutdown') for v in power.get('operations',[])):raise ValueError('Invalid recovery policy')
     return {'services':services,'logs':p.get('logs') is True,'recovery':recovery,'power':power}
 

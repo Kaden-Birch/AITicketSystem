@@ -13,7 +13,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-VERSION = '0.10.0'
+VERSION = '0.10.1'
 
 
 def endpoint(value,allow_http=False):
@@ -220,7 +220,7 @@ def main():
                     if exc.code not in (400,409): raise
                 state['command_results'].pop(0);write_state(path,state)
             if state.get('action_result'):
-                send(base,'/api/agent/action-result',state['action_result'],state.get('ca'),state.get('action_credential',''))
+                send(base,'/api/agent/action-result',state['action_result'],state.get('ca'),state.get('action_credential') or state['credential'])
                 state.pop('action_result',None)
                 write_state(path,state)
             if state.get('diagnostic_result'):
@@ -237,7 +237,6 @@ def main():
                 advertised=capabilities(policy)
                 advertised['shell_commands']=policy_config(args.policy).get('enabled') is True
                 if not state.get('action_credential'):
-                    advertised.pop('power_operations',None)
                     advertised.pop('actions',None)
                     advertised.pop('action_services',None)
                 pending = {'event_id': str(uuid.uuid4()), 'version': VERSION, 'telemetry': telemetry(state), 'sampled_at':time.time(), 'capabilities':advertised,'host_info':host_info(),'network':network_info()}
@@ -253,7 +252,7 @@ def main():
             write_state(path, state)
             start(state,path,response.get('commands',[]),write_state,lambda job:send(base,'/api/agent/command-permission',{'id':job['id'],'dispatch_token':job['dispatch_token']},state.get('ca'),state['credential']).get('allowed') is True,lambda:policy_config(args.policy))
             process_jobs(state,path,response.get('jobs',[]),policy)
-            process_actions(state,path,response.get('actions',[]),policy,lambda payload:send(base,'/api/agent/action-authorize',payload,state.get('ca'),state.get('action_credential','')),policy_loader=lambda:load_policy(args.policy))
+            process_actions(state,path,response.get('actions',[]),policy,lambda payload:send(base,'/api/agent/action-authorize',payload,state.get('ca'),state.get('action_credential') or state['credential']),policy_loader=lambda:load_policy(args.policy))
             requested=response.get("poll_interval_seconds",30)
             delay=requested if type(requested) is int and 20<=requested<=300 else 30
             monitor_checks(send,base,state,path)

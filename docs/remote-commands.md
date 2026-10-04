@@ -95,7 +95,7 @@ Read classification is deliberately conservative: known diagnostic executables a
 
 Changing modes cancels old queued requests instead of approving them retrospectively. Submit a fresh request under the new mode. Preapproved commands can finish after a successful AI session; takeover, cancellation, expiry and permission changes still fence execution. Existing legacy policies are retained on upgrade and identified in settings; they are replaced when you save one of the three modes.
 
-The settings page also holds host details, Proxmox association and optional manual power-button configuration. Monitoring and notification configuration links are collected there.
+The settings page also holds host details, Proxmox association and optional automatic power controls. Monitoring and notification configuration links are collected there.
 
 ## 4. Enable commands in ticket Hermes investigations
 

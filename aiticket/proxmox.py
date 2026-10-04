@@ -28,6 +28,13 @@ class Client:
                     raise ValueError('API response exceeds size limit')
             return json.loads(body)['data']
 
+    def power_allowed(self,obj):
+        from urllib.parse import quote
+        path='/nodes/'+obj['node'] if obj['kind']=='node' else '/vms/'+obj['object_key'].split('/',1)[1]
+        permission='Sys.PowerMgmt' if obj['kind']=='node' else 'VM.PowerMgmt'
+        data=self.get('/access/permissions?path='+quote(path,safe=''))
+        return isinstance(data,dict) and isinstance(data.get(path),dict) and data[path].get(permission) in (1,True)
+
     def test(self):
         results = {'reachability': 'unknown', 'authentication': 'unknown', 'capabilities': {}}
         try:

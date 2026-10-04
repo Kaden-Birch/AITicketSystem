@@ -190,3 +190,19 @@ def test_independent_update_activation_and_interrupted_rollback(runtime,tmp_path
     recovered=updater.Updater(root);recovered.run()
     assert support.current(root)==installed and recovered.status['state']=='rolled_back'
     assert recovered.status['failed_release']==failed_version
+
+
+def test_power_defaults_use_elevated_identity_and_honor_local_restriction(runtime,tmp_path,monkeypatch):
+    _,backend=runtime
+    policy=tmp_path/'policy.json';policy.write_text('{}')
+    monkeypatch.setattr(backend.ctypes.windll.shell32,'IsUserAnAdmin',lambda:True)
+    p=backend.load_policy(policy)
+    assert backend.capabilities(p)['power_operations']==['host_restart','host_shutdown']
+    calls=[]
+    monkeypatch.setattr(backend,'run',lambda argv,timeout:calls.append(argv) or {'state':'completed'})
+    backend.action({'operation':'host_restart','parameters':{},'expires':time.time()+60},p)
+    assert '/r' in calls[0] and '/t' in calls[0]
+    policy.write_text('{"power":{"enabled":false}}')
+    assert 'power_operations' not in backend.capabilities(backend.load_policy(policy))
+    policy.write_text('{}');monkeypatch.setattr(backend.ctypes.windll.shell32,'IsUserAnAdmin',lambda:False)
+    assert 'power_operations' not in backend.capabilities(backend.load_policy(policy))

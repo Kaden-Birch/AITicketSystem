@@ -10,6 +10,11 @@ from test_proxmox import setup,inventory
 from test_actions import environment_setup
 
 
+@pytest.fixture(autouse=True)
+def power_permission(monkeypatch):
+    monkeypatch.setattr(Client,'power_allowed',lambda self,obj:True)
+
+
 def guest(store,vault,status='running'):
     setup(store,vault)
     resources=inventory()

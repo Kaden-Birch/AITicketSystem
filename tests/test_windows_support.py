@@ -75,3 +75,29 @@ def test_windows_does_not_inherit_linux_only_health_alerts(environment):
     assert len(store.rows('SELECT id FROM checks WHERE machine_id=? AND enabled=1',(linux,)))==3
     cards=health.cards(store,machine)
     assert {c['metric'] for c in cards if c['unsupported']}=={'memory_pressure_percent','inode_used_percent'}
+
+
+def test_windows_telemetry_reaches_health_checks_and_history(environment):
+    from unittest.mock import patch
+    from aiticket import health_rules as health,worker
+    from aiticket.hostview import overview
+    from aiticket.metric_history import charts
+    app,store,vault=environment;machine,agent,headers=enrolled(store)
+    for metric in ('cpu_percent','memory_used_percent','disk_used_percent'):
+        cfg=health.defaults(metric)
+        health.save(store,'*',{'metric':metric,'unit':'percent','threshold':str(cfg['threshold']),'recovery':str(cfg['recovery']),'sustain_seconds':'120','severity':'medium','enabled':'yes'})
+    client=app.test_client();now=time.time()
+    telemetry={'cpu_percent':25,'memory_total_bytes':1000,'memory_available_bytes':500,'disk_total_bytes':1000,'disk_free_bytes':500,'uptime_seconds':1200,'cpu_cores':4}
+    for cycle in range(2):
+        at=now+cycle*30
+        with patch('time.time',return_value=at):
+            payload={'event_id':str(uuid.uuid4()),'version':'0.10.0','sampled_at':at,'telemetry':telemetry,'host_info':{'os':'Windows 11'},'network':{'interfaces':[],'neighbors':[],'machine_type':'vm'}}
+            assert client.post('/api/agent/heartbeat',json=payload,headers=headers).status_code==200
+            for _ in range(3):worker.tick(store,vault)
+    checks=store.rows("SELECT * FROM checks WHERE machine_id=? AND kind='agent_metric' AND enabled=1",(machine,))
+    assert len(checks)==3 and all(c['health']=='healthy' for c in checks)
+    assert all(len(store.rows('SELECT id FROM observations WHERE check_id=?',(c['id'],)))==2 for c in checks)
+    host=overview(store,now+30)[0]
+    assert host['sample']['fresh'] and host['sample']['cpu']==25 and host['sample']['ram']==50 and host['sample']['disk']==50
+    history=charts(store,host,now=now+30)
+    assert history['count']==2 and {c['key'] for c in history['charts']} >= {'cpu_percent','ram_percent','disk_percent','uptime_hours'}

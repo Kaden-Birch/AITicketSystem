@@ -4,65 +4,17 @@ Open **Hosts** and click a machine name for its dedicated workspace. The compact
 
 Agent telemetry is preferred for guest filesystem usage. Proxmox metrics are snapshots of the last successful inventory discovery/refresh, not a continuous live feed. Configure scheduled discovery under Proxmox; values older than 180 seconds are marked stale. A Proxmox node page lists all visible discovered VMs and containers on that node, including unassigned guests and templates, with state, metrics and links. Token visibility determines which guests can be discovered. Proxmox disk figures may describe allocated capacity; they do not establish a VM's actual free filesystem space. Enroll a guest agent for that information.
 
-## Proxmox guest power
+## Automatic power controls
 
-On a linked application's **Host settings → Manual power buttons**, choose **Proxmox guest power API**, select the existing cluster connection and enable the buttons. The saved connection's current API token is reused for start, reboot and shutdown, including task verification; no secondary token is required. Proxmox enforces the token's permissions and denied requests are reported as failures.
+Power buttons are available automatically after an agent is enrolled or a Proxmox resource is linked. There is no separate enablement, backend selection, token, or action credential to configure.
 
-**Start** requires a stopped, explicitly associated Proxmox guest. **Restart** and **Shutdown** require a running guest. Templates, Proxmox nodes and storage cannot be powered through this application. Keep the monitoring VM, Hermes and other essential infrastructure protected. Enter a reason, create the proposal, review its exact identity/operation/impact and confirm **Approve once**. A migration, changed binding, stale inventory, expired proposal or changed policy invalidates the proposal. Shutdown is graceful; no forced stop fallback is sent. Restart calls the reboot API, rather than independently sending stop/start commands.
+Linked Proxmox guests and nodes use the cluster connection's existing API token. The application checks effective `VM.PowerMgmt` permission for guests and `Sys.PowerMgmt` for nodes. The host page caches that read-only check for up to 60 seconds; creating a request and dispatching it check permission again. Read-only permission discovery can use another configured cluster endpoint. A power write is sent once to the selected endpoint and is never replayed through another endpoint if delivery is uncertain.
 
-The worker persists dispatch before sending one request. Acceptance is followed by task/state verification. An ambiguous result blocks new power controls until you independently check the target and acknowledge it; this does not relabel the result as verified. Commands are never automatically retried. A five-minute cooldown applies after dispatch. Approval expires after five minutes. Planned shutdown does not rewrite expected monitoring states; use the existing maintenance/snooze controls first if appropriate.
+Without a Proxmox link, an enrolled Linux root or Windows SYSTEM agent automatically advertises restart and shutdown support. Its existing enrollment credential authenticates the exact manual power job; service recovery still uses its separate credential and policy. Older agents need the automatic agent update before this capability appears. Explicit local power restrictions continue to apply.
 
-## Linux agent restart/shutdown
+Start is available for stopped linked Proxmox guests. Restart and Shutdown are available for running guests, online Proxmox nodes, or fresh capable standalone agents. Storage and templates have no power controls. A Proxmox permission denial does not silently switch to agent execution.
 
-An agent supports restart/shutdown, but cannot start a powered-off host. Prefer Proxmox guest power for guests. Agent execution requires all three of: the application power policy, a separate action credential and a root-managed local power allowlist. Existing monitoring installations gain no OS power permission automatically.
-
-Add the following `power` section to `/etc/aiticket-agent/policy.json`, preserving existing service/recovery configuration:
-
-```json
-"power": {
-  "enabled": false,
-  "validated": false,
-  "operations": ["host_restart", "host_shutdown"]
-}
-```
-
-The agent runs fixed `/usr/bin/systemctl --no-ask-password reboot` or `poweroff` commands without a shell, sudo or privilege escalation. An administrator must separately configure narrow OS permissions for the `aiticket-agent` account if these commands should be allowed. Keep the unprivileged service account and hardened systemd unit; do not switch the entire agent to root. Test permissions on a disposable host, then explicitly enable and validate the local section and the application's policy. Issue the separate action credential on the host page and install it using the [existing action-credential procedure](agent.md#optional-service-recovery). Capability changes appear on the next heartbeat.
-
-A fresh uptime sample and heartbeat are required. Restart is verified by new uptime; absence of a heartbeat alone cannot prove shutdown. Agent shutdown therefore requires independent manual confirmation. The permanent execution ledger prevents an acknowledged command from being replayed after a crash/restart.
-
-## Upgrade an existing HTTP installation
-
-Back up the matched database and encryption key using your normal procedure before the schema upgrade. On the main VM:
-
-```sh
-cd /opt/aiticket
-sudo docker compose stop app
-git pull --ff-only origin main
-sha256sum -c SHA256SUMS
-sudo docker compose build
-sudo docker compose up -d
-```
-
-Do not run `init` again or delete volumes. Preserve `.env` and the existing Compose project name. Wait for health before opening the dashboard.
-
-On each enrolled agent (adjust the source directory if different):
-
-```sh
-cd ~/aiticket-agent-source
-git pull --ff-only origin main
-sha256sum -c SHA256SUMS
-sudo systemctl stop aiticket-agent
-sudo install -o root -g root -m 0755 agent/agent.py /opt/aiticket-agent/agent.py
-sudo install -o root -g root -m 0644 agent/diagnostics.py /opt/aiticket-agent/diagnostics.py
-sudo install -o root -g root -m 0644 agent/monitoring.py /opt/aiticket-agent/monitoring.py
-sudo install -o root -g root -m 0644 agent/actions.py /opt/aiticket-agent/actions.py
-sudo systemctl start aiticket-agent
-sudo systemctl status aiticket-agent --no-pager
-```
-
-Keep `/var/lib/aiticket-agent/identity.json` and its execution ledgers; reenrollment is unnecessary. Agent 0.4.0 adds OS information, CPU core count, swap and additional load averages. Earlier agents can still report their existing metrics.
-
-Automated tests use mocked power endpoints/subprocesses. No real host/guest power operation has been run by development tests; live permission/runtime validation remains necessary before enabling controls.
+Click an available power button, then confirm the operation for the displayed host. No reason or settings-page setup is required. Target changes, stale inventory, conflicting work, expired proposals and unresolved prior executions still prevent dispatch. Graceful shutdown and reboot retain independent verification. Agent shutdown can require manual acknowledgment because absence of heartbeats is not proof of successful shutdown. Proxmox node restart is verified from fresh cluster state and new uptime. A node reported offline after shutdown still requires independent manual confirmation; an offline status or API acceptance alone does not prove it powered off.
 
 For editing existing hosts, linking previously enrolled agents, viewing unassigned Proxmox resources and opening manual tickets, see [host editing and tickets](host-editing-tickets.md).
 
@@ -70,8 +22,8 @@ For editing existing hosts, linking previously enrolled agents, viewing unassign
 
 Each host now has current CPU, memory, storage and uptime cards, with retained history charts for all supported telemetry (load averages, swap, inodes and memory pressure where supplied). Select **1h / 6h / 24h / 7d**. History starts accumulating after the main application update and is retained for seven days. Missing samples leave gaps; lines show bucket averages and captions show actual minimum/maximum samples. Proxmox allocation and agent filesystem values remain distinct.
 
-System details are in a compact sidebar. Checks expand to show evidence; open tickets and historical tickets are below. **Add check** at the top opens a form already scoped to this host. Configure permissions, host details, associations, manual power and check enable/disable through **Host settings**. Operational power controls remain available on the host page; command history is collapsed until needed.
+System details are in a compact sidebar. Checks expand to show evidence; open tickets and historical tickets are below. **Add check** at the top opens a form already scoped to this host. Configure permissions, host details, associations and check enable/disable through **Host settings**. Operational power controls remain available on the host page; command history is collapsed until needed.
 
 Only update/rebuild the main application for this workspace (schema 25). No agent or Hermes update is required. Existing data and check settings are retained. Graphs refresh using the existing five-second live page updates; collection speed still depends on the agent reporting and Proxmox discovery intervals.
 
-Existing Proxmox power policies now reuse their selected connection token. Legacy separate power tokens are no longer used. Only update/rebuild the main application; no agent or Hermes update is required.
+Update/rebuild the main application for automatic Proxmox controls. Agents update independently to 0.10.1 or newer for automatic standalone power capability. Existing identities and permissions are preserved.
