@@ -9,6 +9,7 @@ pytestmark=pytest.mark.skipif(os.name!='nt',reason='Native Windows APIs required
 
 @pytest.fixture
 def runtime(monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT/'agent'))
     monkeypatch.syspath_prepend(str(WINDOWS))
     import platform_support,backend
     return platform_support,backend

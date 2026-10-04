@@ -556,7 +556,7 @@ def create_app(data_dir=None, testing=False):
             windows=is_windows(store,machine)
             if kind in ('process','docker'):
                 if not valid_target(kind,target,windows):
-                    raise ValueError('Enter a valid container name/ID, process name or systemd .service unit.')
+                    raise ValueError('Enter a valid container name/ID, process name or service target.')
             elif not valid_target(kind,target,windows):
                 raise ValueError('Enter the absolute mounted SMB directory on the monitored host.')
             if not store.rows('SELECT id FROM agents WHERE machine_id=? AND revoked=0',(machine,)):

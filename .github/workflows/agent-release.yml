@@ -19,7 +19,7 @@ jobs:
           python-version: '3.13'
       - name: Validate Windows runtime and SYSTEM installation
         run: |
-          python -m pip install pytest cryptography
+          python -m pip install pytest "cryptography>=43,<47"
           python -m pytest -q --confcutdir=tests/windows tests/windows
   release:
     needs: windows

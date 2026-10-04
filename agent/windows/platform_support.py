@@ -32,7 +32,7 @@ def powershell():return str(system_directory()/'WindowsPowerShell'/'v1.0'/'power
 
 
 def ps_argv(script):
-    code="$ErrorActionPreference='Stop';[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);"+script
+    code="$ErrorActionPreference='Stop';$env:PSModulePath=[Environment]::GetFolderPath('System')+'\\WindowsPowerShell\\v1.0\\Modules;'+[Environment]::GetFolderPath('ProgramFiles')+'\\WindowsPowerShell\\Modules';[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);"+script
     return [powershell(),'-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',base64.b64encode(code.encode('utf-16le')).decode()]
 
 
@@ -133,7 +133,7 @@ def run(argv,timeout=5,limit=16000,allowed=None):
 
 def ps(script,timeout=8,limit=16000):
     result=run(ps_argv(script),timeout,limit)
-    if result['state']!='completed' or result['truncated']:raise ValueError('Windows query unavailable or exceeded its bounds')
+    if result['state']!='completed' or result['truncated']:raise ValueError('Windows query unavailable or exceeded its bounds: '+result['stderr'][:500])
     return result['stdout'].strip()
 
 

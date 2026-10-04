@@ -2,6 +2,8 @@
 [CmdletBinding()]
 param([string]$Server,[string]$CA,[string]$Source,[string]$PythonExe,[string]$Root="$env:ProgramData\AITicketAgent")
 $ErrorActionPreference='Stop'
+# Do not inherit PowerShell 7 modules when launching Windows PowerShell 5.1.
+$env:PSModulePath="$env:SystemRoot\System32\WindowsPowerShell\v1.0\Modules;$env:ProgramFiles\WindowsPowerShell\Modules"
 $admin=[Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
 if(!$admin.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'Open PowerShell as Administrator.'}
 if(![Environment]::Is64BitProcess){throw 'Use 64-bit PowerShell.'}
