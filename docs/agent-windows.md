@@ -54,3 +54,5 @@ For Windows fleet account, SSH key and package tasks, see [Fleet](fleet.md#windo
 ## Container and process discovery
 
 Agent 0.11.0+ reports process working sets and CPU deltas, plus Docker inventory when the CLI/daemon are accessible to LocalSystem. Expand **Containers & processes** on the host and select **Monitor** to add an exact-name check. Docker Desktop scoped to a signed-in user might not be available to LocalSystem. See [storage and service monitoring](storage-services.md).
+
+For compatibility checks, local update-now commands and explicit failed-release retries, see [Agent recovery and Needs attention](agent-recovery-attention.md). Existing installations need one installer rerun to upgrade the independent updater.

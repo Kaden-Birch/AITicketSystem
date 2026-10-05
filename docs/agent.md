@@ -104,3 +104,5 @@ Root installations advertise host restart and shutdown automatically (agent 0.10
 ## Container and process discovery
 
 Agent 0.11.0+ sends bounded Docker and process inventories with heartbeats. Expand **Containers & processes** on a host to search names, inspect resource use and add a check with **Monitor**. Discovery does not automatically create checks. See [storage and service monitoring](storage-services.md) for limits and TrueNAS/Plex setup.
+
+For compatibility checks, local update-now commands and explicit failed-release retries, see [Agent recovery and Needs attention](agent-recovery-attention.md). Existing installations need one installer rerun to upgrade the independent updater.

@@ -167,12 +167,19 @@ def test_independent_update_activation_and_interrupted_rollback(runtime,tmp_path
     payload=json.dumps(doc).encode();manifest=json.dumps({'payload':base64.b64encode(payload).decode(),'signature':base64.b64encode(key.sign(payload)).decode()}).encode()
     monkeypatch.setattr(updater,'download',lambda url,limit:manifest if url==updater.FEED else body)
     monkeypatch.setattr(updater.Updater,'report',lambda self:None)
+    monkeypatch.setattr(updater.Updater,'compatible',lambda self,version,stage:None)
     tasks=[]
     def task(self,action):
         tasks.append(action)
         if action=='start':(state/'health.json').write_text(json.dumps({'version':version,'at':time.time()}))
     monkeypatch.setattr(updater.Updater,'task',task)
     update=updater.Updater(root)
+    from update_support import CompatibilityError
+    def incompatible(*args):raise CompatibilityError('Update the main application first.')
+    monkeypatch.setattr(update,'compatible',incompatible)
+    update.run(now=True)
+    assert update.status['state']=='blocked' and support.current(root)==previous and not tasks
+    monkeypatch.setattr(update,'compatible',lambda *args:None)
     with (state/'execution.lock').open('a') as work:
         support.locks.flock(work,support.locks.LOCK_SH)
         update.run()
@@ -190,6 +197,10 @@ def test_independent_update_activation_and_interrupted_rollback(runtime,tmp_path
     recovered=updater.Updater(root);recovered.run()
     assert support.current(root)==installed and recovered.status['state']=='rolled_back'
     assert recovered.status['failed_release']==failed_version
+    version=failed_version
+    recovered.run(now=True,retry_failed=True)
+    assert recovered.status['state']=='updated' and support.current(root).name==failed_version
+    with pytest.raises(ValueError):recovered.run(retry_failed=True)
 
 
 def test_power_defaults_use_elevated_identity_and_honor_local_restriction(runtime,tmp_path,monkeypatch):

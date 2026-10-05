@@ -4,7 +4,7 @@ from pathlib import Path
 
 def test_installer_verifies_complete_bundle_and_rejects_tampering(tmp_path):
     installer=Path('agent/install.sh').resolve()
-    names=('agent.py','diagnostics.py','monitoring.py','network.py','actions.py','commands.py','install_verify.py','aiticket-agent.service','updater.py','release-public.pem','aiticket-agent-updater.service','aiticket-agent-updater.timer')
+    names=('agent.py','diagnostics.py','monitoring.py','network.py','actions.py','commands.py','install_verify.py','aiticket-agent.service','updater.py','update_support.py','release-public.pem','aiticket-agent-updater.service','aiticket-agent-updater.timer')
     (tmp_path/'agent').mkdir()
     sums=[]
     for name in names:

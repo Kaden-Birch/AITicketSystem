@@ -28,6 +28,7 @@ def test_install_and_reinstall_as_system(tmp_path,monkeypatch,accept_heartbeat):
             elif self.path=='/api/agent/command-result':results.append(data)
             elif self.path=='/api/agent/checks':reply={'checks':[]}
             elif self.path=='/api/agent/updater':reply={'request':None}
+            elif self.path=='/api/agent/update-compatibility':reply={'version':data['version'],'compatible':True}
             self.send_response(200);self.send_header('Content-Type','application/json');self.end_headers();self.wfile.write(json.dumps(reply).encode())
     server=ThreadingHTTPServer(('127.0.0.1',0),Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
     identity={'server':'http://127.0.0.1:'+str(server.server_port),'allow_http':True,'agent_id':'fixture-agent','credential':'fixture-credential'}

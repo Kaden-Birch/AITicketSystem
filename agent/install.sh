@@ -31,12 +31,19 @@ if sys.version_info < (3,11): raise SystemExit('Python 3.11+ is required.')
 root=Path(sys.argv[1]); sums={}
 for line in (root/'SHA256SUMS').read_text().splitlines():
     digest,path=line.split('  ',1);sums[path]=digest
-for name in ('agent.py','diagnostics.py','monitoring.py','network.py','actions.py','commands.py','install_verify.py','aiticket-agent.service','updater.py','release-public.pem','aiticket-agent-updater.service','aiticket-agent-updater.timer'):
+for name in ('agent.py','diagnostics.py','monitoring.py','network.py','actions.py','commands.py','install_verify.py','aiticket-agent.service','updater.py','update_support.py','release-public.pem','aiticket-agent-updater.service','aiticket-agent-updater.timer'):
     path='agent/'+name
     if sums.get(path)!=hashlib.sha256((root/path).read_bytes()).hexdigest():raise SystemExit('Checksum mismatch: '+path)
 print('Agent source checksums verified.')
 PY
 ((verify_only)) && exit 0
+python3 - "$source_dir/agent" <<'PYPREFLIGHT'
+import sys
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+from update_support import preflight_existing
+preflight_existing(Path('/var/lib/aiticket-agent/identity.json'),Path(sys.argv[1]))
+PYPREFLIGHT
 if ! id aiticket-agent >/dev/null 2>&1; then
   useradd --system --home /var/lib/aiticket-agent --shell /usr/sbin/nologin aiticket-agent
 fi
@@ -53,7 +60,7 @@ for file in agent.py diagnostics.py monitoring.py network.py actions.py commands
 done
 ln -s "$bundle_dir" /opt/aiticket-agent/current.install
 mv -Tf /opt/aiticket-agent/current.install /opt/aiticket-agent/current
-for file in updater.py release-public.pem; do
+for file in updater.py update_support.py release-public.pem; do
   install -o root -g root -m 0644 "$source_dir/agent/$file" "/opt/aiticket-agent/$file"
 done
 for unit in aiticket-agent-updater.service aiticket-agent-updater.timer; do

@@ -13,7 +13,8 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-VERSION = '0.11.0'
+VERSION = '0.12.0'
+UPDATE_REQUIREMENTS = {'protocol':1,'operations':['process_summary','service_status','service_logs','container_logs']}
 
 
 def endpoint(value,allow_http=False):

@@ -41,7 +41,7 @@ def installation(tmp_path,keys,monkeypatch):
     data=bundle();doc={'version':'0.9.0+123456789abc','url':'https://github.com/Kaden-Birch/AITicketSystem/releases/download/agent-0.9.0+123456789abc/agent.tar.gz','sha256':hashlib.sha256(data).hexdigest(),'published':int(time.time())-4000,'rollout_minutes':30}
     envelope=signed(keys,tmp_path,doc)
     monkeypatch.setattr(u,'fetch',lambda url,limit:envelope if url==u.FEED else data)
-    updater.service=Mock();updater.healthy=Mock(return_value=True)
+    updater.service=Mock();updater.healthy=Mock(return_value=True);updater.compatible=Mock()
     return updater,doc,data,keys,tmp_path
 
 
@@ -157,3 +157,63 @@ def test_application_reporting_failure_cannot_stop_release_recovery(installation
     updater.report=u.Updater.report.__get__(updater)
     updater.run()
     assert updater.status['state']=='updated' and updater.status['installed']==doc['version']
+
+
+def test_compatibility_blocks_before_stopping_current_agent(installation):
+    updater,*_=installation
+    from agent.update_support import CompatibilityError
+    updater.compatible.side_effect=CompatibilityError('Update the main application first.')
+    updater.run(now=True)
+    assert updater.status['state']=='blocked'
+    updater.service.assert_not_called()
+    assert (updater.root/'current').resolve().name=='previous'
+
+
+def test_local_now_and_explicit_failed_retry_keep_verification(installation):
+    updater,doc,*_=installation
+    updater.config['automatic']=False;updater.status['failed_release']=doc['version']
+    updater.run(now=True);assert updater.status['state']=='rolled_back'
+    updater.service.assert_not_called()
+    updater.run(now=True,retry_failed=True)
+    assert updater.status['state']=='updated'
+    updater.compatible.assert_called_once()
+    with pytest.raises(ValueError):updater.run(retry_failed=True)
+
+
+def test_compatibility_checks_use_identity_and_do_not_follow_redirects(monkeypatch,tmp_path):
+    from agent import update_support as support
+    import urllib.error
+    stage=tmp_path/'stage';stage.mkdir();(stage/'agent.py').write_text("UPDATE_REQUIREMENTS = {'protocol':1,'operations':['container_logs']}\n")
+    identity={'server':'http://localhost:8080','allow_http':True,'credential':'private-test-key'}
+    version='0.12.0+abcdef123456'
+    class Response:
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def read(self,n):return json.dumps({'version':version,'compatible':True}).encode()
+    opener=Mock();opener.open.return_value=Response()
+    monkeypatch.setattr(support.urllib.request,'build_opener',lambda *args:opener)
+    support.check(identity,version,stage)
+    request=opener.open.call_args.args[0]
+    assert request.full_url=='http://localhost:8080/api/agent/update-compatibility'
+    assert json.loads(request.data)['operations']==['container_logs']
+    assert request.headers['Authorization']=='Bearer private-test-key'
+    for code in (401,404,503):
+        opener.open.side_effect=urllib.error.HTTPError(request.full_url,code,'private-test-key',{},None)
+        with pytest.raises(support.CompatibilityError) as caught:support.check(identity,version,stage)
+        assert 'private-test-key' not in str(caught.value)
+    opener.open.side_effect=urllib.error.URLError('private-test-key')
+    with pytest.raises(support.CompatibilityError) as caught:support.check(identity,version,stage)
+    assert 'private-test-key' not in str(caught.value)
+
+
+def test_installer_preflight_preserves_identity_and_blocks_incompatible_upgrade(monkeypatch,tmp_path):
+    from agent import update_support as support
+    stage=tmp_path/'stage';stage.mkdir();(stage/'agent.py').write_text("VERSION = '0.12.0'\n")
+    identity=tmp_path/'identity.json';identity.write_text('{"credential":"fixture"}')
+    checked=Mock();monkeypatch.setattr(support,'check',checked)
+    support.preflight_existing(identity,stage)
+    assert checked.call_args.args[1]=='0.12.0'
+    assert identity.read_text()=='{"credential":"fixture"}'
+    checked.side_effect=support.CompatibilityError('Update the main application first.')
+    with pytest.raises(SystemExit,match='Update the main application first'):support.preflight_existing(identity,stage)
+    checked.reset_mock();support.preflight_existing(tmp_path/'missing.json',stage);checked.assert_not_called()

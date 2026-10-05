@@ -50,3 +50,5 @@ git pull --ff-only origin main && sudo docker compose up -d --build
 Schema 31 adds persistent intentional-offline state automatically. Agent and Hermes installations need no update for this UI milestone.
 
 Dashboard and Fleet use the grouped Agent Health visual style in light and dark themes. Dashboard statistics share a compact summary strip; performance and ticket graphs are grouped separately, with calculation details behind named disclosures. Fleet uses side columns for task settings, host selection and supporting key/job information, stacking naturally on smaller screens.
+
+**Needs attention** brings update, connection, investigation and notification issues into one searchable workspace with category tabs and 20-item pages. See [Agent recovery and operational attention](agent-recovery-attention.md).

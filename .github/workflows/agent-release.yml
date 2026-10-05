@@ -32,8 +32,9 @@ jobs:
           python-version: '3.12'
       - name: Validate independent updater
         run: |
-          python -m pip install pytest
+          python -m pip install pytest -r requirements.txt
           python -m pytest -q --confcutdir=tests/updater tests/updater
+          python -m pytest -q tests/test_update_recovery_attention.py tests/test_agent_updates.py tests/test_windows_support.py
           bash -n agent/install.sh
       - name: Sign and publish
         env:

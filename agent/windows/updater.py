@@ -1,7 +1,8 @@
 """Independent Windows signed updater, running as its own SYSTEM scheduled task."""
-import base64,hashlib,io,json,os,re,shutil,sys,tarfile,tempfile,time,urllib.request,ssl
+import argparse,base64,hashlib,io,json,os,re,shutil,sys,tarfile,tempfile,time,urllib.request,ssl
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent))
+from update_support import check as compatibility_check, CompatibilityError, failure_reason
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 from platform_support import locks,current,activate,ps,literal
 
@@ -80,8 +81,11 @@ class Updater:
         except (OSError,ValueError,KeyError):return False
     def rollback(self):
         self.task('stop');activate(self.root,self.status['previous']);self.task('start')
-        self.record('rolled_back','Previous agent restored; waiting for a newer corrective release.',installed=self.status.get('previous_version','unknown'),failed_release=self.status.get('available'))
-    def run(self):
+        self.record('rolled_back','The new agent could not verify a heartbeat. Previous agent restored; correct the cause before retrying.',installed=self.status.get('previous_version','unknown'),failed_release=self.status.get('available'))
+    def compatible(self,version,stage):
+        compatibility_check(self.identity,version,stage)
+    def run(self,now=False,retry_failed=False):
+        if retry_failed and not now:raise ValueError("Use --now with --retry-failed.")
         with (self.state/'updater.lock').open('a') as lock:
             try:locks.flock(lock,locks.LOCK_EX|locks.LOCK_NB)
             except BlockingIOError:return
@@ -94,14 +98,15 @@ class Updater:
                 if doc['published']<self.status.get('highest_published',0):raise ValueError('Older release rejected')
                 self.status.update(highest_published=doc['published'],available=doc['version'])
                 if self.status.get('installed')==doc['version']:self.record('current','Windows agent is up to date.',handled_request=request);return
-                if self.status.get('failed_release')==doc['version']:self.record('rolled_back','This release failed verification; waiting for a newer release.',handled_request=request);return
-                if not request and not self.config.get('automatic',True):self.record('available','Automatic updates paused.');return
+                if self.status.get('failed_release')==doc['version'] and not retry_failed:self.record('rolled_back','This release failed verification; waiting for a newer release.',handled_request=request);return
+                if not (request or now) and not self.config.get('automatic',True):self.record('available','Automatic updates paused.');return
                 bucket=int(hashlib.sha256(self.identity['agent_id'].encode()).hexdigest()[:8],16)%100
-                if not request and time.time()<doc['published']+(0 if bucket<10 else doc['rollout_minutes']*60):self.record('scheduled','Staged update scheduled.');return
+                if not (request or now) and time.time()<doc['published']+(0 if bucket<10 else doc['rollout_minutes']*60):self.record('scheduled','Staged update scheduled.');return
                 body=download(doc['url'],20000000)
                 if hashlib.sha256(body).hexdigest()!=doc['sha256']:raise ValueError('Windows archive checksum failed')
                 with tempfile.TemporaryDirectory(dir=self.root/'releases') as temp:
                     stage=Path(temp)/'bundle';extract(body,stage)
+                    self.compatible(doc['version'],stage)
                     with (self.state/'execution.lock').open('a') as work:
                         try:locks.flock(work,locks.LOCK_EX|locks.LOCK_NB)
                         except BlockingIOError:self.record('waiting','Waiting for active agent work.');return
@@ -117,12 +122,21 @@ class Updater:
                     while time.monotonic()<deadline and not self.healthy(doc['version'],since):time.sleep(2)
                     if self.healthy(doc['version'],since):self.record('updated','Authenticated Windows heartbeat verified.',installed=doc['version'],handled_request=request)
                     else:self.rollback();self.status['handled_request']=request
-            except Exception:
+            except CompatibilityError as error:
+                self.record('blocked',str(error),handled_request=request)
+            except Exception as error:
                 if self.status.get('state')=='installing':
                     try:self.rollback()
                     except Exception:self.record('failed','Update recovery failed; inspect the updater log.')
-                else:self.record('failed','Windows update check or validation failed; inspect connectivity and release configuration.')
+                else:self.record('failed',failure_reason(error))
                 self.status['handled_request']=request
             finally:save(self.path,self.status);self.report()
 
-if __name__=='__main__':Updater().run()
+if __name__=='__main__':
+    parser=argparse.ArgumentParser();parser.add_argument('--now',action='store_true');parser.add_argument('--retry-failed',action='store_true');args=parser.parse_args()
+    import ctypes
+    if not ctypes.windll.shell32.IsUserAnAdmin():parser.error('Run from Administrator PowerShell.')
+    if args.retry_failed and not args.now:parser.error('--retry-failed requires --now')
+    updater=Updater();updater.run(now=args.now,retry_failed=args.retry_failed)
+    print(updater.status.get('state','waiting')+': '+updater.status.get('detail','Another updater cycle is running.'))
+    sys.exit(1 if updater.status.get('state') in ('blocked','failed','rolled_back') else 0)

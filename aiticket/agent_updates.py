@@ -5,7 +5,9 @@ import re
 import time
 from .db import uid
 
-STATES={'current','available','scheduled','waiting','installing','updated','rolled_back','failed'}
+HEARTBEAT_OPERATIONS={'process_summary','service_status','service_logs','container_logs'}
+
+STATES={'current','available','scheduled','waiting','installing','updated','rolled_back','failed','blocked'}
 
 
 def report(store,agent,payload):
@@ -45,8 +47,20 @@ def request_update(store,machine):
 
 def view(store,agent):
     if not agent: return None
+    windows=json.loads(agent.get('host_info') or '{}').get('os','').lower().startswith('windows')
     rows=store.rows('SELECT * FROM agent_updates WHERE agent_id=?',(agent['id'],))
-    if not rows: return {'installed':agent.get('version') or 'Not reported','needs_install':True}
+    if not rows: return {'installed':agent.get('version') or 'Not reported','needs_install':True,'windows':windows}
     row=rows[0];status=json.loads(row['status'])
-    return {**status,'at':row['at'],'stale':row['at']<time.time()-900,'pending':bool(row['request']),
+    return {**status,'windows':windows,'at':row['at'],'stale':row['at']<time.time()-900,'pending':bool(row['request']),
             'outdated':bool(status.get('available') and status.get('installed')!=status['available'])}
+
+
+def compatibility(payload):
+    if not isinstance(payload,dict) or set(payload)!={'version','protocol','operations'}:
+        raise ValueError('Invalid compatibility request.')
+    version=payload['version'];operations=payload['operations']
+    if not isinstance(version,str) or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:\+[a-f0-9]{12})?',version):
+        raise ValueError('Invalid release version.')
+    if type(payload['protocol']) is not int or not isinstance(operations,list) or len(operations)>16 or any(not isinstance(op,str) or len(op)>80 for op in operations):
+        raise ValueError('Invalid release requirements.')
+    return {'version':version,'compatible':payload['protocol']==1 and set(operations)<=HEARTBEAT_OPERATIONS}

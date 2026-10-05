@@ -57,20 +57,22 @@ try {
   Expand-Archive -LiteralPath $archive -DestinationPath $temp
   $Source=Join-Path $temp 'AITicketSystem-main'
  }
- $files=@('agent.py','commands.py','diagnostics.py','actions.py','monitoring.py','network.py','install_verify.py','windows/runner.py','windows/backend.py','windows/platform_support.py','windows/launcher.py','windows/updater.py','windows/install.ps1','release-public.pem')
+ $files=@('agent.py','commands.py','diagnostics.py','actions.py','monitoring.py','network.py','install_verify.py','windows/runner.py','windows/backend.py','windows/platform_support.py','windows/launcher.py','windows/updater.py','update_support.py','windows/install.ps1','release-public.pem')
  $sums=@{}
  Get-Content -LiteralPath (Join-Path $Source 'SHA256SUMS') | ForEach-Object { $parts=$_ -split '  ',2; $sums[$parts[1]]=$parts[0] }
  foreach($name in $files){
   $file=Join-Path $Source ('agent/'+$name)
   if(!(Test-Path -LiteralPath $file) -or (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLower() -ne $sums['agent/'+$name]){throw "Source checksum mismatch: $name"}
  }
+ Python 'import sys,pathlib;sys.path.insert(0,sys.argv[1]);from update_support import preflight_existing;preflight_existing(pathlib.Path(sys.argv[2]),pathlib.Path(sys.argv[1]))' @((Join-Path $Source 'agent'),(Join-Path $Root 'state\identity.json'))
  foreach($task in @('AITicketAgentUpdater','AITicketAgent')){if(Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue){Stop-ScheduledTask -TaskName $task}}
  $bundle=Join-Path $Root ('releases\bootstrap-'+[guid]::NewGuid().ToString())
  New-Item -ItemType Directory -Path (Join-Path $bundle 'windows') -Force | Out-Null
- foreach($name in $files | Where-Object {$_ -notin @('windows/launcher.py','windows/updater.py','windows/install.ps1','release-public.pem')}){Copy-Item -LiteralPath (Join-Path $Source ('agent/'+$name)) -Destination (Join-Path $bundle $name)}
+ foreach($name in $files | Where-Object {$_ -notin @('windows/launcher.py','windows/updater.py','update_support.py','windows/install.ps1','release-public.pem')}){Copy-Item -LiteralPath (Join-Path $Source ('agent/'+$name)) -Destination (Join-Path $bundle $name)}
  Copy-Item -LiteralPath (Join-Path $Source 'agent/windows/launcher.py') -Destination (Join-Path $Root 'launcher.py')
  Copy-Item -LiteralPath (Join-Path $Source 'agent/windows/updater.py') -Destination (Join-Path $Root 'updater.py')
  Copy-Item -LiteralPath (Join-Path $Source 'agent/windows/platform_support.py') -Destination (Join-Path $Root 'platform_support.py')
+ Copy-Item -LiteralPath (Join-Path $Source 'agent/update_support.py') -Destination (Join-Path $Root 'update_support.py')
  Copy-Item -LiteralPath (Join-Path $Source 'agent/release-public.pem') -Destination (Join-Path $Root 'release-public.pem')
  @{path=$bundle} | ConvertTo-Json | Set-Content -Encoding UTF8 -LiteralPath (Join-Path $Root 'current.json')
  # Windows PowerShell 5.1 writes a BOM; normalize all generated JSON through Python.

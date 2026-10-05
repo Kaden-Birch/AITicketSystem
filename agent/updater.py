@@ -10,16 +10,21 @@ import os
 import re
 import shutil
 import ssl
+import sys
 import subprocess
 import tarfile
 import tempfile
 import time
 import urllib.request
 from pathlib import Path
+try:
+    from .update_support import check as compatibility_check, CompatibilityError, failure_reason
+except ImportError:
+    from update_support import check as compatibility_check, CompatibilityError, failure_reason
 
 FEED = 'https://github.com/Kaden-Birch/AITicketSystem/releases/download/agent-stable/agent-manifest.json'
 FILES = ('agent.py', 'diagnostics.py', 'monitoring.py', 'network.py', 'actions.py', 'commands.py', 'install_verify.py')
-STATES = ('current', 'available', 'scheduled', 'waiting', 'installing', 'updated', 'rolled_back', 'failed')
+STATES = ('current', 'available', 'scheduled', 'waiting', 'installing', 'updated', 'rolled_back', 'failed', 'blocked')
 
 
 def save(path, value):
@@ -118,7 +123,11 @@ class Updater:
             return health.get('version') == version and health.get('at',0) >= since
         except (OSError, ValueError): return False
 
-    def run(self):
+    def compatible(self, version, stage):
+        compatibility_check(self.identity,version,stage)
+
+    def run(self, now=False, retry_failed=False):
+        if retry_failed and not now: raise ValueError("Use --now with --retry-failed.")
         self.state.mkdir(parents=True, exist_ok=True)
         with open(self.state/'updater.lock','a') as lock:
             try: fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -137,16 +146,17 @@ class Updater:
                 self.status.update(highest_published=doc['published'], available=doc['version'])
                 if self.status.get('installed') == doc['version']:
                     self.record('current', 'Agent is up to date.', handled_request=request); return
-                if self.status.get('failed_release') == doc['version']:
+                if self.status.get('failed_release') == doc['version'] and not retry_failed:
                     self.record('rolled_back','This release failed verification. Waiting for a newer release.', handled_request=request); return
-                if not request and not self.config.get('automatic',True): self.record('available','Automatic updates are paused.'); return
+                if not (request or now) and not self.config.get('automatic',True): self.record('available','Automatic updates are paused.'); return
                 bucket=int(hashlib.sha256(self.identity['agent_id'].encode()).hexdigest()[:8],16)%100
                 ready=doc['published']+(0 if bucket<10 else doc['rollout_minutes']*60)
-                if not request and time.time()<ready: self.record('scheduled','Update scheduled during the staged rollout.'); return
+                if not (request or now) and time.time()<ready: self.record('scheduled','Update scheduled during the staged rollout.'); return
                 body=fetch(doc['url'],20_000_000)
                 if hashlib.sha256(body).hexdigest()!=doc['sha256']: raise ValueError('Release checksum verification failed')
                 with tempfile.TemporaryDirectory(dir=self.root/'releases') as temp:
                     stage=Path(temp)/'bundle'; extract(body,stage)
+                    self.compatible(doc['version'],stage)
                     # Shared execution lock prevents updates interrupting diagnostics or commands.
                     with open(self.state/'execution.lock','a') as execution:
                         try: fcntl.flock(execution, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -168,17 +178,26 @@ class Updater:
                         self.record('rolled_back','New agent did not establish a verified heartbeat; previous release restored.',failed_release=doc['version'], installed=previous_version,handled_request=request)
                     else:
                         self.record('updated','Update verified by an authenticated agent heartbeat.',installed=doc['version'],handled_request=request)
+            except CompatibilityError as exc:
+                self.record('blocked',str(exc),handled_request=request)
             except Exception as exc:
                 if self.status.get('state')=='installing':
                     try:
                         self.service('stop'); activate(self.root,self.status['previous']); self.service('start')
                         self.record('rolled_back','Installation failed; previous release restored.',failed_release=self.status.get('available'),installed=self.status.get('previous_version'),handled_request=request)
                     except Exception: self.record('failed','Update recovery failed. Inspect the updater journal.',handled_request=request)
-                else: self.record('failed',str(exc)[:240],handled_request=request)
+                else: self.record('failed',failure_reason(exc),handled_request=request)
             finally:
                 save(self.path,self.status); self.report()
 
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser(); parser.add_argument('--config',default='/etc/aiticket-agent/updater.json'); args=parser.parse_args()
-    Updater(config=Path(args.config)).run()
+    parser=argparse.ArgumentParser(); parser.add_argument('--config',default='/etc/aiticket-agent/updater.json')
+    parser.add_argument('--now',action='store_true',help='Skip rollout delay and local automatic-update pause')
+    parser.add_argument('--retry-failed',action='store_true',help='Explicitly retry the failed release after correcting the cause')
+    args=parser.parse_args()
+    if os.geteuid()!=0: parser.error('Run with sudo.')
+    if args.retry_failed and not args.now: parser.error('--retry-failed requires --now')
+    updater=Updater(config=Path(args.config)); updater.run(now=args.now,retry_failed=args.retry_failed)
+    print(updater.status.get('state','waiting')+': '+updater.status.get('detail','Another updater cycle is running.'))
+    sys.exit(1 if updater.status.get('state') in ('blocked','failed','rolled_back') else 0)

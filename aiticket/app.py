@@ -199,10 +199,22 @@ def create_app(data_dir=None, testing=False):
     def dashboard():
         from .overview_ui import dashboard_data
         from .reliability import issues
-        return render_template('dashboard.html',summary=dashboard_data(store),monitoring_attention=len(issues(store)))
+        from .attention import collect
+        return render_template('dashboard.html',summary=dashboard_data(store),monitoring_attention=len(issues(store)),attention_count=len(collect(store)))
 
     from .ticket_updates import readable
     app.jinja_env.filters['readable_update']=readable
+
+    @app.get('/attention')
+    @login_required
+    def attention():
+        from .attention import listing
+        category=request.args.get('view','all');query=request.args.get('q','').strip()[:100]
+        page=int(request.args.get('page',1))
+        data=listing(store,category,query,page)
+        return render_template('attention.html',**data,view=category,query=query,page=page,
+            previous=url_for('attention',view=category,q=query,page=page-1) if page>1 else None,
+            following=url_for('attention',view=category,q=query,page=page+1) if data['more'] else None)
 
     @app.route('/monitoring-health',methods=['GET','POST'])
     @login_required
@@ -1273,6 +1285,15 @@ def create_app(data_dir=None, testing=False):
         flash('Update requested. The independent updater will check on its next five-minute cycle.')
         return redirect(url_for('host_settings',machine_id=machine_id)+'#agent-updates')
 
+    @app.post('/api/agent/update-compatibility')
+    def agent_update_compatibility():
+        from .agent_updates import compatibility
+        bearer=request.headers.get('Authorization','')
+        if not bearer.startswith('Bearer ') or not store.rows('SELECT id FROM agents WHERE credential_digest=? AND revoked=0',(digest(bearer[7:]),)):
+            abort(401)
+        try:return compatibility(request.get_json())
+        except ValueError:abort(400)
+
     @app.post('/api/agent/updater')
     def agent_updater_status():
         from .agent_updates import report
@@ -1314,7 +1335,8 @@ def create_app(data_dir=None, testing=False):
         capabilities=payload.get('capabilities',{})
         if not isinstance(capabilities,dict) or set(capabilities)-{'operations','services','actions','action_services','power_operations','shell_commands'} or any(not isinstance(capabilities.get(k,[]),list) for k in ('operations','services')):
             abort(400)
-        if len(capabilities.get('operations',[]))>4 or any(x not in ('process_summary','service_status','service_logs','container_logs') for x in capabilities.get('operations',[])) or len(capabilities.get('services',[]))>20 or any(not isinstance(x,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',x) for x in capabilities.get('services',[])):
+        from .agent_updates import HEARTBEAT_OPERATIONS
+        if len(capabilities.get('operations',[]))>len(HEARTBEAT_OPERATIONS) or any(x not in HEARTBEAT_OPERATIONS for x in capabilities.get('operations',[])) or len(capabilities.get('services',[]))>20 or any(not isinstance(x,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',x) for x in capabilities.get('services',[])):
             abort(400)
         if type(capabilities.get('shell_commands',False)) is not bool: abort(400)
         power_operations=capabilities.get('power_operations',[])
