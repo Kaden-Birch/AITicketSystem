@@ -1,6 +1,17 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 38
+CURRENT_VERSION = 39
 MIGRATIONS = {
+    39: (
+        "ALTER TABLE ai_jobs ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0",
+        "CREATE TABLE kb_folders(id TEXT PRIMARY KEY,name TEXT NOT NULL,parent_id TEXT REFERENCES kb_folders(id),kind TEXT NOT NULL DEFAULT 'troubleshooting',machine_id TEXT REFERENCES machines(id),service_id TEXT REFERENCES integrations(id),created REAL NOT NULL)",
+        "CREATE TABLE kb_articles(id TEXT PRIMARY KEY,folder_id TEXT NOT NULL REFERENCES kb_folders(id),title TEXT NOT NULL,body TEXT NOT NULL,tags TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT 'draft',author TEXT NOT NULL,source_incident TEXT REFERENCES incidents(id),created REAL NOT NULL,updated REAL NOT NULL,version INTEGER NOT NULL DEFAULT 1)",
+        "CREATE TABLE kb_versions(article_id TEXT NOT NULL REFERENCES kb_articles(id),version INTEGER NOT NULL,title TEXT NOT NULL,body TEXT NOT NULL,at REAL NOT NULL,author TEXT NOT NULL,PRIMARY KEY(article_id,version))",
+        "CREATE TABLE kb_requests(job_id TEXT PRIMARY KEY REFERENCES ai_jobs(id),folder_id TEXT NOT NULL REFERENCES kb_folders(id),title TEXT NOT NULL,article_id TEXT REFERENCES kb_articles(id))",
+        "CREATE TABLE change_events(id TEXT PRIMARY KEY,machine_id TEXT NOT NULL REFERENCES machines(id),entity TEXT NOT NULL,kind TEXT NOT NULL,summary TEXT NOT NULL,details TEXT NOT NULL,at REAL NOT NULL)",
+        "CREATE INDEX change_events_host ON change_events(machine_id,at)",
+        "CREATE TABLE telegram_updates(update_id INTEGER PRIMARY KEY,chat_id TEXT NOT NULL,user_id TEXT NOT NULL,text TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'pending',job_id TEXT REFERENCES ai_jobs(id),created REAL NOT NULL)",
+        "CREATE TABLE telegram_outbox(id TEXT PRIMARY KEY,event_key TEXT NOT NULL UNIQUE,chat_id TEXT NOT NULL,text TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'pending',created REAL NOT NULL,error TEXT,next_attempt REAL NOT NULL DEFAULT 0)",
+    ),
     38: (
         "ALTER TABLE command_jobs ADD COLUMN read_only_command INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE ai_jobs ADD COLUMN automatic INTEGER NOT NULL DEFAULT 0",

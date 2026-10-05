@@ -79,7 +79,7 @@ def permitted(c,job,now):
     if job['ai_job_id'] and job['state']!='running' and not job['read_only_command']:
         ai=c.execute('SELECT * FROM ai_jobs WHERE id=?',(job['ai_job_id'],)).fetchone()
         from .maintenance_ai import blocked
-        if ai and blocked(c,ai,job['machine_id'],now) and (ai['automatic'] or not ai['maintenance_changes']):return False
+        if ai and (ai['read_only'] or blocked(c,ai,job['machine_id'],now) and (ai['automatic'] or not ai['maintenance_changes'])):return False
     policy=c.execute('SELECT * FROM command_policies WHERE machine_id=?',(job['machine_id'],)).fetchone()
     agent=c.execute('SELECT revoked,capabilities FROM agents WHERE id=?',(job['agent_id'],)).fetchone()
     incident=c.execute('SELECT closed,status FROM incidents WHERE id=?',(job['incident_id'],)).fetchone() if job['incident_id'] else None

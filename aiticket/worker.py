@@ -147,6 +147,16 @@ def run(store, vault, stop):
             try:integration_tick(store,vault)
             except Exception:log.exception('Integration polling failed; durable leases recover')
             stop.wait(.5)
+    def poll_telegram():
+        from .telegram import tick as telegram_tick
+        while not stop.is_set():
+            try:
+                telegram_tick(store,vault)
+                from .ai_setup import refresh as refresh_ai_connection
+                refresh_ai_connection(store,vault)
+            except Exception:log.exception('Telegram worker needs attention')
+            stop.wait(1)
+    Thread(target=poll_telegram,name='telegram-poller',daemon=True).start()
     Thread(target=poll_integrations,name='integration-poller',daemon=True).start()
     while not stop.is_set():
         try:

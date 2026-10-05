@@ -289,19 +289,20 @@ def test_evidence_snapshot_redacts_structured_secrets():
     assert 'another-secret' not in json.dumps(snapshot)
 
 
-def test_enable_requires_live_validation_and_recent_interface_check(signed_in):
+def test_enable_checks_connection_automatically(signed_in):
     client,store,vault,csrf=signed_in
-    _,_=configured(store,vault)
-    store.save('hermes_validation',{'at':time.time(),'url':'https://192.0.2.20'})
-    bridge=store.setting('hermes_config')
-    bridge.update(enabled=False,runtime_verified=False)
+    configured(store,vault)
+    bridge={**store.setting('hermes_config'),'enabled':False,'runtime_verified':False}
     store.save('hermes_config',bridge)
-    assert client.post('/hermes',data={'csrf':csrf,'operation':'enable'}).status_code==400
+    with patch('aiticket.ai.bridge_request',side_effect=ValueError('offline')):
+        response=client.post('/hermes',data={'csrf':csrf,'operation':'enable'},follow_redirects=True)
+    assert response.status_code==200 and b'Cannot connect' in response.data
     assert store.setting('hermes_config')['enabled'] is False
-    bridge['runtime_verified']=True
-    store.save('hermes_config',bridge)
-    assert client.post('/hermes',data={'csrf':csrf,'operation':'enable'}).status_code==302
+    capability={'version':1,'tools':[],'compatible':True,'model_gateway':True,'workspace_modes':['advice']}
+    with patch('aiticket.ai.bridge_request',return_value=capability):
+        assert client.post('/hermes',data={'csrf':csrf,'operation':'enable'}).status_code==302
     assert store.setting('hermes_config')['enabled'] is True
+    assert store.setting('hermes_validation')['workspace_modes']==['advice']
 
 
 def test_model_change_requires_provider_reverification(environment):

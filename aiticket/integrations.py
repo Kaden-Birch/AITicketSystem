@@ -66,6 +66,8 @@ def refresh(store,vault,row):
         # Never apply an old credential/configuration result after editing/deletion.
         changed=c.execute('UPDATE integrations SET snapshot=?,at=?,next_run=?,lease_until=NULL WHERE id=? AND config=? AND secret=?',(json.dumps(snapshot),now,now+cfg['interval'],row['id'],row['config'],row['secret'])).rowcount
         if changed:
+            from .changes import integration as record_changes
+            record_changes(c,row,snapshot,now)
             from .metric_history import record
             if row['kind']=='truenas':
                 record(c,row['machine_id'],'truenas',now,snapshot.get('metrics',{}))

@@ -60,7 +60,7 @@ def evidence_snapshot(value):
     return redact(value) if isinstance(value, str) else value
 
 
-def request_job(store, vault, incident_id, automatic=False, now=None, mode='triage', question='', request_id=None, source_ids=(), diagnostic_ids=(), resume_checkpoint=None, expected_generation=None, recovery_target=None, resume_task=None, maintenance_changes=False):
+def request_job(store, vault, incident_id, automatic=False, now=None, mode='triage', question='', request_id=None, source_ids=(), diagnostic_ids=(), resume_checkpoint=None, expected_generation=None, recovery_target=None, resume_task=None, maintenance_changes=False, read_only=False, knowledge_draft=None):
     now = time.time() if now is None else now
     if resume_task is not None and (not resume_checkpoint or not isinstance(resume_task,str) or not 1<=len(resume_task.strip())<=2000):
         raise ValueError('Supply a current checkpoint task of 1–2000 characters.')
@@ -74,7 +74,7 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
             uuid.UUID(request_id)
         except (ValueError, TypeError, AttributeError):
             raise ValueError('Invalid request identity; reload the incident page.')
-    fingerprint = hashlib.sha256(json.dumps({'mode': mode, 'question': question.strip(), 'sources': sorted(source_ids), 'diagnostics': sorted(diagnostic_ids), 'checkpoint': resume_checkpoint, 'generation': expected_generation,'recovery_target':recovery_target,'maintenance_changes':bool(maintenance_changes),**({'resume_task':resume_task.strip()} if resume_task else {})}, sort_keys=True).encode()).hexdigest()
+    fingerprint = hashlib.sha256(json.dumps({'mode': mode, 'question': question.strip(), 'sources': sorted(source_ids), 'diagnostics': sorted(diagnostic_ids), 'checkpoint': resume_checkpoint, 'generation': expected_generation,'recovery_target':recovery_target,'maintenance_changes':bool(maintenance_changes),'read_only':bool(read_only),**({'resume_task':resume_task.strip()} if resume_task else {})}, sort_keys=True).encode()).hexdigest()
     with store.connect() as c:
         c.execute('BEGIN IMMEDIATE')
         if request_id:
@@ -184,6 +184,17 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
         from .ticket_groups import context as group_context
         document['evidence_available']=evidence_summary(c,incident['machine_id'],now)
         document['affected_targets']=group_context(c,incident_id,now)
+        from .knowledge import context as kb_context
+        from .ticket_groups import machines as group_machines
+        from .changes import context as change_context
+        from .knowledge import related_scope
+        affected=related_scope(c,group_machines(c,incident_id))
+        document['knowledge']=kb_context(c,affected)
+        document['recent_changes']=[{k:v for k,v in item.items() if k!='details'} for item in change_context(c,affected)[:8]]
+        from .knowledge import ticket_context
+        report=json.loads(incident['report'])
+        document['ticket_history']=ticket_context(c,affected,report.get('knowledge_source') if report.get('knowledge_task') else None,incident_id)
+        document['read_only_task']=bool(read_only)
         document['maintenance']=maintenance_state(c,incident['machine_id'],now,incident_id)
         document['maintenance']['changes_allowed']=bool(maintenance_changes) and not automatic
 
@@ -193,6 +204,11 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
             # Preserve the primary incident/task; large inventories remain available via targets.
             document['affected_targets']={'coverage':'Retrieve affected hosts and linked tickets using targets. No extra command permissions granted.'}
             document['machine']={'id':incident['machine_id'],'coverage':'Full current host context is available through targets; snapshot omitted to preserve incident evidence.'}
+            evidence=json.dumps(evidence_snapshot(document))
+        if len(evidence)>14500:
+            document['knowledge']={'coverage':'Search knowledge for saved articles; optional article creation only when useful.'}
+            document['recent_changes']={'coverage':'Use changes for observed change history.'}
+            if not report.get('knowledge_task'):document['ticket_history']={'coverage':'Use ticket_history to retrieve prior tickets.'}
             evidence=json.dumps(evidence_snapshot(document))
         if codex and bridge.get('command_tools'):
             document=json.loads(evidence)
@@ -207,7 +223,9 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
             if len(evidence)>16000: raise ValueError('Operational task context exceeds limits.')
         c.execute('INSERT INTO ai_jobs(id,incident_id,state,created,expires,model,allowance,max_calls,evidence,credential_digest,credential,endpoint,bridge_secret,next_attempt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                   (job_id, incident_id, 'pending', now, now+3600, cfg['model'], min(cfg['triage_tokens'], cfg['incident_tokens']), min(cfg['max_turns'], 100), evidence, digest(token), vault.encrypt(token), bridge['url'].rstrip('/'), setting(c, 'hermes_secret'), now))
-        c.execute('UPDATE ai_jobs SET automatic=?,maintenance_changes=? WHERE id=?',(int(automatic),int(bool(maintenance_changes) and not automatic),job_id))
+        c.execute('UPDATE ai_jobs SET automatic=?,maintenance_changes=?,read_only=? WHERE id=?',(int(automatic),int(bool(maintenance_changes) and not automatic),int(read_only),job_id))
+        if knowledge_draft:
+            c.execute('INSERT INTO kb_requests VALUES(?,?,?,NULL)',(job_id,*knowledge_draft))
         c.execute('UPDATE ai_jobs SET mode=?,request_id=?,request_fingerprint=?,allowance=? WHERE id=?', (mode, request_id, fingerprint, min(cfg['triage_tokens'], cfg['incident_tokens']) if mode=='triage' else cfg['incident_tokens'], job_id))
         if bridge.get('command_tools'):
             if not codex: raise ValueError('Command tools currently require Codex mode.')
@@ -404,6 +422,9 @@ def apply_status(store, job_id, document, now=None):
             except ValueError as exc:
                 state='failed'
                 summary=str(exc)
+        if state=='completed':
+            from .knowledge import record_draft
+            record_draft(c,store,job,redact(summary))
         c.execute('UPDATE ai_jobs SET state=?,summary=?,completed=?,error=?,next_attempt=?,lease_until=NULL,lease_token=NULL WHERE id=?', (state, redact(summary), now if state in TERMINAL else None, 'Bridge interrupted; execution must not be replayed.' if state=='unknown' else None, now+30, job_id))
         from .worklog import update_job
         if job['state']=='unknown' and state in ('running','completed'):

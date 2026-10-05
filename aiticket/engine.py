@@ -140,6 +140,8 @@ def enqueue(c, incident_id, event, now, store):
     minimum=policy['minimum']
     if SEVERITIES.index(severity) < SEVERITIES.index(minimum):
         return
+    from .telegram import notification as telegram_notification
+    telegram_notification(c,store,incident_id,event)
     if event.startswith('blocker:') and not store.setting('discord_blockers',True): return
     if event == 'recovery' and not policy['recovery']:
         return

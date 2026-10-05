@@ -20,7 +20,7 @@ def normalized(raw,source):
 
 def record(c,entity,source,at,metrics):
     if entity and metrics:
-        c.execute('INSERT OR IGNORE INTO metric_samples(entity_id,source,at,metrics) VALUES(?,?,?,?)',(entity,source,at,json.dumps({**normalized(metrics,source),**({k:v for k,v in metrics.items() if type(v) in (int,float) and math.isfinite(v)} if source=='truenas' else {})})))
+        c.execute('INSERT OR IGNORE INTO metric_samples(entity_id,source,at,metrics) VALUES(?,?,?,?)',(entity,source,at,json.dumps({**normalized(metrics,source),**({k:v for k,v in metrics.items() if type(v) in (int,float) and math.isfinite(v)} if source in ('truenas','container') else {})})))
 
 
 def charts(store,host,window='6h',now=None):

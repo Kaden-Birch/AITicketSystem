@@ -23,11 +23,11 @@ def load_policy(path):
     power=policy.get('power',{'enabled':os.geteuid()==0,'validated':os.geteuid()==0,'operations':['host_restart','host_shutdown'] if os.geteuid()==0 else []})
     if not isinstance(power,dict) or not isinstance(power.get('operations',[]),list) or len(power.get('operations',[]))>2 or any(op not in ('host_restart','host_shutdown') for op in power.get('operations',[])):
         raise ValueError('Invalid local power allowlist')
-    return {'power':{'enabled':power.get('enabled') is True,'validated':power.get('validated') is True,'operations':power.get('operations',[])},'services':services,'logs':policy.get('logs') is True,'recovery':{'enabled':recovery.get('enabled') is True,'validated':recovery.get('validated') is True,'services':recovery.get('services',[])}}
+    return {'container_logs':policy.get('container_logs',True) is True,'power':{'enabled':power.get('enabled') is True,'validated':power.get('validated') is True,'operations':power.get('operations',[])},'services':services,'logs':policy.get('logs') is True,'recovery':{'enabled':recovery.get('enabled') is True,'validated':recovery.get('validated') is True,'services':recovery.get('services',[])}}
 
 
 def capabilities(policy):
-    result={'operations':['process_summary','service_status']+(['service_logs'] if policy['logs'] else []),'services':list(policy['services'])}
+    result={'operations':['process_summary','service_status']+(['container_logs'] if policy.get('container_logs',True) else [])+(['service_logs'] if policy['logs'] else []),'services':list(policy['services'])}
     cfg=policy.get('recovery',{})
     if cfg.get('enabled') and cfg.get('validated'):
         result.update(actions=['service_restart'],action_services={s:policy['services'][s] for s in cfg['services']})
@@ -77,6 +77,9 @@ def execute(job,policy,proc_root='/proc'):
     parameters=job.get('parameters',{})
     if operation not in capabilities(policy)['operations'] or not isinstance(parameters,dict):
         raise ValueError('Diagnostic denied by local allowlist')
+    if operation=='container_logs':
+        if set(parameters)!={'target'} or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}',str(parameters['target'])):raise ValueError('Choose an exact container name.')
+        return command(['docker','logs','--tail','50','--since','15m','--timestamps',parameters['target']])
     if operation=='process_summary':
         if parameters:
             raise ValueError('Process summary accepts no parameters')

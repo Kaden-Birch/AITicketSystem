@@ -8,7 +8,7 @@ def validate(data):
     warnings=data.get('warnings',[])
     if not isinstance(warnings,list):raise ValueError('Invalid discovery warnings.')
     result={'docker_installed':data.get('docker_installed') is True,'warnings':[str(x)[:200] for x in warnings[:5]],'containers_truncated':data.get('containers_truncated') is True,'processes_truncated':data.get('processes_truncated') is True}
-    for kind,limit,keys in [('containers',100,('name','target','image','state','status','ports','cpu_percent','memory_percent')),('processes',200,('name','target','pid','memory_bytes','cpu_percent'))]:
+    for kind,limit,keys in [('containers',100,('name','target','image','state','status','ports','cpu_percent','memory_percent','restart_count','exit_code','oom_killed','started_at','image_id','health','exit_reason')),('processes',200,('name','target','pid','memory_bytes','cpu_percent'))]:
         rows=data.get(kind,[])
         if not isinstance(rows,list) or len(rows)>limit:raise ValueError('Invalid discovery inventory.')
         result[kind]=[]
@@ -18,7 +18,9 @@ def validate(data):
             for key in keys:
                 v=row.get(key)
                 if v is None:continue
-                if key in ('pid','memory_bytes','cpu_percent','memory_percent'):
+                if key=='oom_killed':
+                    if type(v) is not bool:raise ValueError('Invalid container memory state.')
+                elif key in ('pid','memory_bytes','cpu_percent','memory_percent','restart_count','exit_code'):
                     if type(v) not in (int,float) or not math.isfinite(v) or v<0:raise ValueError('Invalid discovery counter.')
                 elif not isinstance(v,str) or len(v)>500:raise ValueError('Invalid discovery label.')
                 clean[key]=v

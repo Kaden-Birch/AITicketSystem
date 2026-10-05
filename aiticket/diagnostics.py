@@ -5,18 +5,18 @@ import re
 import time
 from .db import uid
 
-OPERATIONS = ('process_summary','service_status','service_logs')
+OPERATIONS = ('process_summary','service_status','service_logs','container_logs')
 METRICS = ('cpu_percent','memory_used_percent','memory_pressure_percent','disk_used_percent','inode_used_percent')
 
 
-def redact(text):
-    text = str(text)[:16000]
+def redact(text,limit=16000):
+    text = str(text)[:limit]
     text = re.sub(r'(?i)(password|passwd|secret|token|api[_-]?key|authorization)\s*[:=]\s*(?:bearer\s+)?[^\s,;]+',r'\1=[REDACTED]',text)
     text = re.sub(r'https?://[^\s/@]+:[^\s/@]+@','https://[REDACTED]@',text)
     return text
 
 
-def request_job(store,agent_id,incident_id,operation,service=None,now=None):
+def request_job(store,agent_id,incident_id,operation,service=None,now=None,ai_job=None):
     now=time.time() if now is None else now
     if operation not in OPERATIONS:
         raise ValueError('Unsupported read-only diagnostic')
@@ -27,13 +27,21 @@ def request_job(store,agent_id,incident_id,operation,service=None,now=None):
         if not agent or not incident or agent['machine_id']!=incident['machine_id']:
             raise ValueError('Diagnostic target must belong to this incident')
         from .handoff import control
-        if control(c, incident_id)['owner']=='ai':
+        if not ai_job and control(c, incident_id)['owner']=='ai':
             raise ValueError('AI owns this investigation; take control before requesting diagnostics.')
         capabilities=json.loads(agent['capabilities'])
         if operation not in capabilities.get('operations',[]):
             raise ValueError('Agent does not advertise this operation')
+        if ai_job:
+            from .commands import ai_allowed
+            job=ai_allowed(c,ai_job)
+            if not job or job['incident_id']!=incident_id:raise ValueError('Diagnostic is outside this investigation.')
         parameters={}
-        if operation!='process_summary':
+        if operation=='container_logs':
+            inventory=c.execute('SELECT at,data FROM agent_discovery WHERE machine_id=?',(agent['machine_id'],)).fetchone()
+            if not inventory or not 0<=now-inventory['at']<=180 or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}',str(service)) or not any(x['target']==service for x in json.loads(inventory['data']).get('containers',[])):raise ValueError('Select a container from current discovery.')
+            parameters={'target':service}
+        elif operation!='process_summary':
             if service not in capabilities.get('services',[]):
                 raise ValueError('Service is not in the agent allowlist')
             parameters={'service_id':service}

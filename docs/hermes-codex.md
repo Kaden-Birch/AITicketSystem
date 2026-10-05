@@ -1,6 +1,6 @@
 # Hermes with Codex sign-in
 
-Use **Hermes Codex login · subscription run limits** on Hermes & usage when you authenticate Hermes using a Codex/ChatGPT account rather than a provider API key. This integration uses Hermes's native `openai-codex` / `codex_responses` route. It does not start the unrestricted Codex app-server, mirror your chat sessions or enable tools/plugins. The chosen model ID is preserved exactly; model availability is established only by a successful live inference, not by the compatibility check.
+Use **Codex account** under **Settings → AI & Hermes** when you authenticate Hermes using a Codex/ChatGPT account rather than a provider API key. This integration uses Hermes's native `openai-codex` / `codex_responses` route. It does not start the unrestricted Codex app-server, mirror your chat sessions or enable tools/plugins. The chosen model ID is preserved exactly; model availability is established only by a successful live inference, not by the compatibility check.
 
 The signed bridge, immutable execution IDs, bounded evidence, ownership/handoff, local timeout/cancellation and prohibition on automatically replaying ambiguous jobs still apply. Codex mode requests one tool-free Hermes turn per execution, disables SDK retries and suppresses background review. Hermes may have other internal retry/auxiliary behavior: this is not a hard per-model-call cap. Queued runs, including failed/cancelled/ambiguous runs, count against incident, UTC-day and UTC-month limits. Counts are reserved transactionally before queueing and retained across restarts. Existing API gateway token/dollar settings and meters do not apply to these runs. Account allowance is shared with other Codex use; this app cannot report remaining allowance or guarantee a token/cost ceiling. Cancellation stops the local subprocess when permission is next checked; inference already sent to the provider may continue.
 
@@ -77,20 +77,20 @@ The service advertises only its configured execution mode. Gateway-mode jobs can
 
 ## Main application settings
 
-On **Hermes & usage**, choose **Hermes Codex login · subscription run limits**. For this deployment:
+On **Settings → AI & Hermes**, choose **Codex account**. For this deployment:
 
 - Bridge URL: `http://10.128.2.39:8090`
 - Bridge CA: blank for HTTP
 - Shared secret: the existing bridge secret; blank retains a saved secret
-- Exact model ID: `gpt-6.1-sol`
+- Model: `gpt-6.1-sol`
 - Reasoning effort: `low`
 - Initial trial limits: 1 run per incident/day/month, 90 seconds elapsed
 - Automatic triage: unchecked for the first trial
 - API provider URL/key/verification and prices: unused in Codex mode
 
-Save while keeping AI disabled. Run **Check bridge compatibility**: it imports/checks the installed interfaces without resolving OAuth credentials or invoking inference. A signed success proves matching mode and interface only; it does not prove login, model entitlement, completion behavior or remaining account allowance.
+Click **Save & connect**. The application automatically checks the signed bridge and installed interfaces without invoking a model. A successful connection check does not establish model login, entitlement or remaining account allowance.
 
-When ready for a deliberately bounded live trial, review the isolated deployment and explicitly acknowledge the configured Codex trial controls using the runtime checkbox. Save, rerun the signed check, then enable. Queue one read-only triage on a noncritical active incident. Confirm model/reasoning, successful tool-free findings, no background review and normal takeover/timeout behavior before enabling routine or automatic investigations and raising limits. Do not enable API provider verification for this trial. A failed or cancelled trial still consumes the queued-run allowance; increase a limit explicitly if another reviewed trial is needed. No automatic retry is offered.
+Enable the connection when ready, then use **Try investigation** for a bounded read-only trial. Review its findings before enabling automatic investigations or raising run limits. Failed or cancelled trials still consume the run allowance; another trial may require an explicit limit increase. API provider verification is unused in Codex mode.
 
 Automated tests use fake authentication resolvers and agents; development has made no live Codex login, inference or infrastructure action. Installed-version and model entitlement validation remains a deployment step.
 
@@ -99,3 +99,7 @@ Automated tests use fake authentication resolvers and agents; development has ma
 Update the bridge source and restart its service if a run reports “Codex Responses stream flag is only allowed in fallback streaming requests.” Codex mode omits the Chat Completions `stream` request override and lets Hermes manage its native Responses transport. API gateway mode retains its non-streaming override. Keep the exact model ID lowercase: `gpt-6.1-sol`. Failed runs still count against admission limits; explicitly raise the trial limit before queueing a new execution. A restart request written in a ticket remains read-only AI evidence, not power-operation authorization; use the host power broker for an actual restart.
 
 For operational investigations and independent Hermes command access, see [general remote commands](remote-commands.md). That explicit opt-in adds one scoped command tool and up to 12 model iterations; the read-only default described above remains available.
+
+## Current setup workflow
+
+Global AI configuration is now **Settings → AI & Hermes**. Saving and enabling automatically check the signed connection; the former runtime-verification checkbox is replaced by an optional bounded test investigation. Compatibility renews automatically while enabled. See [Settings and knowledge](settings-and-knowledge.md) for the current UI, normal-Hermes status setup, knowledge tools and read-only article drafting.

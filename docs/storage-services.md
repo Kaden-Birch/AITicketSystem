@@ -47,3 +47,5 @@ Full application/database backups retain encrypted connections (and require the 
 - [TrueNAS app statistics](https://api.truenas.com/v25.04.2/api_events_app.stats.html)
 - [TrueNAS real-time host statistics](https://api.truenas.com/v25.04.2/api_events_reporting.realtime.html)
 - [Plex Media Server API](https://developer.plex.tv/pms/)
+
+Updated agents also report Docker restart/exit/health details. **Details** in host container inventory includes resource trends and **Collect recent logs**. NAS app and server-version transitions are recorded under host **Recent changes**. Host/service **Knowledge** links organize reusable guides and fixes. See [Settings and knowledge](settings-and-knowledge.md).

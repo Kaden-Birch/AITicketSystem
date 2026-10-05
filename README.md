@@ -117,3 +117,5 @@ Windows hosts use the [Windows agent installer](docs/agent-windows.md), with Loc
 - [Investigation reliability, application health and workflow testing](docs/investigation-reliability.md)
 
 TrueNAS SCALE / HexOS can be added directly through **Hosts → Add host → TrueNAS**, without an OS agent. Host-linked Plex server and media-read checks live under **Applications**. Linux/Windows agents also discover Docker containers and processes for one-click monitoring. See [TrueNAS, Plex and discovery setup](docs/storage-services.md).
+
+[Settings, knowledge and diagnostics](docs/settings-and-knowledge.md): grouped settings, simpler Hermes activation, normal Hermes status queries, optional knowledge articles and AI drafting, container details/logs/trends, observed change history and allowlisted Telegram conversations.

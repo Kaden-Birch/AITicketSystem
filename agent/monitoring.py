@@ -78,6 +78,45 @@ os.statvfs(path)
     return {'sampled_at':time.time(),'id':check['id'],'config':check['config'],'healthy':healthy,'details':details}
 
 
+
+def container_facts(items,runner=None):
+    """Use selected inspect fields; never collect environment or full configuration."""
+    from diagnostics import redact
+    names=[x['target'] for x in items if isinstance(x.get('target'),str) and x['target'] and not x['target'].startswith('-')][:100]
+    if not names:return {}
+    template='{"name":{{json .Name}},"restart_count":{{json .RestartCount}},"exit_code":{{json .State.ExitCode}},"oom_killed":{{json .State.OOMKilled}},"started_at":{{json .State.StartedAt}},"image_id":{{json .Image}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}"not_configured"{{end}},"exit_reason":{{json .State.Error}}}'
+    argv=['docker','container','inspect','--format',template,'--',*names]
+    if runner:
+        reply=runner(argv,timeout=4,limit=60000)
+        if reply['state']!='completed':raise ValueError('Inspection unavailable')
+        raw=reply['stdout']
+    else:
+        import selectors,os
+        process=subprocess.Popen(argv,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,shell=False)
+        selector=selectors.DefaultSelector();selector.register(process.stdout,selectors.EVENT_READ)
+        output=bytearray();deadline=time.monotonic()+4
+        try:
+            while time.monotonic()<deadline and len(output)<60000:
+                if selector.select(min(.2,max(0,deadline-time.monotonic()))):
+                    block=os.read(process.stdout.fileno(),min(4096,60000-len(output)))
+                    if not block:break
+                    output.extend(block)
+                elif process.poll() is not None:break
+            if process.poll() is None:
+                process.kill();process.wait();raise ValueError('Inspection exceeded limits')
+            if process.returncode:raise ValueError('Inspection unavailable')
+        finally:
+            selector.close();process.stdout.close()
+            if process.poll() is None:process.kill();process.wait()
+        raw=output.decode(errors='replace')
+    rows={}
+    for line in raw.splitlines()[:100]:
+        item=json.loads(line);name=item.pop('name','').lstrip('/')
+        item['exit_reason']=redact(item.get('exit_reason',''))[:500]
+        rows[name]=item
+    for item in items:item.update(rows.get(item['target'],{}))
+    return rows
+
 def discover(state):
     """Inventory names and counters, never environment variables or command lines."""
     import os,shutil
@@ -97,6 +136,8 @@ def discover(state):
                     try:item[out]=float(row[key].rstrip('%'))
                     except (KeyError,ValueError):pass
         except (OSError,ValueError,subprocess.SubprocessError):result['warnings'].append('Docker inventory is unavailable. Check the daemon and agent permissions.')
+    try:container_facts(result['containers'])
+    except (OSError,ValueError,subprocess.SubprocessError):result['warnings'].append('Detailed container state is unavailable.')
     now=time.monotonic();previous=state.get('discovery_cpu',{});elapsed=now-state.get('discovery_at',now);ticks=os.sysconf('SC_CLK_TCK');page=os.sysconf('SC_PAGE_SIZE');current={}
     for directory in list(Path('/proc').glob('[0-9]*'))[:4096]:
         try:

@@ -28,7 +28,11 @@ def blocked(c,job,machine=None,now=None):
 def check_change(c,job_id,machine,command=None,method=None,now=None):
     if not job_id:return
     job=c.execute('SELECT * FROM ai_jobs WHERE id=?',(job_id,)).fetchone()
-    if not job or not blocked(c,job,machine,now):return
+    if not job:return
+    from .host_access import read_only
+    diagnostic=method=='GET' or (command is not None and read_only(command))
+    if job['read_only'] and not diagnostic:raise ValueError('This status/article investigation is read-only. Open a ticket to request changes.')
+    if not blocked(c,job,machine,now):return
     from .host_access import read_only
     if method=='GET' or (command is not None and read_only(command)):return
     if job['automatic'] or not job['maintenance_changes']:

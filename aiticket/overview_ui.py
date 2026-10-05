@@ -3,7 +3,7 @@ import json,time
 from datetime import datetime,timedelta
 from zoneinfo import ZoneInfo
 
-NAV=[('Dashboard','/'),('Hosts','/hosts'),('Tickets','/tickets'),('Network Devices','/network-devices'),('Proxmox','/proxmox'),('Fleet','/fleet'),('Applications','/applications'),('Monitoring health','/monitoring-health'),('Agent health','/resources'),('Delivery queue','/queue'),('Audit','/audit'),('Policies','/policies'),('Hermes & usage','/hermes'),('Recovery policy','/recovery-policy'),('Settings','/settings'),('Administration','/administration')]
+NAV=[('Dashboard','/'),('Hosts','/hosts'),('Tickets','/tickets'),('Network Devices','/network-devices'),('Proxmox','/proxmox'),('Fleet','/fleet'),('Applications','/applications'),('Knowledge Base','/knowledge'),('Monitoring health','/monitoring-health'),('Delivery queue','/queue'),('Audit','/audit'),('Settings','/settings')]
 
 
 def ticket_rows(store,now=None):

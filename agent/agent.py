@@ -91,7 +91,7 @@ def bounded_discovery(data):
     """Optional inventory must never exceed the server's heartbeat schema limits."""
     import math
     result={'docker_installed':data.get('docker_installed') is True,'warnings':[str(x)[:200] for x in data.get('warnings',[])[:5]]}
-    for kind,limit,keys in [('containers',100,('name','target','image','state','status','ports','cpu_percent','memory_percent')),('processes',200,('name','target','pid','memory_bytes','cpu_percent'))]:
+    for kind,limit,keys in [('containers',100,('name','target','image','state','status','ports','cpu_percent','memory_percent','restart_count','exit_code','oom_killed','started_at','image_id','health','exit_reason')),('processes',200,('name','target','pid','memory_bytes','cpu_percent'))]:
         rows=data.get(kind,[]);result[kind]=[];result[kind+'_truncated']=bool(data.get(kind+'_truncated') or len(rows)>limit)
         for row in rows[:limit]:
             if not all(isinstance(row.get(k),str) and 0<len(row[k])<=500 for k in ('name','target')):
@@ -99,7 +99,8 @@ def bounded_discovery(data):
             clean={}
             for key in keys:
                 value=row.get(key)
-                if isinstance(value,str):clean[key]=value[:500]
+                if key=='oom_killed' and type(value) is bool:clean[key]=value
+                elif isinstance(value,str):clean[key]=value[:500]
                 elif type(value) in (int,float) and math.isfinite(value) and value>=0:clean[key]=value
             result[kind].append(clean)
     while len(json.dumps(result))>90000:

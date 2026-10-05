@@ -41,11 +41,11 @@ def load_policy(path):
     if not isinstance(services,dict) or len(services)>20 or any(not re.fullmatch('[A-Za-z0-9_.-]{1,80}',k) or not re.fullmatch('[A-Za-z0-9_.@ -]{1,100}',v) for k,v in services.items()):raise ValueError('Invalid Windows service allowlist')
     recovery=p.get('recovery',{});power=p.get('power',{'enabled':bool(ctypes.windll.shell32.IsUserAnAdmin()),'validated':bool(ctypes.windll.shell32.IsUserAnAdmin()),'operations':['host_restart','host_shutdown']})
     if any(v not in services for v in recovery.get('services',[])) or any(v not in ('host_restart','host_shutdown') for v in power.get('operations',[])):raise ValueError('Invalid recovery policy')
-    return {'services':services,'logs':p.get('logs') is True,'recovery':recovery,'power':power}
+    return {'container_logs':p.get('container_logs',True) is True,'services':services,'logs':p.get('logs') is True,'recovery':recovery,'power':power}
 
 
 def capabilities(p):
-    result={'operations':['process_summary','service_status']+(['service_logs'] if p['logs'] else []),'services':list(p['services'])}
+    result={'operations':['process_summary','service_status']+(['container_logs'] if p.get('container_logs',True) else [])+(['service_logs'] if p['logs'] else []),'services':list(p['services'])}
     recovery=p.get('recovery',{});power=p.get('power',{})
     if recovery.get('enabled') and recovery.get('validated'):result.update(actions=['service_restart'],action_services={s:p['services'][s] for s in recovery.get('services',[])})
     if power.get('enabled') and power.get('validated'):result['power_operations']=power.get('operations',[])
@@ -70,6 +70,11 @@ def execute_command(job,authorize,load_policy):
 def diagnostic(job,p):
     op=job.get('operation');params=job.get('parameters',{})
     if job.get('expires',0)<=time.time() or op not in capabilities(p)['operations'] or not isinstance(params,dict):raise ValueError('Diagnostic unavailable')
+    if op=='container_logs':
+        if set(params)!={'target'} or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}',str(params['target'])):raise ValueError('Choose an exact container name.')
+        from diagnostics import redact
+        reply=run(['docker','logs','--tail','50','--since','15m','--timestamps',params['target']],timeout=5,limit=16000)
+        return {'status':'completed' if reply['state']=='completed' else 'failed','output':redact(reply.get('stdout','')+'\n'+reply.get('stderr',''))}
     if op=='process_summary':
         if params:raise ValueError('No process-summary parameters allowed')
         script='Get-Process | Select-Object -First 100 Id,ProcessName'
@@ -136,6 +141,8 @@ def discovery(state):
                     try:item[out]=float(row[key].rstrip('%'))
                     except (KeyError,ValueError):pass
         except Exception:result['warnings'].append('Docker inventory is unavailable. Check the daemon and LocalSystem access.')
+    try:monitoring.container_facts(result['containers'],runner=run)
+    except Exception:result['warnings'].append('Detailed container state is unavailable.')
     try:
         rows=query("@(Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 200 | ForEach-Object { [pscustomobject]@{pid=$_.Id;name=$_.ProcessName;target=$_.ProcessName;memory_bytes=$_.WorkingSet64;cpu_seconds=$_.CPU;started=$(try{$_.StartTime.ToUniversalTime().Ticks}catch{0})} })",limit=60000)
         if isinstance(rows,dict):rows=[rows]

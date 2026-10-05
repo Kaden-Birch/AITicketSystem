@@ -53,13 +53,13 @@ def test_codex_gui_save_and_signed_mode_matching(signed_in):
     assert client.post('/hermes',data=fields).status_code==302
     assert store.setting('hermes_config')['execution_mode']=='codex'
     assert not store.setting('ai_provider_secret')
-    assert b'Codex subscription settings' in client.get('/hermes').data
+    assert b'Model & run limits' in client.get('/hermes').data
     result={'version':1,'tools':[],'compatible':True,'model_gateway':False,'execution_mode':'codex','workspace_modes':['advice','exploration']}
     with patch('aiticket.ai.bridge_request',return_value=result):
         assert client.post('/hermes',data={'csrf':csrf,'operation':'test'}).status_code==302
     assert store.setting('hermes_validation')['execution_mode']=='codex'
     with patch('aiticket.ai.bridge_request',return_value={**result,'execution_mode':'gateway','model_gateway':True}):
-        assert client.post('/hermes',data={'csrf':csrf,'operation':'test'}).status_code==400
+        assert client.post('/hermes',data={'csrf':csrf,'operation':'test'}).status_code==302
 
 
 def test_codex_result_requires_matching_signed_metadata(environment):
