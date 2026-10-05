@@ -181,6 +181,8 @@ def resolve_verified(c,store,incident_id,summary,now):
     report=json.loads(row['report']);report['recovery_summary']=summary[:1000]
     report['recovered_at']=now;report['observed']='healthy'
     c.execute("UPDATE incidents SET status='Resolved',closed=?,last_seen=?,report=? WHERE id=?",(now,now,json.dumps(report),incident_id))
+    from .knowledge_workflows import verified
+    verified(c,incident_id,now)
     if report.get('workflow_test'):
         c.execute('UPDATE checks SET enabled=0 WHERE id=(SELECT check_id FROM incidents WHERE id=?)',(incident_id,))
     store.timeline(c,incident_id,'recovery',summary,actor='monitor',now=now)

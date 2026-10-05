@@ -69,6 +69,43 @@ def register(app,store,vault,login_required):
         for row in store.rows('SELECT id FROM integrations'):knowledge.root(store,'service',service=row['id'])
         return render_template('knowledge-editor.html',article=existing,values=values,error=error,folders=store.rows('SELECT * FROM kb_folders ORDER BY kind,name'),versions=store.rows('SELECT * FROM kb_versions WHERE article_id=? ORDER BY version DESC LIMIT 20',(article,)) if article else [])
 
+    @app.route('/knowledge/articles/<article>/workflow',methods=['GET','POST'])
+    @login_required
+    def knowledge_workflow(article):
+        from . import knowledge_workflows as workflows
+        from .db import uid
+        rows=store.rows('SELECT * FROM kb_articles WHERE id=?',(article,))
+        if not rows:abort(404)
+        with store.connect() as c:plan=workflows.definition(c,article)
+        values={**(plan['steps'] if plan else {}),'version':str(plan['version']) if plan else '0','enabled':'yes' if not plan or plan['enabled'] else ''};error=None
+        if request.method=='POST':
+            values=dict(request.form)
+            try:
+                if values.get('operation')=='run':
+                    machine=values.get('machine_id')
+                    with store.connect() as c:
+                        current=workflows.definition(c,article)
+                        if not current or not current['enabled'] or current['status']!='published':raise ValueError('Publish the article and enable its workflow first.')
+                        if current['article_version']!=rows[0]['version']:raise ValueError('Review and save the workflow after changing its article.')
+                        if current['machine_id'] and current['machine_id']!=machine:raise ValueError('Choose this article’s host.')
+                    import uuid
+                    request_id=values.get('request_id','');uuid.UUID(request_id)
+                    previous=store.rows('SELECT j.incident_id,r.article_id,r.machine_id FROM ai_jobs j LEFT JOIN kb_workflow_runs r ON r.job_id=j.id WHERE j.request_id=?',(request_id,))
+                    if previous:
+                        if previous[0]['article_id']!=article or previous[0]['machine_id']!=machine:raise ValueError('This request was already used for another procedure or host. Reload before starting.')
+                        return redirect('/incidents/'+previous[0]['incident_id'])
+                    from .host_admin import open_ticket
+                    from .ai import request_job
+                    ticket=open_ticket(store,machine,'Procedure: '+rows[0]['title'][:85],'Use the saved procedure '+rows[0]['title']+'. Check current prerequisites, record each step and independently verify the result.','medium',handling_mode='paused')
+                    with store.connect() as c:c.execute("UPDATE incident_control SET owner='available',handling_mode='paused' WHERE incident_id=?",(ticket,))
+                    try:request_job(store,vault,ticket,question='Use the saved workflow for article '+article+'. Retrieve it through knowledge and record prerequisites, diagnostics, fix and verification through workflow. Stop if it does not apply. Existing host permissions and maintenance restrictions apply.',request_id=request_id,workflow_article=article)
+                    except ValueError as e:flash('Procedure ticket created. AI could not start: '+str(e))
+                    return redirect('/incidents/'+ticket)
+                workflows.save(store,article,values);flash('Workflow saved.');return redirect(request.path)
+            except (ValueError,TypeError) as e:error=str(e)
+        with store.connect() as c:statistics=workflows.stats(c,article)
+        return render_template('knowledge-workflow.html',statistics=statistics,article=rows[0],plan=plan,values=values,error=error,runs=workflows.history(store,article),hosts=store.rows('SELECT id,name FROM machines ORDER BY name'),request_id=uid())
+
     @app.post('/knowledge/folders')
     @login_required
     def knowledge_folder():

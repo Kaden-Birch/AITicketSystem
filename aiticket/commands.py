@@ -78,6 +78,9 @@ def admitted_execution(c,identifier):
 def permitted(c,job,now):
     if job['ai_job_id'] and job['state']!='running' and not job['read_only_command']:
         ai=c.execute('SELECT * FROM ai_jobs WHERE id=?',(job['ai_job_id'],)).fetchone()
+        from .knowledge_workflows import check_change as workflow_change
+        try:workflow_change(c,job['ai_job_id'])
+        except ValueError:return False
         from .maintenance_ai import blocked
         if ai and (ai['read_only'] or blocked(c,ai,job['machine_id'],now) and (ai['automatic'] or not ai['maintenance_changes'])):return False
     policy=c.execute('SELECT * FROM command_policies WHERE machine_id=?',(job['machine_id'],)).fetchone()

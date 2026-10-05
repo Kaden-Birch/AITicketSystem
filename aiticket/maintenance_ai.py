@@ -31,6 +31,9 @@ def check_change(c,job_id,machine,command=None,method=None,now=None):
     if not job:return
     from .host_access import read_only
     diagnostic=method=='GET' or (command is not None and read_only(command))
+    if not diagnostic:
+        from .knowledge_workflows import check_change as workflow_change
+        workflow_change(c,job_id)
     if job['read_only'] and not diagnostic:raise ValueError('This status/article investigation is read-only. Open a ticket to request changes.')
     if not blocked(c,job,machine,now):return
     from .host_access import read_only

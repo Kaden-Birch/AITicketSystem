@@ -26,6 +26,11 @@ def config(form,kind):
         library=form.get('library_id','').strip()
         if library and not library.isdigit():raise ValueError('Choose a valid Plex library.')
         result['library_id']=library
+        libraries=form.getlist('library_ids') if hasattr(form,'getlist') else form.get('library_ids',[])
+        if not isinstance(libraries,list) or len(libraries)>10 or any(not isinstance(x,str) or not x.isdigit() for x in libraries):raise ValueError('Choose up to ten Plex libraries.')
+        result['library_ids']=list(dict.fromkeys(([library] if library else [])+libraries))
+        if len(result['library_ids'])>10:raise ValueError('Choose up to ten Plex libraries.')
+        result['deep_monitoring']=True
     return result
 
 
@@ -48,6 +53,9 @@ def save(store,vault,machine,kind,name,cfg,secret,identifier=None,snapshot=None,
         if not old:
             check=uid();c.execute("INSERT INTO checks(id,machine_id,name,kind,config,interval,severity) VALUES(?,?,?,?,?,?,'medium')",(check,machine,'TrueNAS health' if kind=='truenas' else name.strip(),kind,json.dumps({'connection_id':identifier,'scope':'host' if kind=='truenas' else 'service'}),cfg['interval']))
         else:c.execute("UPDATE checks SET next_run=0 WHERE json_extract(config,'$.connection_id')=?",(identifier,))
+        if kind=='plex':
+            from .service_dependencies import sync
+            sync(c,store,identifier,machine,name.strip(),cfg)
         store.audit(c,'integration.saved',identifier,{'kind':kind,'machine_id':machine})
     return identifier
 
@@ -61,7 +69,8 @@ def read(kind,cfg,secret):
 
 
 def refresh(store,vault,row):
-    cfg=json.loads(row['config']);snapshot=read(row['kind'],cfg,vault.decrypt(row['secret']));now=time.time()
+    cfg=json.loads(row['config']);reading_cfg={**cfg,'_previous':json.loads(row['snapshot'])} if row['kind']=='plex' else cfg
+    snapshot=read(row['kind'],reading_cfg,vault.decrypt(row['secret']));now=time.time()
     with store.connect() as c:
         # Never apply an old credential/configuration result after editing/deletion.
         changed=c.execute('UPDATE integrations SET snapshot=?,at=?,next_run=?,lease_until=NULL WHERE id=? AND config=? AND secret=?',(json.dumps(snapshot),now,now+cfg['interval'],row['id'],row['config'],row['secret'])).rowcount
@@ -114,8 +123,16 @@ def probe(store,kind,cfg):
     if not row['at'] or not 0<=time.time()-row['at']<=max(180,interval*3):return None,{'reason':'Waiting for a current API reading.','monitoring_issue':True}
     if data.get('error'):return None,{'reason':data['error'],'monitoring_issue':True}
     if kind=='plex':
+        if cfg.get('scope')=='location':
+            item=next((x for x in data.get('media_locations',[]) if x['id']==cfg.get('target')),None)
+            if item is None:return None,{'reason':'The selected media location is not in the current reading. Review library settings.','monitoring_issue':True}
+            return item['readable'],{'reason':item['reason'],'location':item['path'],'library':item['library'],'sampled_at':row['at'],'coverage':'One sampled file in this location.'}
+        if cfg.get('scope')=='transcode':
+            playback=data.get('playback',{})
+            if not playback.get('error_reporting_available'):return None,{'reason':'No current transcode session exposes an error flag. This does not establish playback health.','monitoring_issue':True}
+            return playback.get('transcode_errors',0)==0,{'reason':'Plex reports a transcode error.' if playback.get('transcode_errors') else 'Current transcode sessions report no errors.','details':playback,'sampled_at':row['at']}
         healthy=data.get('media_access') if cfg.get('scope')=='media' else data.get('responsive')
-        return healthy,{'reason':'Plex can read the sample media file.' if healthy and cfg.get('scope')=='media' else 'Plex responds.' if healthy else data.get('media_reason','Plex is not responding.'),'sampled_at':row['at'],'metrics':data.get('metrics',{})}
+        return healthy,{'reason':data.get('media_reason','Plex can read the sample media file.') if healthy and cfg.get('scope')=='media' else 'Plex responds.' if healthy else data.get('media_reason','Plex is not responding.'),'sampled_at':row['at'],'metrics':data.get('metrics',{})}
     scope=cfg.get('scope','host')
     if scope=='host':
         severe=[a for a in data.get('alerts',[]) if a.get('level') in ('CRITICAL','ERROR','ALERT','EMERGENCY')]
@@ -140,8 +157,13 @@ def add_check(store,connection,scope,target=None):
     if not row:raise ValueError('Unknown monitoring connection.')
     if not row['fresh'] or row['data'].get('error'):raise ValueError('Wait for a current API reading before adding a check.')
     if row['kind']=='plex':
-        if scope!='media' or not row['config'].get('library_id'):raise ValueError('Choose a Plex library in service settings first.')
-        title=row['name']+' media access'
+        if scope=='location':
+            item=next((x for x in row['data'].get('media_locations',[]) if x['id']==target),None)
+            if not item:raise ValueError('Choose a discovered media location.')
+            title=row['name']+' · '+item['library']+' · '+item['path']
+        elif scope=='transcode':title=row['name']+' transcode errors'
+        elif scope=='media' and (row['config'].get('library_id') or row['config'].get('library_ids')):title=row['name']+' media access'
+        else:raise ValueError('Choose a Plex library in service settings first.')
     else:
         if scope not in ('pool','app'):raise ValueError('Select an application or storage pool.')
         item=next((x for x in row['data'].get('pools' if scope=='pool' else 'apps',[]) if str(x['id'] if scope=='pool' else x['name'])==target),None)
@@ -153,6 +175,9 @@ def add_check(store,connection,scope,target=None):
         old=c.execute('SELECT id FROM checks WHERE machine_id=? AND kind=? AND config=?',(row['machine_id'],row['kind'],json.dumps(cfg))).fetchone()
         if old:return old['id']
         identifier=uid();c.execute("INSERT INTO checks(id,machine_id,name,kind,config,interval,severity) VALUES(?,?,?,?,?,?,'medium')",(identifier,row['machine_id'],title,row['kind'],json.dumps(cfg),row['config']['interval']))
+        if row['kind']=='plex':
+            from .service_dependencies import sync
+            sync(c,store,connection,row['machine_id'],row['name'],row['config'])
         store.audit(c,'check.created',identifier,{'kind':row['kind']})
     return identifier
 
@@ -167,6 +192,10 @@ def connection_error(exc):
 def remove(store,identifier):
     with store.connect() as c:
         c.execute("UPDATE checks SET enabled=0 WHERE json_extract(config,'$.connection_id')=?",(identifier,))
+        group='service:'+identifier
+        c.execute('DELETE FROM application_dependencies WHERE application_id=?',(group,))
+        c.execute('DELETE FROM application_checks WHERE application_id=?',(group,))
+        c.execute('DELETE FROM applications WHERE id=?',(group,))
         # Keep service knowledge after removing its live monitoring connection.
         c.execute('UPDATE kb_folders SET service_id=NULL WHERE service_id=?',(identifier,))
         c.execute('DELETE FROM integrations WHERE id=?',(identifier,));store.audit(c,'integration.deleted',identifier)

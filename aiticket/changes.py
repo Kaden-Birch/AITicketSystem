@@ -30,6 +30,13 @@ def integration(c,row,snapshot,at):
     if not old or old.get('error'):return
     for key in ('version',):
         if key in old and key in snapshot:event(c,row['machine_id'],row['name'],key,old[key],snapshot[key],at)
+    if row['kind']=='plex':
+        before=old.get('playback',{});after=snapshot.get('playback',{})
+        if before.get('error_reporting_available') and after.get('error_reporting_available'):event(c,row['machine_id'],row['name'],'transcode_errors',before.get('transcode_errors'),after.get('transcode_errors'),at)
+        previous={x['id']:x for x in old.get('media_locations',[])}
+        for item in snapshot.get('media_locations',[]):
+            prior_location=previous.get(item['id'])
+            if prior_location and prior_location.get('readable') is not None and item.get('readable') is not None:event(c,row['machine_id'],row['name']+' · '+item['library'],'media_access',prior_location['readable'],item['readable'],at)
     prior={x['name']:x for x in old.get('apps',[])}
     for item in snapshot.get('apps',[]):
         prev=prior.get(item['name'])

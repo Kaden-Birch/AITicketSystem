@@ -1,6 +1,13 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 39
+CURRENT_VERSION = 40
 MIGRATIONS = {
+    40: (
+        "UPDATE integrations SET config=json_set(config,'$.deep_monitoring',json('true'),'$.library_ids',json(CASE WHEN coalesce(json_extract(config,'$.library_id'),'')!='' THEN json_array(json_extract(config,'$.library_id')) ELSE '[]' END)) WHERE kind='plex'",
+        "CREATE TABLE kb_workflows(article_id TEXT PRIMARY KEY REFERENCES kb_articles(id),version INTEGER NOT NULL,article_version INTEGER NOT NULL,steps TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1,updated REAL NOT NULL)",
+        "CREATE TABLE kb_workflow_runs(id TEXT PRIMARY KEY,article_id TEXT NOT NULL REFERENCES kb_articles(id),version INTEGER NOT NULL,plan TEXT NOT NULL,machine_id TEXT NOT NULL REFERENCES machines(id),incident_id TEXT NOT NULL REFERENCES incidents(id),job_id TEXT NOT NULL REFERENCES ai_jobs(id),state TEXT NOT NULL DEFAULT 'checking',phase TEXT NOT NULL DEFAULT 'prerequisites',created REAL NOT NULL,finished REAL,summary TEXT NOT NULL DEFAULT '',UNIQUE(article_id,job_id))",
+        "CREATE TABLE kb_workflow_events(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES kb_workflow_runs(id),phase TEXT NOT NULL,outcome TEXT NOT NULL,note TEXT NOT NULL,at REAL NOT NULL)",
+        "CREATE INDEX kb_workflow_history ON kb_workflow_runs(article_id,created)",
+    ),
     39: (
         "ALTER TABLE ai_jobs ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0",
         "CREATE TABLE kb_folders(id TEXT PRIMARY KEY,name TEXT NOT NULL,parent_id TEXT REFERENCES kb_folders(id),kind TEXT NOT NULL DEFAULT 'troubleshooting',machine_id TEXT REFERENCES machines(id),service_id TEXT REFERENCES integrations(id),created REAL NOT NULL)",

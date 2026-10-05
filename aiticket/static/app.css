@@ -147,3 +147,5 @@ body{background:var(--page)}header,section,.cards article,.table,.metric,.host-c
 
 .attention-workspace .workspace-group{padding:20px;margin:0}.attention-workspace .delivery-filters{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}.attention-workspace pre{white-space:pre-wrap;overflow-wrap:anywhere}
 :root[data-theme="dark"] .attention-agents,:root[data-theme="dark"] .attention-ai{color:#ffa5ae}:root[data-theme="dark"] .attention-updates{color:#c5a6ff}:root[data-theme="dark"] .attention-connections{color:#92c5ff}:root[data-theme="dark"] .attention-notifications{color:#efc570}:root[data-theme="dark"] .attention-monitoring{color:#8adbd0}
+
+.location-title{min-width:0}.location-title small{display:block;margin-top:5px;font-weight:400;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:38vw}@media(max-width:800px){.location-title small{max-width:65vw}}

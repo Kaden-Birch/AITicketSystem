@@ -2,6 +2,7 @@
 import re
 
 LABELS = {
+    'workflow_started': ('Saved procedure', 'info', None),
     'ai_queued': ('Queued', 'neutral', 'Investigation queued.'),
     'ai_running': ('In progress', 'info', None),
     'resolution_requested': ('Checking recovery', 'info', 'Work finished. Checking that everything is healthy.'),

@@ -264,12 +264,16 @@ def create_app(data_dir=None, testing=False):
         from .metric_history import series
         row=next((r for r in views(store) if r['id']==identifier and r['kind']=='plex'),None)
         if identifier and not row:abort(404)
-        values={**row['config'],'name':row['name'],'machine_id':row['machine_id']} if row else {'machine_id':request.args.get('host',''),'name':'Plex','interval':60}
+        from .service_dependencies import choices,configure
+        application_types=[{'id':'plex','name':'Plex'}]
+        values={**row['config'],'name':row['name'],'machine_id':row['machine_id']} if row else {'machine_id':request.args.get('host',''),'name':'Plex','interval':60,'kind':'plex'}
         error=None;notice=None;preview=row['data'] if row else {}
         if request.method=='POST':
             values=request.form
             try:
-                cfg=config(values,'plex');machine=row['machine_id'] if row else values.get('machine_id')
+                kind=values.get('kind','plex')
+                if kind not in {x['id'] for x in application_types} or row and kind!=row['kind']:raise ValueError('Choose a supported application.')
+                cfg=configure(store,values,config(values,kind));machine=row['machine_id'] if row else values.get('machine_id')
                 if not store.rows('SELECT id FROM machines WHERE id=?',(machine,)):raise ValueError('Select the host that runs Plex.')
                 if not 1<=len(values.get('name','').strip())<=100:raise ValueError('Enter a service name, up to 100 characters.')
                 token=values.get('token','') or (vault.decrypt(store.rows('SELECT secret FROM integrations WHERE id=?',(identifier,))[0]['secret']) if row else '')
@@ -281,8 +285,9 @@ def create_app(data_dir=None, testing=False):
                     identifier=save(store,vault,machine,'plex',values.get('name',''),cfg,values.get('token',''),identifier,preview)
                     flash('Plex service saved.');return redirect('/services/'+identifier)
             except Exception as exc:error=str(exc) if isinstance(exc,ValueError) else connection_error(exc)
-        history=series(store,identifier,'plex',request.args.get('window','6h'),definitions=[('response_ms','Response time',' ms',None),('active_sessions','Active streams','',None),('transcoding_sessions','Transcoding','',None)])
-        return render_template('service.html',service=row,values=values,preview=preview,error=error,notice=notice,machines=store.rows('SELECT id,name FROM machines ORDER BY name'),history=history)
+        history=series(store,identifier,'plex',request.args.get('window','6h'),definitions=[('response_ms','Response time',' ms',None),('active_sessions','Active streams','',None),('transcoding_sessions','Transcoding','',None),('transcode_errors','Reported transcode errors','',None)])
+        nas_apps,storage_checks=choices(store)
+        return render_template('service.html',application_types=application_types,nas_apps=nas_apps,storage_checks=storage_checks,service=row,values=values,preview=preview,error=error,notice=notice,machines=store.rows('SELECT id,name FROM machines ORDER BY name'),history=history)
 
     @app.post('/integrations/<identifier>/checks')
     @login_required
@@ -504,7 +509,7 @@ def create_app(data_dir=None, testing=False):
 
     def command_tool_action_impl(payload,ai_job=None,external=False):
         from .commands import queue,view,decide
-        if not isinstance(payload,dict) or set(payload)-{'action','machine_id','incident_id','command','id','connection_id','method','path','params','summary','source','offset','limit','query','article_id','category','folder','title','body','tags','operation','target'}: raise ValueError('Invalid command tool envelope.')
+        if not isinstance(payload,dict) or set(payload)-{'action','machine_id','incident_id','command','id','connection_id','method','path','params','summary','source','offset','limit','query','article_id','category','folder','title','body','tags','operation','target','phase','outcome'}: raise ValueError('Invalid command tool envelope.')
         if any(k in payload and (not isinstance(payload[k],str) or len(payload[k])>100) for k in ('id','machine_id','incident_id')): raise ValueError('Invalid command target identity.')
         action=payload.get('action')
         if ai_job:
@@ -552,8 +557,15 @@ def create_app(data_dir=None, testing=False):
                 if article:
                     row=c.execute('SELECT a.*,f.machine_id FROM kb_articles a JOIN kb_folders f ON f.id=a.folder_id WHERE a.id=? AND a.status!=?',(article,'archived')).fetchone()
                     if not row or row['machine_id'] and row['machine_id'] not in scope:abort(403)
-                    return {'article':dict(row),'note':'Historical guidance; never automatic permission.'}
+                    from .knowledge_workflows import definition
+                    return {'article':dict(row),'workflow':definition(c,article),'note':'Historical guidance; never automatic permission.'}
                 return {'articles':[{k:v for k,v in row.items() if k!='body'}|{'summary':row['body'][:600]} for row in search(c,scope,payload.get('query',''),limit=10,offset=payload.get('offset',0))]}
+        if action=='workflow':
+            if not ai_job:abort(403)
+            from .knowledge_workflows import tool
+            with store.connect() as c:
+                c.execute('BEGIN IMMEDIATE')
+                return tool(c,store,payload,original_machine,incident_id,ai_job)
         if action=='knowledge_write':
             if not ai_job:abort(403)
             from .knowledge import root,folder,save_in

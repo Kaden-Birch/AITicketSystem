@@ -60,7 +60,7 @@ def evidence_snapshot(value):
     return redact(value) if isinstance(value, str) else value
 
 
-def request_job(store, vault, incident_id, automatic=False, now=None, mode='triage', question='', request_id=None, source_ids=(), diagnostic_ids=(), resume_checkpoint=None, expected_generation=None, recovery_target=None, resume_task=None, maintenance_changes=False, read_only=False, knowledge_draft=None):
+def request_job(store, vault, incident_id, automatic=False, now=None, mode='triage', question='', request_id=None, source_ids=(), diagnostic_ids=(), resume_checkpoint=None, expected_generation=None, recovery_target=None, resume_task=None, maintenance_changes=False, read_only=False, knowledge_draft=None, workflow_article=None):
     now = time.time() if now is None else now
     if resume_task is not None and (not resume_checkpoint or not isinstance(resume_task,str) or not 1<=len(resume_task.strip())<=2000):
         raise ValueError('Supply a current checkpoint task of 1–2000 characters.')
@@ -74,7 +74,7 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
             uuid.UUID(request_id)
         except (ValueError, TypeError, AttributeError):
             raise ValueError('Invalid request identity; reload the incident page.')
-    fingerprint = hashlib.sha256(json.dumps({'mode': mode, 'question': question.strip(), 'sources': sorted(source_ids), 'diagnostics': sorted(diagnostic_ids), 'checkpoint': resume_checkpoint, 'generation': expected_generation,'recovery_target':recovery_target,'maintenance_changes':bool(maintenance_changes),'read_only':bool(read_only),**({'resume_task':resume_task.strip()} if resume_task else {})}, sort_keys=True).encode()).hexdigest()
+    fingerprint = hashlib.sha256(json.dumps({'mode': mode, 'question': question.strip(), 'sources': sorted(source_ids), 'diagnostics': sorted(diagnostic_ids), 'checkpoint': resume_checkpoint, 'generation': expected_generation,'recovery_target':recovery_target,'maintenance_changes':bool(maintenance_changes),'read_only':bool(read_only),**({'workflow_article':workflow_article} if workflow_article else {}),**({'resume_task':resume_task.strip()} if resume_task else {})}, sort_keys=True).encode()).hexdigest()
     with store.connect() as c:
         c.execute('BEGIN IMMEDIATE')
         if request_id:
@@ -224,6 +224,10 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
         c.execute('INSERT INTO ai_jobs(id,incident_id,state,created,expires,model,allowance,max_calls,evidence,credential_digest,credential,endpoint,bridge_secret,next_attempt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                   (job_id, incident_id, 'pending', now, now+3600, cfg['model'], min(cfg['triage_tokens'], cfg['incident_tokens']), min(cfg['max_turns'], 100), evidence, digest(token), vault.encrypt(token), bridge['url'].rstrip('/'), setting(c, 'hermes_secret'), now))
         c.execute('UPDATE ai_jobs SET automatic=?,maintenance_changes=?,read_only=? WHERE id=?',(int(automatic),int(bool(maintenance_changes) and not automatic),int(read_only),job_id))
+        if workflow_article:
+            if not bridge.get('command_tools'):raise ValueError('Enable AI host tools before running a saved procedure.')
+            from .knowledge_workflows import start
+            start(c,store,workflow_article,incident['machine_id'],incident_id,job_id)
         if knowledge_draft:
             c.execute('INSERT INTO kb_requests VALUES(?,?,?,NULL)',(job_id,*knowledge_draft))
         c.execute('UPDATE ai_jobs SET mode=?,request_id=?,request_fingerprint=?,allowance=? WHERE id=?', (mode, request_id, fingerprint, min(cfg['triage_tokens'], cfg['incident_tokens']) if mode=='triage' else cfg['incident_tokens'], job_id))
@@ -426,6 +430,8 @@ def apply_status(store, job_id, document, now=None):
             from .knowledge import record_draft
             record_draft(c,store,job,redact(summary))
         c.execute('UPDATE ai_jobs SET state=?,summary=?,completed=?,error=?,next_attempt=?,lease_until=NULL,lease_token=NULL WHERE id=?', (state, redact(summary), now if state in TERMINAL else None, 'Bridge interrupted; execution must not be replayed.' if state=='unknown' else None, now+30, job_id))
+        from .knowledge_workflows import job_ended
+        job_ended(c,job_id,state,summary,now)
         from .worklog import update_job
         if job['state']=='unknown' and state in ('running','completed'):
             c.execute("UPDATE ticket_blockers SET cleared=? WHERE job_id=? AND cleared IS NULL AND reason=?",(now,job_id,'The investigation connection was interrupted. Its outcome is being checked; commands will not be replayed.'))
@@ -448,6 +454,8 @@ def cancel(store, job_id):
             raise ValueError('Unknown AI execution.')
         if job['state'] not in TERMINAL:
             c.execute("UPDATE ai_jobs SET state='cancelled',completed=?,lease_until=NULL,lease_token=NULL WHERE id=?", (time.time(), job_id))
+            from .knowledge_workflows import job_ended
+            job_ended(c,job_id,'cancelled','Investigation stopped by administrator.',time.time())
             from .worklog import end
             end(c,job['incident_id'],'hermes','Stopped',time.time())
             store.timeline(c, job['incident_id'], 'ai_cancelled', 'Further model requests denied; in-flight usage remains reserved.', actor='user')
@@ -473,6 +481,8 @@ def tick(store, vault, now=None):
         # Expiry fences calls, but never releases uncertain provider usage.
         for job in c.execute("SELECT * FROM ai_jobs WHERE expires<=? AND state NOT IN ('completed','failed','cancelled','expired')", (now,)).fetchall():
             c.execute("UPDATE ai_jobs SET state='expired',completed=? WHERE id=?", (now, job['id']))
+            from .knowledge_workflows import job_ended
+            job_ended(c,job['id'],'expired','The investigation timed out before verification.',now)
             from .handoff import release
             release(c, job)
             from .worklog import update_job
