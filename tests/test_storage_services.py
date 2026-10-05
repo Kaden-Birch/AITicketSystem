@@ -99,7 +99,12 @@ def test_poll_history_context_encrypted_key_retained_edit_and_deletion(environme
     assert data['services'][0]['data']['apps'][0]['name']=='plex' and 'fixture-key' not in json.dumps(data)
     integrations.save(store,vault,'m','truenas','NAS renamed',CFG,'',identifier,sample())
     assert vault.decrypt(store.rows('SELECT secret FROM integrations')[0]['secret'])=='fixture-key'
+    from aiticket import knowledge
+    folder=knowledge.root(store,'service',service=identifier)
+    article=knowledge.save(store,folder_id=folder,title='Storage service guide',body='Retain this knowledge after removing the API connection.',status='published')
     integrations.remove(store,identifier)
+    assert store.rows('SELECT service_id FROM kb_folders WHERE id=?',(folder,))[0]['service_id'] is None
+    assert store.rows('SELECT id FROM kb_articles WHERE id=?',(article,))
     assert not store.rows('SELECT * FROM integrations') and store.rows('SELECT enabled FROM checks')[0]['enabled']==0
 
 

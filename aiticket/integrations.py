@@ -167,4 +167,6 @@ def connection_error(exc):
 def remove(store,identifier):
     with store.connect() as c:
         c.execute("UPDATE checks SET enabled=0 WHERE json_extract(config,'$.connection_id')=?",(identifier,))
+        # Keep service knowledge after removing its live monitoring connection.
+        c.execute('UPDATE kb_folders SET service_id=NULL WHERE service_id=?',(identifier,))
         c.execute('DELETE FROM integrations WHERE id=?',(identifier,));store.audit(c,'integration.deleted',identifier)

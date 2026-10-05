@@ -57,6 +57,7 @@ def test_password_invalidates_other_sessions(signed_in, environment):
 def test_key_rotation_all_credentials_and_rollback(environment, tmp_path):
     _, store, old = environment
     store.save('discord_secret', old.encrypt('discord-value'))
+    store.save('telegram_secret',old.encrypt('fixture-bot-token'))
     with store.connect() as c:
         c.execute("INSERT INTO machines(id,name,parent_id,created) VALUES('m','Machine',NULL,1)")
         c.execute("INSERT INTO checks(id,machine_id,name,kind,config,interval) VALUES('c','m','PVE','proxmox',?,60)", (json.dumps({'token_secret': old.encrypt('legacy-value')}),))
@@ -67,6 +68,7 @@ def test_key_rotation_all_credentials_and_rollback(environment, tmp_path):
     new = rotate_key(store, old, destination)
     assert new.decrypt(store.setting('session_secret')) == old_session
     assert new.decrypt(store.setting('discord_secret')) == 'discord-value'
+    assert new.decrypt(store.setting('telegram_secret'))=='fixture-bot-token'
     assert new.decrypt(store.rows('SELECT token_secret FROM proxmox_connections')[0]['token_secret']) == 'connection-value'
     assert new.decrypt(json.loads(store.rows('SELECT config FROM checks')[0]['config'])['token_secret']) == 'legacy-value'
     assert destination.stat().st_mode & 0o777 == 0o600
