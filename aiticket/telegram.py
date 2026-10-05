@@ -146,7 +146,7 @@ def tick(store,vault):
             current['offset']=max([cfg['offset']]+[u['update_id']+1 for u in updates if type(u.get('update_id')) is int]);current['next_poll']=now+5;c.execute("UPDATE settings SET value=? WHERE key='telegram_config'",(json.dumps(current),))
         receive(store,current,updates)
         cfg=current
-        for row in store.rows("SELECT * FROM telegram_updates WHERE state='pending' ORDER BY update_id LIMIT 10"):
+        for row in store.rows("SELECT * FROM telegram_updates WHERE state='pending' ORDER BY created,update_id LIMIT 10"):
             if row['chat_id'] in cfg['chats'] and row['user_id'] in cfg['users']:handle(store,vault,cfg,row)
             else:
                 with store.connect() as c:c.execute("UPDATE telegram_updates SET state='cancelled' WHERE update_id=?",(row['update_id'],))

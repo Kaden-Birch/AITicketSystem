@@ -171,3 +171,13 @@ def test_selected_container_inspection_fields_and_windows_optout(tmp_path,monkey
     monkeypatch.setattr(backend.ctypes,'windll',types.SimpleNamespace(shell32=shell),raising=False)
     loaded=backend.load_policy(policy)
     assert 'container_logs' not in backend.capabilities(loaded)['operations']
+
+
+def test_namespaced_updates_are_handled_in_receipt_order(environment):
+    _,store,vault=environment;host(store);cfg=configured(store,vault)
+    telegram.receive(store,cfg,[message(1,text='/status Voyager'),message(2,text='/status all'),message(3,text='/status missing')])
+    expected=[r['update_id'] for r in store.rows('SELECT * FROM telegram_updates ORDER BY created')]
+    handled=[]
+    with patch('aiticket.telegram.api',return_value=[]),patch('aiticket.telegram.handle',side_effect=lambda store,vault,cfg,row:handled.append(row['update_id'])):
+        telegram.tick(store,vault)
+    assert handled==expected
