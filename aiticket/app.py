@@ -1314,7 +1314,7 @@ def create_app(data_dir=None, testing=False):
         capabilities=payload.get('capabilities',{})
         if not isinstance(capabilities,dict) or set(capabilities)-{'operations','services','actions','action_services','power_operations','shell_commands'} or any(not isinstance(capabilities.get(k,[]),list) for k in ('operations','services')):
             abort(400)
-        if len(capabilities.get('operations',[]))>3 or any(x not in ('process_summary','service_status','service_logs') for x in capabilities.get('operations',[])) or len(capabilities.get('services',[]))>20 or any(not isinstance(x,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',x) for x in capabilities.get('services',[])):
+        if len(capabilities.get('operations',[]))>4 or any(x not in ('process_summary','service_status','service_logs','container_logs') for x in capabilities.get('operations',[])) or len(capabilities.get('services',[]))>20 or any(not isinstance(x,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',x) for x in capabilities.get('services',[])):
             abort(400)
         if type(capabilities.get('shell_commands',False)) is not bool: abort(400)
         power_operations=capabilities.get('power_operations',[])

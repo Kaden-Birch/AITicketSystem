@@ -14,6 +14,21 @@ def enrolled(store):
     return machine,agent,{'Authorization':'Bearer '+token}
 
 
+@pytest.mark.parametrize('os_name', ['Linux', 'Windows Server 2025'])
+def test_heartbeat_accepts_container_log_capability(environment, os_name):
+    app,store,_=environment
+    _,agent,headers=enrolled(store)
+    operations=['process_summary','service_status','service_logs','container_logs']
+    payload={'event_id':str(uuid.uuid4()),'host_info':{'os':os_name},
+             'capabilities':{'operations':operations,'services':[]}}
+    client=app.test_client()
+    assert client.post('/api/agent/heartbeat',json=payload,headers=headers).status_code==200
+    assert json.loads(store.rows('SELECT capabilities FROM agents WHERE id=?',(agent,))[0]['capabilities'])['operations']==operations
+    payload['event_id']=str(uuid.uuid4())
+    payload['capabilities']['operations']=['arbitrary_shell']
+    assert client.post('/api/agent/heartbeat',json=payload,headers=headers).status_code==400
+
+
 def test_windows_heartbeat_network_services_and_signed_docker(environment):
     app,store,_=environment;machine,agent,headers=enrolled(store);client=app.test_client()
     network={'machine_type':'physical','interfaces':[{'name':name,'mac':'aa:bb:cc:dd:ee:ff','kind':'physical','state':'up','carrier':True,'addresses':['10.0.0.2'],'members':[],'master':''} for name in ('Ethernet 2','vEthernet (Default Switch)','Local Area Connection* 1','Connexion réseau')],'neighbors':[]}
