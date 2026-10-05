@@ -38,6 +38,7 @@
       return;
     }
     if (current.nodeType !== Node.ELEMENT_NODE) return;
+    if (current.hasAttribute('data-live-preserve')) return;
     if (current.matches('form') && (dirty.has(current) || current.contains(document.activeElement))) return;
     const open = current.matches('details') ? current.open : null;
     for (const attr of [...current.attributes]) if (!next.hasAttribute(attr.name)) current.removeAttribute(attr.name);

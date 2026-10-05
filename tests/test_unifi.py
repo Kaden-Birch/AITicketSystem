@@ -225,7 +225,7 @@ def test_nas_readable_metrics_and_history(signed_in,monkeypatch):
     unifi.refresh(store,vault,row['id'])
     page=client.get('/network-devices/'+row['id'])
     assert page.status_code==200
-    for text in (b'Storage pools',b'raid5',b'47',b'CPU usage',b'Memory usage',b'Pool 1 usage',b'10 GbE',b'<svg'):assert text in page.data
+    for text in (b'Storage pools',b'raid5',b'47',b'CPU usage',b'RAM usage',b'Pool 1 usage',b'10 GbE',b'<svg'):assert text in page.data
     hist=unifi.history(store,row['machine_id'],'1h')
     assert hist['count']==1
     assert any(c['latest']==7.8 for c in hist['charts'])
@@ -321,3 +321,30 @@ def test_statistics_allowlist_uses_latest(environment,monkeypatch):
     with pytest.raises(ValueError):api.get(unifi.NETWORK+'/sites/site1/devices/device1/statistics')
     assert api.get(unifi.NETWORK+'/sites/site1/devices/device1/statistics/latest')['cpuUtilizationPct']==25
     assert len(calls)==1
+
+
+def test_nas_workspace_real_readings_and_unknown_bays(signed_in):
+    client,store,vault,_=signed_in
+    row=configured(store,vault)
+    snapshot={'sampled_at':time.time(),'readings':{'device':{'cpu':{'currentload':.18,'temperature':54},'memory':{'total':8e9,'available':5e9}},'storage':{'slotCount':4,'disks':[{'slotId':1,'state':'optimal','model':'Actual drive','size':12e12},{'slotId':2,'state':'failed'}],'pools':[{'number':1,'status':'degraded','capacity':12e12,'usage':4e12}]}},'errors':{}}
+    with store.connect() as c:c.execute('UPDATE unifi_connections SET snapshot=? WHERE id=?',(json.dumps(snapshot),row['id']))
+    response=client.get('/network-devices/'+row['id']+'?window=30d')
+    assert response.status_code==200
+    assert b'Actual drive' in response.data and b'CPU temperature' in response.data
+    assert b'No reading for this bay' in response.data
+    assert b'Preview controls' not in response.data and b'Network activity' in response.data
+    assert b'Storage needs attention' in response.data
+    assert b'1 month' in response.data and b'not disk I/O' in response.data
+
+
+def test_nas_presentation_stale_and_throughput_history(environment):
+    from aiticket.unifi_nas_view import build
+    _,store,vault=environment;row=configured(store,vault);now=time.time()
+    with store.connect() as c:c.execute('INSERT INTO metric_samples VALUES(?,?,?,?)',(row['machine_id'],'unifi',now-20,json.dumps({'throughput.receiveKBPS':124000,'throughput.transmitKBPS':18000})))
+    result=build(store,row['machine_id'],{'device':{'cpu':{'currentload':.99}},'storage':{'disks':[{'slotId':'A','state':'optimal'}]}},False,{},'10m')
+    assert result['state']=='unknown' and result['disks'][0]['state']=='unknown'
+    assert result['metrics'][0]['value'] is None
+    assert result['samples'][0]['read']==124 and result['samples'][0]['write']==18
+    assert result['window']=='10m'
+    # Display warnings do not alter the check's stored status or ticket state.
+    assert store.rows('SELECT health FROM checks WHERE id=?',(row['check_id'],))[0]['health']=='unknown'

@@ -66,3 +66,24 @@ Open Network Devices, select the appliance, then Device settings → Delete devi
 Network device statistics use `GET /proxy/network/integration/v1/sites/{siteId}/devices/{deviceId}/statistics/latest`, as specified in the [official Network OpenAPI specification](https://developer.ui.com/network/v10.1.84/openapi.json). Earlier builds omitted `/latest`, producing HTTP 404 responses. Update the main application and refresh the connection to retry the corrected route.
 
 Unavailable optional statistics remain visible in the snapshot and check evidence as `optional_telemetry_errors`; they alone do not mark the network down. Required inventory/API failures and actual device or NAS health failures still affect their checks. A previous statistics-only incident can recover after the configured number of successful check samples. This does not establish application or end-to-end network health.
+
+### NAS workspace
+
+Open **Network Devices → your UniFi Drive connection** for the visual NAS overview.
+Drive bays follow reported slot labels; explicitly reported bay counts can reveal
+missing readings. Unknown models use the same flexible layout without a model list.
+An unreported bay is unknown, never assumed empty or healthy. Select a bay to open
+its details. Multiple storage pools appear separately with their reported RAID type.
+
+CPU usage, CPU temperature (when reported) and RAM usage have compact bars.
+Colors are presentation guidance only: CPU 70/90%, RAM 75/90%, CPU temperature
+70/85 °C mark elevated/high ranges. Temperature is displayed on a 20–100 °C scale.
+These colors do not change monitoring thresholds, ticket creation or recovery logic.
+Stale or missing readings are unavailable rather than green.
+
+Network history has 10-minute, 30-minute, 1-hour, 6-hour, 24-hour, week and month
+views. **Read** means incoming network traffic; **Write** means outgoing traffic.
+They do not represent disk I/O. Hover, tap or use arrow keys for the nearest exact
+recorded sample and timestamp. Gaps are preserved. Retention remains seven days,
+so the month view displays only available history. Additional performance history,
+monitoring checks, tickets, settings and retained diagnostics remain accessible.
