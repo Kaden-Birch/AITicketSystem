@@ -99,6 +99,8 @@ def test_existing_rules_migrate_preserve_check_and_incident(environment):
     old={'agent_id':'a','metric':'disk_used_percent','fail_above':90,'recover_below':80,'sustain_seconds':300}
     with store.connect() as c:
         c.execute("INSERT INTO checks(id,machine_id,name,kind,config,interval) VALUES('legacy','m','Old disk','agent_metric',?,30)",(json.dumps(old),))
+        from conftest import remove_schema38
+        remove_schema38(c)
         c.execute('DROP TABLE health_rules');c.execute('UPDATE schema_version SET version=31')
     migrated=Store(store.path);health.sync(migrated)
     row=checks(migrated)[0];assert row['id']=='legacy' and row['enabled']

@@ -149,6 +149,8 @@ def test_ai_context_and_read_only_refresh_are_ticket_bound(environment):
     auth={'Authorization':'Bearer '+vault.decrypt(rowjob['credential'])}
     with patch('aiticket.unifi.refresh',return_value={}) as refresh:
         response=app.test_client().post('/api/hermes/'+job+'/command',json={'action':'network','machine_id':'not-the-ticket'},headers=auth)
+        assert response.status_code==403 and not refresh.called
+        response=app.test_client().post('/api/hermes/'+job+'/command',json={'action':'network','machine_id':'m'},headers=auth)
         assert response.status_code==200 and response.json['network_topology']['links'][0]['port']==8
         assert refresh.call_args.args[2]==row['id']
     assert not store.rows('SELECT * FROM command_jobs') and not store.rows('SELECT * FROM proxmox_api_jobs')

@@ -60,7 +60,7 @@ def evidence_snapshot(value):
     return redact(value) if isinstance(value, str) else value
 
 
-def request_job(store, vault, incident_id, automatic=False, now=None, mode='triage', question='', request_id=None, source_ids=(), diagnostic_ids=(), resume_checkpoint=None, expected_generation=None, recovery_target=None, resume_task=None):
+def request_job(store, vault, incident_id, automatic=False, now=None, mode='triage', question='', request_id=None, source_ids=(), diagnostic_ids=(), resume_checkpoint=None, expected_generation=None, recovery_target=None, resume_task=None, maintenance_changes=False):
     now = time.time() if now is None else now
     if resume_task is not None and (not resume_checkpoint or not isinstance(resume_task,str) or not 1<=len(resume_task.strip())<=2000):
         raise ValueError('Supply a current checkpoint task of 1–2000 characters.')
@@ -74,7 +74,7 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
             uuid.UUID(request_id)
         except (ValueError, TypeError, AttributeError):
             raise ValueError('Invalid request identity; reload the incident page.')
-    fingerprint = hashlib.sha256(json.dumps({'mode': mode, 'question': question.strip(), 'sources': sorted(source_ids), 'diagnostics': sorted(diagnostic_ids), 'checkpoint': resume_checkpoint, 'generation': expected_generation,'recovery_target':recovery_target,**({'resume_task':resume_task.strip()} if resume_task else {})}, sort_keys=True).encode()).hexdigest()
+    fingerprint = hashlib.sha256(json.dumps({'mode': mode, 'question': question.strip(), 'sources': sorted(source_ids), 'diagnostics': sorted(diagnostic_ids), 'checkpoint': resume_checkpoint, 'generation': expected_generation,'recovery_target':recovery_target,'maintenance_changes':bool(maintenance_changes),**({'resume_task':resume_task.strip()} if resume_task else {})}, sort_keys=True).encode()).hexdigest()
     with store.connect() as c:
         c.execute('BEGIN IMMEDIATE')
         if request_id:
@@ -94,6 +94,12 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
         incident = c.execute('SELECT * FROM incidents WHERE id=?', (incident_id,)).fetchone()
         if not incident or incident['closed'] is not None or incident['status'] == 'Resolved':
             raise ValueError('Investigation requires an active unresolved incident.')
+        from .maintenance_ai import state as maintenance_state
+        if automatic:
+            from .maintenance_ai import post_window_ready
+            if maintenance_state(c,incident['machine_id'],now,incident_id)['active'] or not post_window_ready(c,incident_id,incident['machine_id'],now):return None
+        from .ticket_groups import coordinating_primary
+        if automatic and coordinating_primary(c,incident_id,now):return None
         from .handoff import control
         ownership = control(c, incident_id)
         checkpoint_data = None
@@ -174,10 +180,18 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
         from .machine_context import context as machine_context
         document=json.loads(evidence)
         document['machine']=machine_context(c,incident['machine_id'],now)
+        from .evidence import summary as evidence_summary
+        from .ticket_groups import context as group_context
+        document['evidence_available']=evidence_summary(c,incident['machine_id'],now)
+        document['affected_targets']=group_context(c,incident_id,now)
+        document['maintenance']=maintenance_state(c,incident['machine_id'],now,incident_id)
+        document['maintenance']['changes_allowed']=bool(maintenance_changes) and not automatic
+
         if json.loads(incident['report']).get('workflow_test'):document['workflow_test']=True
         evidence=json.dumps(evidence_snapshot(document))
         if len(evidence)>16000:
             # Preserve the primary incident/task; large inventories remain available via targets.
+            document['affected_targets']={'coverage':'Retrieve affected hosts and linked tickets using targets. No extra command permissions granted.'}
             document['machine']={'id':incident['machine_id'],'coverage':'Full current host context is available through targets; snapshot omitted to preserve incident evidence.'}
             evidence=json.dumps(evidence_snapshot(document))
         if codex and bridge.get('command_tools'):
@@ -186,13 +200,14 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
             task=question.strip() or (report.get('description','') if report.get('manual_ticket') else 'Investigate the incident using current read-only diagnostics. Report findings; do not change systems without an explicit administrator task.')
             from .machine_context import context as machine_context
             document['administrator_task']=task
-            document['task_origin']='Administrator selected this operational investigation; checkpoint resumption restates its saved question as the current task.'
+            document['task_origin']='Monitoring automatically requested this investigation.' if automatic else 'Administrator selected this operational investigation; checkpoint resumption restates its saved question as the current task.'
             from .proxmox_operations import context as proxmox_context
             document['linked_proxmox']=proxmox_context(c,incident['machine_id'])
             evidence=json.dumps(document)
             if len(evidence)>16000: raise ValueError('Operational task context exceeds limits.')
         c.execute('INSERT INTO ai_jobs(id,incident_id,state,created,expires,model,allowance,max_calls,evidence,credential_digest,credential,endpoint,bridge_secret,next_attempt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                   (job_id, incident_id, 'pending', now, now+3600, cfg['model'], min(cfg['triage_tokens'], cfg['incident_tokens']), min(cfg['max_turns'], 100), evidence, digest(token), vault.encrypt(token), bridge['url'].rstrip('/'), setting(c, 'hermes_secret'), now))
+        c.execute('UPDATE ai_jobs SET automatic=?,maintenance_changes=? WHERE id=?',(int(automatic),int(bool(maintenance_changes) and not automatic),job_id))
         c.execute('UPDATE ai_jobs SET mode=?,request_id=?,request_fingerprint=?,allowance=? WHERE id=?', (mode, request_id, fingerprint, min(cfg['triage_tokens'], cfg['incident_tokens']) if mode=='triage' else cfg['incident_tokens'], job_id))
         if bridge.get('command_tools'):
             if not codex: raise ValueError('Command tools currently require Codex mode.')
@@ -458,6 +473,30 @@ def tick(store, vault, now=None):
             end(c,job['incident_id'],'hermes','Stopped',time.time())
             store.timeline(c, job['incident_id'], 'ai_cancelled', 'Incident resolved; further model calls denied.', now=now)
             return True
+        from .maintenance_ai import blocked,fresh_after_pause
+        if job['state']=='pending' and job['automatic']:
+            if blocked(c,job,now=now):
+                c.execute('UPDATE ai_jobs SET maintenance_paused_at=coalesce(maintenance_paused_at,?),next_attempt=? WHERE id=?',(now,now+15,job['id']))
+                return False
+            if job['maintenance_paused_at'] is not None:
+                from .maintenance_ai import post_window_ready
+                target_machine=c.execute('SELECT machine_id FROM incidents WHERE id=?',(job['incident_id'],)).fetchone()[0]
+                if not post_window_ready(c,job['incident_id'],target_machine,now) or not fresh_after_pause(c,job['incident_id'],now) or c.execute("SELECT 1 FROM incident_sources s JOIN checks ch ON ch.id=s.check_id LEFT JOIN observations o ON o.id=(SELECT id FROM observations WHERE check_id=ch.id ORDER BY at DESC LIMIT 1) WHERE s.incident_id=? AND ch.enabled=1 AND ch.kind!='manual' AND (o.at IS NULL OR o.at<?)",(job['incident_id'],job['maintenance_paused_at'])).fetchone():
+                    c.execute('UPDATE checks SET next_run=0 WHERE id IN (SELECT check_id FROM incident_sources WHERE incident_id=?)',(job['incident_id'],))
+                    c.execute('UPDATE ai_jobs SET next_attempt=? WHERE id=?',(now+15,job['id']))
+                    return False
+                # Replace stale snapshots before dispatch, preserving task and incident evidence.
+                from .machine_context import context as current_context
+                from .evidence import summary as current_summary
+                document=json.loads(job['evidence']);document['machine']=current_context(c,c.execute('SELECT machine_id FROM incidents WHERE id=?',(job['incident_id'],)).fetchone()[0],now)
+                document['evidence_available']=current_summary(c,target_machine,now)
+                from .ticket_groups import context as group_context
+                document['affected_targets']=group_context(c,job['incident_id'],now)
+                document['maintenance']={'active':False,'note':'Maintenance ended; fresh monitoring required before dispatch.'}
+                encoded=json.dumps(evidence_snapshot(document))
+                if len(encoded)>16000:document['machine']={'coverage':'Use targets/evidence for fresh host readings.'};encoded=json.dumps(evidence_snapshot(document))
+                job['evidence']=encoded
+                c.execute('UPDATE ai_jobs SET evidence=?,maintenance_paused_at=NULL WHERE id=?',(encoded,job['id']))
         token = uid()
         was_pending = job['state']=='pending'
         c.execute("UPDATE ai_jobs SET state=CASE WHEN state='pending' THEN 'dispatching' ELSE state END,lease_until=?,lease_token=?,attempts=attempts+1 WHERE id=?", (now+45, token, job['id']))
@@ -485,6 +524,8 @@ def tick(store, vault, now=None):
 
 def automatic_tick(store,vault):
     """One opt-in automatic run per incident; a blocked ticket cannot starve others."""
+    from .ticket_groups import tick as group_tick
+    group_tick(store)
     bridge=store.setting('hermes_config',BRIDGE_DEFAULTS)
     if not bridge.get('enabled') or not bridge.get('automatic'): return 0
     eligible=SEVERITIES[SEVERITIES.index(bridge.get('minimum','high')):]
@@ -531,6 +572,11 @@ def run(store, vault, stop):
 def automatic_status(store,incident):
     """Explain automatic admission without changing configuration or submitting work."""
     resolved=incident['closed'] is not None or incident['status']=='Resolved'
+    with store.connect() as c:
+        from .maintenance_ai import state
+        if not resolved and state(c,incident['machine_id'],incident=incident['id'])['active']:return 'Maintenance active: automatic investigations and changes are paused. Manual diagnostics remain available.'
+        from .ticket_groups import coordinating_primary
+        if not resolved and coordinating_primary(c,incident['id']):return 'Related failure: the primary ticket coordinates automatic investigation. This ticket keeps its own recovery checks.'
     jobs=store.rows('SELECT id,state,error FROM ai_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 1',(incident['id'],))
     if jobs:
         job=jobs[0]

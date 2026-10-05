@@ -28,3 +28,10 @@ def signed_in(environment):
     with client.session_transaction() as s:
         csrf = s['csrf']
     return client, store, vault, csrf
+
+
+def remove_schema38(c):
+    """Reconstruct old fixtures by removing the new schema before lowering its marker."""
+    for table in ('ticket_targets','ticket_group_exclusions','ticket_groups'):c.execute('DROP TABLE '+table)
+    c.execute('ALTER TABLE command_jobs DROP COLUMN read_only_command')
+    for column in ('automatic','maintenance_changes','maintenance_paused_at'):c.execute('ALTER TABLE ai_jobs DROP COLUMN '+column)

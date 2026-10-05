@@ -107,6 +107,8 @@ def test_ai_command_tool_scoped_to_ticket_and_revoked_on_takeover(environment):
     with store.connect() as c:c.execute("UPDATE ai_jobs SET state='running' WHERE id=?",(jobid,))
     row=store.rows('SELECT * FROM ai_jobs WHERE id=?',(jobid,))[0];auth={'Authorization':'Bearer '+vault.decrypt(row['credential'])}
     response=app.test_client().post('/api/hermes/'+jobid+'/command',json={'action':'run','machine_id':'different-host','command':'uptime','id':str(uuid.uuid4())},headers=auth)
+    assert response.status_code==400
+    response=app.test_client().post('/api/hermes/'+jobid+'/command',json={'action':'run','machine_id':mid,'command':'uptime','id':str(uuid.uuid4())},headers=auth)
     assert response.status_code==200 and response.json['machine_id']==mid
     ai.cancel(store,jobid)
     assert app.test_client().post('/api/hermes/'+jobid+'/command',json={'action':'targets'},headers=auth).status_code==403

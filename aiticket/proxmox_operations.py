@@ -61,6 +61,8 @@ def queue(store,vault,machine,payload,ai_job=None,external=False):
             return identifier
         if method!='GET' and (c.execute("SELECT 1 FROM command_jobs WHERE machine_id=? AND state IN ('awaiting','pending','dispatched','running','cancelling','unknown')",(machine,)).fetchone() or c.execute("SELECT 1 FROM power_jobs WHERE machine_id=? AND state IN ('awaiting','approved','dispatched','authorized','verifying','unknown')",(machine,)).fetchone()): raise ValueError('Complete or reconcile other host operations before Proxmox writes.')
         if c.execute("SELECT 1 FROM proxmox_api_jobs WHERE machine_id=? AND state IN ('dispatched','unknown')",(machine,)).fetchone(): raise ValueError('Reconcile the outstanding Proxmox request first.')
+        from .maintenance_ai import check_change
+        check_change(c,ai_job,machine,method=method)
         from .reliability import repair_budget
         repair_budget(c,vault,ai_job,api=data)
         from .host_access import requires_approval
@@ -77,6 +79,8 @@ def execute(store,vault,identifier,ai_job=None,external=False):
         if not r or r['state']!='awaiting': return
         p=policy(c,r['machine_id'],ai_job,external)
         data=json.loads(vault.decrypt(r['payload']));linked=context(c,r['machine_id'])
+        from .maintenance_ai import check_change
+        check_change(c,r['ai_job_id'],r['machine_id'],method=data['method'])
         from .reliability import repair_budget
         repair_budget(c,vault,ai_job,api=data)
         from .host_access import requires_approval

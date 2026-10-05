@@ -33,6 +33,8 @@ def context(c,machine,now=None,external=False):
     discovery=c.execute('SELECT * FROM agent_discovery WHERE machine_id=?',(machine,)).fetchone()
     if discovery:
         inventory=json.loads(discovery['data']);result['discovery']={'sampled_at':discovery['at'],'fresh':fresh and 0<=now-discovery['at']<=180,'containers':inventory.get('containers',[]),'processes':inventory.get('processes',[])[:40],'processes_truncated':len(inventory.get('processes',[]))>40 or inventory.get('processes_truncated',False),'containers_truncated':inventory.get('containers_truncated',False),'warnings':inventory.get('warnings',[])}
+    from .evidence import summary as coverage_summary
+    result['evidence_available']=coverage_summary(c,machine,now)
     result['coverage']={'checks_truncated':len(rows)>30,'telemetry':'All reported metric values; unavailable values are not healthy results.'}
     from .applications import context as applications_context
     result['applications']=applications_context(c,machine,now)

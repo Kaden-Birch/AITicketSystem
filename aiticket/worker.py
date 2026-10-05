@@ -36,6 +36,8 @@ def tick(store, vault):
         observe(store, job['id'], healthy, evidence, lease_token=job['lease_token'])
     from .engine import resolution_tick
     resolution_tick(store)
+    from .ticket_groups import tick as group_tick
+    group_tick(store)
     delivery = claim(store, 'deliveries')
     if delivery:
         deliver(store, vault, delivery)
@@ -51,6 +53,15 @@ def deliver(store, vault, job):
         outcome(store, job, 'pending', 'Discord webhook has not been configured.', 60)
         return
     incident = store.rows('SELECT * FROM incidents WHERE id=?', (job['incident_id'],))[0]
+    from .ticket_groups import active_primary,context as group_context
+    with store.connect() as c:
+        primary=active_primary(c,incident['id'])
+        primary_row=c.execute('SELECT machine_id,severity FROM incidents WHERE id=?',(primary,)).fetchone() if primary else None
+        from .policies import effective
+        from .engine import SEVERITIES
+        primary_policy=effective(c,primary_row['machine_id']) if primary_row else None
+    if primary and primary_policy['enabled'] and SEVERITIES.index(primary_row['severity'])>=SEVERITIES.index(primary_policy['minimum']) and job['event_key'].endswith(':opened'):
+        outcome(store,job,'superseded','Related failure is included in the primary investigation. Recovery remains independent.');return
     from .applications import upstream_incident
     with store.connect() as c: root=upstream_incident(c,incident['id'],time.time())
     from .policies import effective
@@ -89,6 +100,8 @@ def deliver(store, vault, job):
     event=job['event_key'].split(':',1)[1]
     text = f"{event} · {incident['severity'].upper()} · {report['target']} · {report['check']}\n{incident['status']} · Cause: {report['cause']}\nIncident {incident['id']}"
     if event=='recovery': text+='\n'+report.get('recovery_summary','Monitoring independently confirmed recovery.')
+    with store.connect() as c:group=group_context(c,incident['id'])
+    if len(group['tickets'])>1:text+='\nAffected: '+', '.join(x['host']+' ('+x['status']+')' for x in group['tickets'][:10])+'. Each ticket retains independent recovery.'
     from .worklog import ticket_url
     link=ticket_url(store,incident['id'])
     if event.startswith('blocker:'):

@@ -6,6 +6,8 @@ Self-hosted monitoring with useful incidents even when AI and the internet are u
 
 Included: a compact fleet dashboard, searchable slide-out navigation, host workspaces, a unified Tickets list, Proxmox guest status, ticket history, authenticated UI, stable machine inventory, HTTP/TCP and read-only Proxmox checks, configurable failure/recovery thresholds, parent suppression, temporary maintenance, deterministic reports, manual notes/resolution, durable Discord delivery, filtered incident history, immutable configuration audit, transactional schema upgrades, and DHCP-safe Linux agent enrollment/telemetry.
 
+Ticket investigations include [evidence coverage, related tickets and maintenance-aware AI controls](docs/investigation-evidence.md). Related failures retain independent recovery and exact-target permissions.
+
 ## Local development
 
 ```sh

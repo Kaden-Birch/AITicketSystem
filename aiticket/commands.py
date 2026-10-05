@@ -53,12 +53,16 @@ def queue(store,vault,machine,command,identifier,incident=None,ai_job=None,exter
         if c.execute("SELECT 1 FROM proxmox_api_jobs WHERE machine_id=? AND state IN ('dispatched','unknown')",(machine,)).fetchone(): raise ValueError('Reconcile Proxmox API operations before shell commands.')
         if c.execute("SELECT 1 FROM power_jobs WHERE machine_id=? AND state IN ('awaiting','approved','dispatched','authorized','verifying','unknown')",(machine,)).fetchone() or c.execute("SELECT 1 FROM action_proposals p JOIN agents a ON a.id=p.agent_id WHERE a.machine_id=? AND p.state IN ('awaiting','approved','dispatched','authorized','verifying','unknown')",(machine,)).fetchone(): raise ValueError('Complete outstanding power/recovery work before shell commands.')
         if c.execute("SELECT 1 FROM command_jobs WHERE agent_id=? AND state IN ('awaiting','pending','dispatched','running','cancelling','unknown')",(agent['id'],)).fetchone(): raise ValueError('Complete or reconcile the existing command before sending another.')
+        from .maintenance_ai import check_change
+        check_change(c,ai_job,machine,command=command)
         from .reliability import repair_budget
         repair_budget(c,vault,ai_job,command=command)
         from .host_access import requires_approval
         approval=requires_approval(policy['approval'],command=command)
         now=time.time();state='awaiting' if approval else 'pending'
         c.execute('INSERT INTO command_jobs(id,machine_id,agent_id,incident_id,ai_job_id,command,fingerprint,policy_version,timeout,output_limit,state,created,expires,requires_approval) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(identifier,machine,agent['id'],incident,ai_job,vault.encrypt(command),fingerprint,policy['version'],policy['timeout'],policy['output_limit'],state,now,now+policy['timeout']+600,int(approval)))
+        from .host_access import read_only
+        c.execute('UPDATE command_jobs SET read_only_command=? WHERE id=?',(int(read_only(command)),identifier))
         store.audit(c,'command.queued',identifier,{'machine_id':machine,'fingerprint':fingerprint,'caller':'hermes' if ai_job else 'external' if external else 'administrator'})
         if incident: store.timeline(c,incident,'command_queued','Shell command '+identifier+' '+state+'; hash '+fingerprint,actor='hermes' if ai_job else 'user')
     return identifier
@@ -72,6 +76,10 @@ def admitted_execution(c,identifier):
 
 
 def permitted(c,job,now):
+    if job['ai_job_id'] and job['state']!='running' and not job['read_only_command']:
+        ai=c.execute('SELECT * FROM ai_jobs WHERE id=?',(job['ai_job_id'],)).fetchone()
+        from .maintenance_ai import blocked
+        if ai and blocked(c,ai,job['machine_id'],now) and (ai['automatic'] or not ai['maintenance_changes']):return False
     policy=c.execute('SELECT * FROM command_policies WHERE machine_id=?',(job['machine_id'],)).fetchone()
     agent=c.execute('SELECT revoked,capabilities FROM agents WHERE id=?',(job['agent_id'],)).fetchone()
     incident=c.execute('SELECT closed,status FROM incidents WHERE id=?',(job['incident_id'],)).fetchone() if job['incident_id'] else None

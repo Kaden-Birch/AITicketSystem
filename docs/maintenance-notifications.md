@@ -10,6 +10,10 @@ The clock-change tests use historical transitions, and current rules reflect Alb
 
 Windows are start-inclusive/end-exclusive. Checks and evidence gathering continue, but new incidents are suppressed and queued notifications are paused. Existing incidents are not marked resolved. Disable a window to stop applying it; window changes are audited. Temporary check snooze remains supported. A persisted incident silence pauses notifications independently of monitoring; zero minutes resumes delivery.
 
+## Automatic AI and manual troubleshooting
+
+Schema 38 also pauses automatic AI admission and new AI changes during active windows/check snoozes. Queued automatic investigations require fresh observations after the window ends. Explicit manual diagnostics remain available; changes require the per-run maintenance choice and ordinary host permissions. Already admitted running commands are not killed and blocked changes are not automatically replayed. See [investigation evidence and maintenance](investigation-evidence.md) for grouping, scope and expiration details.
+
 ## Notifications
 
 Reminders and persistence escalation default disabled. Configure global intervals under Policies; enabled intervals are at least 60 seconds. Scope-specific reminder/escalation overrides remain future work.

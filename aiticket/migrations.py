@@ -1,6 +1,17 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 37
+CURRENT_VERSION = 38
 MIGRATIONS = {
+    38: (
+        "ALTER TABLE command_jobs ADD COLUMN read_only_command INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE ai_jobs ADD COLUMN automatic INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE ai_jobs ADD COLUMN maintenance_changes INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE ai_jobs ADD COLUMN maintenance_paused_at REAL",
+        "UPDATE ai_jobs SET automatic=1 WHERE EXISTS (SELECT 1 FROM audit WHERE action='ai.queued' AND target=ai_jobs.id AND json_extract(details,'$.automatic')=1)",
+        "CREATE TABLE ticket_groups(primary_id TEXT NOT NULL REFERENCES incidents(id),member_id TEXT PRIMARY KEY REFERENCES incidents(id),reason TEXT NOT NULL,automatic INTEGER NOT NULL DEFAULT 0,created REAL NOT NULL)",
+        "CREATE INDEX ticket_groups_primary ON ticket_groups(primary_id)",
+        "CREATE TABLE ticket_group_exclusions(left_id TEXT NOT NULL REFERENCES incidents(id),right_id TEXT NOT NULL REFERENCES incidents(id),PRIMARY KEY(left_id,right_id))",
+        "CREATE TABLE ticket_targets(incident_id TEXT NOT NULL REFERENCES incidents(id),machine_id TEXT NOT NULL REFERENCES machines(id),created REAL NOT NULL,PRIMARY KEY(incident_id,machine_id))",
+    ),
     37: (
         "CREATE TABLE IF NOT EXISTS integrations(id TEXT PRIMARY KEY,machine_id TEXT NOT NULL REFERENCES machines(id),kind TEXT NOT NULL,name TEXT NOT NULL,config TEXT NOT NULL,secret TEXT NOT NULL,snapshot TEXT NOT NULL DEFAULT '{}',at REAL,next_run REAL NOT NULL DEFAULT 0,lease_until REAL)",
         "CREATE TABLE IF NOT EXISTS agent_discovery(machine_id TEXT PRIMARY KEY REFERENCES machines(id),at REAL NOT NULL,data TEXT NOT NULL)",

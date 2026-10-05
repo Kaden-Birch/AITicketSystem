@@ -486,7 +486,7 @@ def create_app(data_dir=None, testing=False):
 
     def command_tool_action_impl(payload,ai_job=None,external=False):
         from .commands import queue,view,decide
-        if not isinstance(payload,dict) or set(payload)-{'action','machine_id','incident_id','command','id','connection_id','method','path','params','summary'}: raise ValueError('Invalid command tool envelope.')
+        if not isinstance(payload,dict) or set(payload)-{'action','machine_id','incident_id','command','id','connection_id','method','path','params','summary','source','offset','limit'}: raise ValueError('Invalid command tool envelope.')
         if any(k in payload and (not isinstance(payload[k],str) or len(payload[k])>100) for k in ('id','machine_id','incident_id')): raise ValueError('Invalid command target identity.')
         action=payload.get('action')
         if ai_job:
@@ -496,10 +496,41 @@ def create_app(data_dir=None, testing=False):
                 if not job: abort(403)
                 incident=store.rows('SELECT machine_id FROM incidents WHERE id=?',(job['incident_id'],))[0]
                 machine=incident['machine_id'];incident_id=job['incident_id']
-                if json.loads(job['evidence']).get('workflow_test') and action not in ('targets','network','block','resolve'):
+                if json.loads(job['evidence']).get('workflow_test') and action not in ('targets','evidence','network','block','resolve'):
                     raise ValueError('Workflow tests only inspect supplied context and request verification. Host operations are disabled.')
         else:
             machine=payload.get('machine_id');incident_id=payload.get('incident_id')
+        original_machine=machine
+        if ai_job and action in ('targets','evidence','network','refresh') and payload.get('machine_id'):
+            with store.connect() as c:
+                from .ticket_groups import machines as affected_machines
+                if payload['machine_id'] not in affected_machines(c,incident_id):abort(403)
+            machine=payload['machine_id']
+        elif ai_job and payload.get('machine_id') not in (None,machine):
+            raise ValueError('Commands remain bound to this ticket’s original target. Start a separate investigation for another affected host.')
+        if action=='refresh':
+            with store.connect() as c:
+                c.execute('BEGIN IMMEDIATE')
+                if external and not c.execute('SELECT 1 FROM command_policies WHERE machine_id=? AND enabled=1 AND external=1',(machine,)).fetchone():abort(403)
+                row=c.execute('SELECT * FROM integrations WHERE id=? AND machine_id=?',(payload.get('connection_id'),machine)).fetchone()
+                if not row:raise ValueError('Choose a saved TrueNAS/Plex connection on an affected host.')
+                if row['lease_until'] and row['lease_until']>time.time():return {'state':'collecting','note':'A refresh is already running. Read evidence shortly.'}
+                c.execute('UPDATE integrations SET lease_until=? WHERE id=?',(time.time()+90,row['id']))
+                row=dict(row)
+            from .integrations import refresh,connection_error
+            try:refresh(store,vault,row)
+            except Exception as exc:
+                with store.connect() as c:
+                    c.execute('UPDATE integrations SET snapshot=?,at=?,lease_until=NULL WHERE id=? AND config=? AND secret=?',(json.dumps({'error':connection_error(exc),'monitoring_issue':True}),time.time(),row['id'],row['config'],row['secret']))
+                return {'state':'unavailable','reason':connection_error(exc)}
+            with store.connect() as c:
+                from .evidence import summary
+                return {'state':'refreshed','evidence_available':summary(c,machine)}
+        if action=='evidence':
+            with store.connect() as c:
+                if external and not c.execute('SELECT 1 FROM command_policies WHERE machine_id=? AND enabled=1 AND external=1',(machine,)).fetchone():abort(403)
+                from .evidence import page
+                return page(c,machine,payload.get('source'),payload.get('offset',0),payload.get('limit',20))
         if action=='block':
             if not ai_job: abort(403)
             reason=payload.get('summary')
@@ -529,12 +560,20 @@ def create_app(data_dir=None, testing=False):
         from . import proxmox_operations as pxops
         if action=='targets':
             targets=store.rows('SELECT m.id,m.name FROM machines m JOIN command_policies p ON p.machine_id=m.id WHERE p.enabled=1 AND '+('m.id=? AND p.hermes=1' if ai_job else 'p.external=1'),(machine,) if ai_job else ())
-            if ai_job: targets=store.rows('SELECT id,name FROM machines WHERE id=?',(machine,))
+            if ai_job:
+                with store.connect() as c:
+                    from .ticket_groups import machines as affected_machines
+                    allowed=affected_machines(c,incident_id)
+                    targets=[dict(r) for r in c.execute('SELECT id,name FROM machines ORDER BY name') if r['id'] in allowed][:50]
             with store.connect() as c:
                 from .machine_context import context as machine_context
                 from .topology import context as topology_context,bounded as bounded_topology
                 targets=[{**machine_context(c,target['id'],external=external),'proxmox':pxops.context(c,target['id']),'network_topology':bounded_topology(topology_context(c,target['id']))} for target in targets]
-            return {'targets':targets}
+                for target in targets:
+                    if ai_job and target['id']!=original_machine:target['shell']={'available':False,'reason':'Related host context only; start a separate investigation for commands.'}
+                from .ticket_groups import context as group_context
+                related=group_context(c,incident_id) if ai_job else None
+            return {'targets':targets,'related_tickets':related}
         if action=='network':
             if external and not store.rows('SELECT 1 FROM command_policies WHERE machine_id=? AND external=1 AND enabled=1',(machine,)):abort(403)
             from .topology import refresh as refresh_network
@@ -776,7 +815,26 @@ def create_app(data_dir=None, testing=False):
         from .hostview import detail
         from .ticket_updates import conversation
         updates=conversation(store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at,id',(incident_id,)),store.rows('SELECT * FROM ai_jobs WHERE incident_id=? ORDER BY created DESC',(incident_id,)))
-        return render_template('incident.html',updates=updates,automatic_status=automatic_status(store,rows[0]), machine_detail=detail(store,rows[0]['machine_id']),work=work_view(store,incident_id),recovery_drafts=[{**d,'data':json.loads(d['payload'])} for d in store.rows('SELECT d.*,a.proposal_id FROM recovery_drafts d LEFT JOIN draft_adoptions a ON a.job_id=d.job_id WHERE d.incident_id=? ORDER BY d.created DESC LIMIT 100',(incident_id,))], merge_candidates=store.rows("SELECT id,severity,first_seen FROM incidents WHERE machine_id=? AND id<>? AND closed IS NULL AND status<>'Resolved'",(rows[0]['machine_id'],incident_id)), ownership=view(store, incident_id), handoff_request_id=uid(), proposals=[{**p,'data':json.loads(p['payload'])} for p in store.rows('SELECT * FROM action_proposals WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,))], action_agents=[{**a,'action_services':json.loads(a['capabilities']).get('action_services',{})} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))], automatic_ai_config=store.setting('hermes_config',{}),workspace_request_id=uid(), workspace_messages=store.rows('SELECT m.*,j.state,j.mode FROM ai_messages m JOIN ai_jobs j ON j.id=m.job_id WHERE m.incident_id=? ORDER BY m.created DESC LIMIT 100', (incident_id,)), workspace_sources=store.rows('SELECT s.check_id,c.name FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=?',(incident_id,)), ai_jobs=store.rows('SELECT id,state,mode,execution_mode,model,reasoning_effort,created,summary,error,resolution_summary FROM ai_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100', (incident_id,)), ai_meter=meter(store, incident_id), incident=rows[0], report=json.loads(rows[0]['report']), timeline=store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at', (incident_id,)), links=store.rows('SELECT * FROM incident_links WHERE left_id=? OR right_id=?',(incident_id,incident_id)), diagnostic_jobs=store.rows('SELECT * FROM diagnostic_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,)), diagnostic_agents=[{**a,'caps':json.loads(a['capabilities'])} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))])
+        with store.connect() as c:
+            from .evidence import summary as evidence_summary
+            from .ticket_groups import context as group_context
+            from .maintenance_ai import state as maintenance_state
+            coverage=evidence_summary(c,rows[0]['machine_id'])
+            group=group_context(c,incident_id)
+            maintenance=maintenance_state(c,rows[0]['machine_id'],incident=incident_id)
+        group_candidates=store.rows("SELECT i.id,i.report,m.name FROM incidents i JOIN machines m ON m.id=i.machine_id WHERE i.closed IS NULL AND i.status!='Resolved' AND i.id<>? AND i.merged_into IS NULL ORDER BY i.first_seen DESC LIMIT 100",(incident_id,))
+        return render_template('incident.html',evidence_coverage=coverage,ticket_group=group,maintenance=maintenance,group_candidates=[{**r,'title':json.loads(r['report']).get('check','Ticket')} for r in group_candidates],target_candidates=store.rows('SELECT id,name FROM machines ORDER BY name'),updates=updates,automatic_status=automatic_status(store,rows[0]), machine_detail=detail(store,rows[0]['machine_id']),work=work_view(store,incident_id),recovery_drafts=[{**d,'data':json.loads(d['payload'])} for d in store.rows('SELECT d.*,a.proposal_id FROM recovery_drafts d LEFT JOIN draft_adoptions a ON a.job_id=d.job_id WHERE d.incident_id=? ORDER BY d.created DESC LIMIT 100',(incident_id,))], merge_candidates=store.rows("SELECT id,severity,first_seen FROM incidents WHERE machine_id=? AND id<>? AND closed IS NULL AND status<>'Resolved'",(rows[0]['machine_id'],incident_id)), ownership=view(store, incident_id), handoff_request_id=uid(), proposals=[{**p,'data':json.loads(p['payload'])} for p in store.rows('SELECT * FROM action_proposals WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,))], action_agents=[{**a,'action_services':json.loads(a['capabilities']).get('action_services',{})} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))], automatic_ai_config=store.setting('hermes_config',{}),workspace_request_id=uid(), workspace_messages=store.rows('SELECT m.*,j.state,j.mode FROM ai_messages m JOIN ai_jobs j ON j.id=m.job_id WHERE m.incident_id=? ORDER BY m.created DESC LIMIT 100', (incident_id,)), workspace_sources=store.rows('SELECT s.check_id,c.name FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=?',(incident_id,)), ai_jobs=store.rows('SELECT id,state,mode,execution_mode,model,reasoning_effort,created,summary,error,resolution_summary FROM ai_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100', (incident_id,)), ai_meter=meter(store, incident_id), incident=rows[0], report=json.loads(rows[0]['report']), timeline=store.rows('SELECT * FROM timeline WHERE incident_id=? ORDER BY at', (incident_id,)), links=store.rows('SELECT * FROM incident_links WHERE left_id=? OR right_id=?',(incident_id,incident_id)), diagnostic_jobs=store.rows('SELECT * FROM diagnostic_jobs WHERE incident_id=? ORDER BY created DESC LIMIT 100',(incident_id,)), diagnostic_agents=[{**a,'caps':json.loads(a['capabilities'])} for a in store.rows('SELECT * FROM agents WHERE machine_id=? AND revoked=0',(rows[0]['machine_id'],))])
+
+    @app.post('/incidents/<incident_id>/related')
+    @login_required
+    def related_ticket(incident_id):
+        from .ticket_groups import attach,detach,target
+        operation=request.form.get('operation')
+        if operation=='attach':attach(store,incident_id,request.form.get('ticket_id'),request.form.get('reason',''))
+        elif operation=='detach':detach(store,incident_id,request.form.get('ticket_id'))
+        elif operation in ('add_host','remove_host'):target(store,incident_id,request.form.get('machine_id'),remove=operation=='remove_host')
+        else:raise ValueError('Choose a related ticket operation.')
+        return redirect(url_for('incident',incident_id=incident_id))
 
     @app.post('/incidents/<incident_id>/archive')
     @login_required
@@ -1596,7 +1654,7 @@ def create_app(data_dir=None, testing=False):
     @login_required
     def investigate(incident_id):
         from .ai import request_job
-        request_job(store, vault, incident_id)
+        request_job(store, vault, incident_id,maintenance_changes=request.form.get('maintenance_changes')=='yes')
         return redirect(url_for('incident', incident_id=incident_id))
 
     @app.route('/recovery-policy', methods=['GET','POST'])
@@ -1755,7 +1813,7 @@ def create_app(data_dir=None, testing=False):
             current=view(store,incident_id)
         task=request.form.get('current_task','').strip()
         if not task or len(task)>2000: raise ValueError('Provide a task or clarification of 1–2000 characters.')
-        resume(store,vault,incident_id,current['checkpoint_id'],current['generation'],request.form.get('request_id'),task)
+        resume(store,vault,incident_id,current['checkpoint_id'],current['generation'],request.form.get('request_id'),task,maintenance_changes=request.form.get('maintenance_changes')=='yes')
         return redirect(url_for('incident',incident_id=incident_id))
 
     @app.post('/incidents/<incident_id>/handoff')
@@ -1775,7 +1833,7 @@ def create_app(data_dir=None, testing=False):
     @login_required
     def incident_workspace(incident_id):
         from .ai import request_job
-        request_job(store, vault, incident_id, mode=request.form.get('mode'), question=request.form.get('question', ''), request_id=request.form.get('request_id'), source_ids=request.form.getlist('source_id'), diagnostic_ids=request.form.getlist('diagnostic_id'))
+        request_job(store, vault, incident_id, mode=request.form.get('mode'), question=request.form.get('question', ''), request_id=request.form.get('request_id'), source_ids=request.form.getlist('source_id'), diagnostic_ids=request.form.getlist('diagnostic_id'),maintenance_changes=request.form.get('maintenance_changes')=='yes')
         return redirect(url_for('incident', incident_id=incident_id))
 
     @app.post('/ai/<job_id>/cancel')

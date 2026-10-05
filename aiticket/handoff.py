@@ -77,8 +77,8 @@ def view(store, incident_id):
         return current
 
 
-def resume(store, vault, incident_id, checkpoint_id, expected_generation, request_id, current_task=None):
+def resume(store, vault, incident_id, checkpoint_id, expected_generation, request_id, current_task=None, maintenance_changes=False):
     from .ai import request_job
     if not isinstance(checkpoint_id, str) or not checkpoint_id:
         raise ValueError('Choose a saved checkpoint before resuming.')
-    return request_job(store, vault, incident_id, mode='exploration', question='Resume the checkpoint investigation with current evidence.', request_id=request_id, resume_checkpoint=checkpoint_id, expected_generation=expected_generation,resume_task=current_task.strip() if current_task and current_task.strip() else None)
+    return request_job(store, vault, incident_id, mode='exploration', question='Resume the checkpoint investigation with current evidence.', request_id=request_id, resume_checkpoint=checkpoint_id, expected_generation=expected_generation,resume_task=current_task.strip() if current_task and current_task.strip() else None,maintenance_changes=maintenance_changes)
