@@ -10,8 +10,9 @@ def config(form,kind):
     url=validate_url(form.get('url','').strip().rstrip('/'),('https',) if kind=='truenas' else ('https','http'))
     p=urlsplit(url)
     if p.query or p.path not in ('','/') or (kind=='truenas' and p.scheme!='https'):raise ValueError('Enter the server address only, such as https://nas.example.com. TrueNAS requires HTTPS.')
+    verify_tls=not (kind=='truenas' and form.get('skip_certificate_verification')=='yes')
     ca=form.get('ca','').strip()
-    if ca and (not Path(ca).is_file() or not __import__('os').access(ca,__import__('os').R_OK)):raise ValueError('The certificate file is not readable by the application. Use its path inside the application container.')
+    if verify_tls and ca and (not Path(ca).is_file() or not __import__('os').access(ca,__import__('os').R_OK)):raise ValueError('The certificate file is not readable by the application. Use its path inside the application container.')
     try:interval=int(form.get('interval',60))
     except (TypeError,ValueError):raise ValueError('Enter a refresh interval in seconds.')
     if not 30<=interval<=3600:raise ValueError('Choose a refresh interval between 30 and 3600 seconds.')
@@ -20,6 +21,7 @@ def config(form,kind):
         username=form.get('username','').strip()
         if not username or len(username)>100:raise ValueError('Enter the TrueNAS user that owns the API key.')
         result['username']=username
+        result['verify_tls']=verify_tls
     else:
         library=form.get('library_id','').strip()
         if library and not library.isdigit():raise ValueError('Choose a valid Plex library.')

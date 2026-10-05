@@ -201,3 +201,48 @@ def test_linux_discovery_omits_arguments_and_process_delta(tmp_path,monkeypatch)
     second=module.discover(state)
     assert first['processes'][0]['target']=='server' and second['processes'][0]['cpu_percent']>0
     assert 'private-command' not in json.dumps(second)
+
+
+def test_truenas_explicit_skip_certificate_verification():
+    form={'url':CFG['url'],'username':'monitor','interval':'60','ca':'/missing/old-ca.pem','skip_certificate_verification':'yes'}
+    cfg=integrations.config(form,'truenas')
+    assert cfg['verify_tls'] is False and cfg['ca']=='/missing/old-ca.pem'
+    with patch('websocket.create_connection',return_value=Mock()) as connect:
+        truenas.Client(cfg).close()
+        assert connect.call_args.args[0].startswith('wss://')
+        assert connect.call_args.kwargs['sslopt']=={'cert_reqs':ssl.CERT_NONE,'check_hostname':False}
+        assert connect.call_args.kwargs['redirect_limit']==0
+    with pytest.raises(ValueError,match='certificate file'):
+        integrations.config({**form,'skip_certificate_verification':''},'truenas')
+    with pytest.raises(ValueError):
+        integrations.config({**form,'url':'http://nas.example.com'},'truenas')
+    default=integrations.config({**form,'ca':'','skip_certificate_verification':''},'truenas')
+    assert default['verify_tls'] is True
+    # A string false is not an explicit boolean opt-out in saved configuration.
+    with patch('websocket.create_connection',return_value=Mock()) as connect:
+        truenas.Client({**CFG,'verify_tls':'false'}).close()
+        assert connect.call_args.kwargs['sslopt']['cert_reqs']==ssl.CERT_REQUIRED
+
+
+def test_truenas_tls_choice_add_edit_test_and_poll(signed_in):
+    client,store,vault,csrf=signed_in
+    fields={'csrf':csrf,'name':'Voyager','host_kind':'truenas','url':CFG['url'],'username':'monitor','token':'fixture-key','interval':'60','operation':'add','skip_certificate_verification':'yes','ca':'/missing/old-ca.pem'}
+    with patch('aiticket.integrations.read',return_value=sample()) as read:
+        response=client.post('/hosts',data=fields)
+        assert response.status_code==302
+        connection=store.rows('SELECT * FROM integrations')[0]
+        assert json.loads(connection['config'])['verify_tls'] is False
+        settings='/hosts/'+connection['machine_id']+'/settings'
+        page=client.get(settings)
+        assert b'aria-label="Skip certificate verification" checked' in page.data
+        assert client.post(settings,data={**fields,'token':'','operation':'test'}).status_code==200
+        assert read.call_args.args[1]['verify_tls'] is False
+        assert integrations.tick(store,vault)
+        assert read.call_args.args[1]['verify_tls'] is False
+        # Unchecking restores verified TLS and leaves existing credentials intact.
+        response=client.post(settings,data={**fields,'token':'','ca':'','skip_certificate_verification':'','operation':'save'})
+        assert response.status_code in (200,302)
+        connection=store.rows('SELECT * FROM integrations')[0]
+        assert json.loads(connection['config'])['verify_tls'] is True
+        assert vault.decrypt(connection['secret'])=='fixture-key'
+        assert b'aria-label="Skip certificate verification" checked' not in client.get(settings).data

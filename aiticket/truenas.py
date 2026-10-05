@@ -12,7 +12,10 @@ class Client:
     def __init__(self,cfg):
         import websocket
         p=urlsplit(cfg['url']);self.deadline=time.monotonic()+40;self.serial=0;self.events={}
-        self.ws=websocket.create_connection(urlunsplit(('wss',p.netloc,'/api/current','','')),timeout=5,sslopt={'cert_reqs':ssl.CERT_REQUIRED,'check_hostname':True,**({'ca_certs':cfg['ca']} if isinstance(cfg.get('ca'),str) else {})},redirect_limit=0)
+        verify_tls=cfg.get('verify_tls') is not False
+        sslopt={'cert_reqs':ssl.CERT_REQUIRED if verify_tls else ssl.CERT_NONE,'check_hostname':verify_tls}
+        if verify_tls and isinstance(cfg.get('ca'),str):sslopt['ca_certs']=cfg['ca']
+        self.ws=websocket.create_connection(urlunsplit(('wss',p.netloc,'/api/current','','')),timeout=5,sslopt=sslopt,redirect_limit=0)
     def receive(self):
         self.ws.settimeout(max(.1,min(5,self.deadline-time.monotonic())))
         raw=self.ws.recv()
