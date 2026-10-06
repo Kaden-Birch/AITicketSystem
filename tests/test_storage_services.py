@@ -39,7 +39,7 @@ def test_rpc_reads_only_tls_and_event_matching():
 
 
 def test_collection_optional_permission_failure_and_close():
-    fake=Mock();fake.call.side_effect=[{'response_type':'SUCCESS'},RAW['system'],RAW['pools'],RAW['datasets'],truenas.RPCError('app.query'),[],[]];fake.statistics.return_value=EVENTS
+    fake=Mock();fake.call.side_effect=[{'response_type':'SUCCESS'},RAW['system'],RAW['pools'],RAW['datasets'],truenas.RPCError('app.query'),[],[],{},[]];fake.statistics.return_value=EVENTS
     with patch('aiticket.truenas.Client',return_value=fake):data=truenas.collect(CFG,'fixture-secret')
     assert 'apps' not in data and data['warnings']
     fake.close.assert_called_once()

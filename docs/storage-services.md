@@ -56,3 +56,15 @@ Full application/database backups retain encrypted connections (and require the 
 - [Plex Media Server API](https://developer.plex.tv/pms/)
 
 Updated agents also report Docker restart/exit/health details. **Details** in host container inventory includes resource trends and **Collect recent logs**. NAS app and server-version transitions are recorded under host **Recent changes**. Host/service **Knowledge** links organize reusable guides and fixes. See [Settings and knowledge](settings-and-knowledge.md).
+
+## Visual TrueNAS host workspace
+
+TrueNAS and HexOS hosts now use a shared server illustration with all discovered pools, dark HDD/SSD tiles, network interface tiles and detail drawers. Pool filters highlight members without hiding other pools. Media types come from disk inventory; missing types show `?`. The arrangement is logical: the collector does not know chassis bay positions. Pool topology is joined to disk inventory only by exact device identity; unmatched partitions/devices stay visibly unmapped rather than guessing.
+
+Compact CPU, temperature (20–100 °C), RAM and ARC cards use green/yellow/red presentation bands. These colors do **not** change monitoring thresholds or ticket decisions. Stale or unavailable measurements stay unknown. Drive colors reflect reported topology and I/O errors, not SMART health; drive temperature and SMART are not collected. Optional inventory permission failures leave existing pool/application monitoring working.
+
+Applications, their containers and virtual machines have separate searchable lists. App drawers retain **Monitor application**, storage mounts, ports and history; pool drawers retain **Monitor pool** and history. VM details use the read-only `vm.query` inventory, configured CPU/memory allocations and power state, not guest utilization or guest health. If this API is unavailable on a release, the VM tab says so; it does not report zero VMs. This does not enumerate a separate Incus/container virtualization API. App containers come from `app.query`; standalone virtualization containers are not covered.
+
+The collector additionally allows only the disk form of [`device.get_info`](https://api.truenas.com/v25.04.2/api_methods_device.get_info.html) (without partition probing) and [`vm.query`](https://api.truenas.com/v25.04.2/api_methods_vm.query.html), bounded to 256 disks / 100 VMs. VM display passwords and cloud-init configuration are omitted. Normalized inventory is also available in the existing AI host context. API credentials remain encrypted and are never included.
+
+Storage and network activity have seven ranges, from ten minutes to one month, and keyboard/touch/hover inspection of exact retained samples. History remains source-separated with seven-day retention; choosing one month does not create older data. Additional existing performance charts, checks, tickets, command history, host settings and knowledge links remain available.

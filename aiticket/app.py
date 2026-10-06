@@ -382,6 +382,9 @@ def create_app(data_dir=None, testing=False):
         for connection in data['connections']:
             for pool in connection['data'].get('pools',[]):pool['history']=series(store,connection['id']+':pool:'+str(pool['id']),'storage',request.args.get('window','6h'),definitions=[('used_percent','Storage used','%',100)])
             for application in connection['data'].get('apps',[]):application['history']=series(store,connection['id']+':app:'+application['name'],'application',request.args.get('window','6h'),definitions=[('cpu_percent','CPU','%',None),('memory_gib','Memory',' GiB',None),('receive_kib_s','Network received',' KiB/s',None),('transmit_kib_s','Network sent',' KiB/s',None)])
+        from .truenas_view import build as truenas_overview
+        nas=next((x for x in data['connections'] if x['kind']=='truenas'),None)
+        data['truenas_ui']=truenas_overview(store,data['host'],nas,request.args.get('window','1h')) if nas else None
         return render_template('host-detail.html',**data)
 
     @app.get('/hosts/<machine_id>/checks/new')

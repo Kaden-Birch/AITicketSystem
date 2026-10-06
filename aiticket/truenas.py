@@ -3,7 +3,7 @@ import json,ssl,time
 from urllib.parse import urlsplit,urlunsplit
 from .diagnostics import redact
 
-READ_METHODS={'auth.login_ex','system.info','pool.query','pool.dataset.query','alert.list','service.query','app.query','core.subscribe'}
+READ_METHODS={'auth.login_ex','system.info','pool.query','pool.dataset.query','alert.list','service.query','app.query','device.get_info','vm.query','core.subscribe'}
 
 class RPCError(ValueError):
     def __init__(self,method):super().__init__('TrueNAS could not read '+{'auth.login_ex':'the account credentials','system.info':'system information','pool.query':'storage pools','pool.dataset.query':'datasets','app.query':'applications','service.query':'services','alert.list':'alerts','core.subscribe':'live statistics'}.get(method,'this information')+'. Check the account permissions and API version.')
@@ -26,6 +26,7 @@ class Client:
         return msg
     def call(self,method,*params):
         if method not in READ_METHODS:raise ValueError('Only supported read-only TrueNAS methods are permitted.')
+        if method=='device.get_info' and params!=({'type':'DISK','get_partitions':False,'serials_only':False},):raise ValueError('Only disk inventory is supported.')
         if method=='core.subscribe' and (len(params)!=1 or str(params[0]).split(':',1)[0] not in ('reporting.realtime','app.stats')):raise ValueError('Unsupported statistics subscription.')
         self.serial+=1;identifier=self.serial
         self.ws.send(json.dumps({'jsonrpc':'2.0','id':identifier,'method':method,'params':list(params)}))
@@ -95,6 +96,18 @@ def normalize(raw,events):
         result['apps']=apps
     if 'alerts' in raw:result['alerts']=[{'level':a.get('level'),'message':redact(str(a.get('formatted',a.get('text','Alert'))))[:500]} for a in raw['alerts'][:100]]
     if 'services' in raw:result['services']=[fields(s,('service','state','enable')) for s in raw['services'][:100]]
+    # Public read-only inventory. Never retain VM display passwords, cloud-init or application configuration.
+    if 'disks' in raw:
+        result['disks']=[{**fields(d,('model','serial','size','type','bus','rotationrate')), 'name':str(name)} for name,d in list(raw['disks'].items())[:256] if isinstance(d,dict)]
+        result['coverage'].update(disk_limit=256,disk_limit_reached=len(raw['disks'])>=256)
+    if 'vms' in raw:
+        result['vms']=[]
+        for vm in raw['vms'][:100]:
+            item=fields(vm,('id','name','description','vcpus','cores','threads','memory','autostart'))
+            item['state']=(vm.get('status') or {}).get('state','UNKNOWN')
+            item['devices']=[fields(d.get('attributes') or {},('dtype','path','nic_attach','type','size')) for d in vm.get('devices',[])[:50] if isinstance(d,dict)]
+            result['vms'].append(item)
+        result['coverage'].update(vm_limit=100,vm_limit_reached=len(raw['vms'])>=100)
     return result
 
 
@@ -113,6 +126,12 @@ def collect(cfg,secret):
                 if not isinstance(data,list):raise ValueError('Unexpected TrueNAS data shape.')
                 raw[key]=data
             except RPCError:raw['warnings'].append('Could not read '+key+'. Check API permissions and version support.')
+        for key,method,args,shape in [('disks','device.get_info',({'type':'DISK','get_partitions':False,'serials_only':False},),dict),('vms','vm.query',([],{'limit':100}),list)]:
+            try:
+                data=client.call(method,*args)
+                if not isinstance(data,shape):raise RPCError(method)
+                raw[key]=data
+            except (RPCError,TimeoutError):raw['warnings'].append('Could not read '+key+'. Check API permissions, version support and connection response time.')
         events=client.statistics()
         if not events:raw['warnings'].append('Live performance statistics are not available.')
         return normalize(raw,events)
