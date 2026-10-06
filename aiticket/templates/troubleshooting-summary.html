@@ -1,0 +1,8 @@
+{% set event_machine=host.id if host is defined else machine %}
+{% if incident is defined %}{% set evidence_timeline=troubleshooting_summary(incident=incident.id) %}{% elif event_machine %}{% set evidence_timeline=troubleshooting_summary(machine=event_machine) %}{% else %}{% set evidence_timeline=none %}{% endif %}
+{% if evidence_timeline %}
+<link rel="stylesheet" href="{{ url_for('static',filename='network-logs.css') }}">
+<section class="troubleshooting-summary"><div class="row"><div><h2>Troubleshooting timeline</h2><p class="hint">Monitoring, network events, resource readings and observed changes.</p></div><a class="button secondary" href="{{ evidence_timeline.url }}">View full timeline →</a></div>
+{% set result=evidence_timeline %}{% set compact=true %}{% include 'troubleshooting-list.html' %}
+<p class="hint">Events are ordered by observation time; nearby events do not establish a cause. <a href="/network-events?machine={{ incident.machine_id if incident is defined else event_machine }}">Browse network events</a></p></section>
+{% endif %}

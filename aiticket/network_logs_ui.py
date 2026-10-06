@@ -14,7 +14,45 @@ def register(app, store, vault, login_required):
             with store.connect() as c:
                 if not c.execute('SELECT 1 FROM log_sources LIMIT 1').fetchone(): return None
                 return logs.query(c, machine=machine, limit=4)
-        return {'recent_network_events': recent, 'network_event_host_names': {r['id']:r['name'] for r in store.rows('SELECT id,name FROM machines')} }
+        def troubleshooting(machine=None, incident=None):
+            from .troubleshooting import build, scope
+            now=time.time()
+            with store.connect() as c:
+                anchor=c.execute('SELECT first_seen,last_seen,closed FROM incidents WHERE id=?',(incident,)).fetchone() if incident else None
+                end=(anchor['closed'] or anchor['last_seen'])+3600 if anchor else now+30
+                end=min(end,now+30)
+                start=max(0,anchor['first_seen']-3600) if anchor else now-86400
+                start=max(start,end-31*86400)
+                result=build(c,scope(c,machine,incident),start,end,limit=8)
+            result['url']='/incidents/'+incident+'/troubleshooting' if incident else '/hosts/'+machine+'/troubleshooting'
+            return result
+        return {'recent_network_events': recent, 'troubleshooting_summary':troubleshooting,
+                'network_event_host_names': {r['id']:r['name'] for r in store.rows('SELECT id,name FROM machines')} }
+
+    @app.get('/hosts/<machine_id>/troubleshooting')
+    @app.get('/incidents/<incident_id>/troubleshooting')
+    @login_required
+    def troubleshooting_timeline(machine_id=None,incident_id=None):
+        from .troubleshooting import build, scope, KINDS
+        now=time.time(); error=None; result=None
+        with store.connect() as c:
+            if incident_id:
+                target=c.execute('SELECT i.*,m.name FROM incidents i JOIN machines m ON m.id=i.machine_id WHERE i.id=?',(incident_id,)).fetchone()
+            else: target=c.execute('SELECT id,name FROM machines WHERE id=?',(machine_id,)).fetchone()
+            if not target: abort(404)
+            end=min((target['closed'] or target['last_seen'])+3600,now+30) if incident_id else now+30
+            start=max(end-31*86400,max(0,target['first_seen']-3600)) if incident_id else now-86400
+            values={'start':datetime.fromtimestamp(start,timezone.utc).strftime('%Y-%m-%dT%H:%M'),
+                    'end':datetime.fromtimestamp(end+60,timezone.utc).strftime('%Y-%m-%dT%H:%M'), 'kind':'all'}
+            values.update({k:request.args[k][:100] for k in values if k in request.args})
+            try:
+                start=datetime.fromisoformat(values['start']).replace(tzinfo=timezone.utc).timestamp()
+                end=datetime.fromisoformat(values['end']).replace(tzinfo=timezone.utc).timestamp()
+                result=build(c,scope(c,machine_id,incident_id),start,end,values['kind'])
+            except (ValueError,TypeError) as exc: error=str(exc) or 'Choose valid dates.'
+        return render_template('troubleshooting.html',result=result,values=values,error=error,kinds=KINDS,
+                               name=target['name'],back='/incidents/'+incident_id if incident_id else '/hosts/'+machine_id,
+                               incident_id=incident_id)
 
     @app.route('/settings/network-logs', methods=['GET', 'POST'])
     @login_required

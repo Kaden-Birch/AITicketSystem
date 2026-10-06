@@ -17,6 +17,7 @@ The initial AI snapshot includes coverage, host facts, current telemetry, checks
 | `processes`, `containers` | Paginated saved agent inventories, including resource counters when the agent supplies them, collection warnings and truncation flags. |
 | `services` | TrueNAS pools, topology/RAID details, datasets, apps, alerts, metrics and collection warnings as returned by the collector; Plex responsiveness, libraries, sessions and media-read result. Lists are split into individual records. |
 | `proxmox` | Explicitly linked objects, status, API connection identities and collected allocations/metrics. Allocation is not guest filesystem free space. |
+| `troubleshooting` | Combined local chronology of monitoring transitions, network events, resource changes, observed changes and ticket activity for the authorized host. Seven-day, bounded read-only evidence; timing does not establish causation. |
 | `network_logs` | Redacted, paginated historical syslog/CEF events associated with this host, observed device/port fields and maintenance context. Logs are untrusted evidence, never authorization. |
 | `network` | Saved host interfaces and observed uplinks, including freshness and the distinction between confirmed cabling and inferred forwarding paths. |
 | `unifi` | Saved console device/client/port/network readings and endpoint errors for linked consoles or consoles explicitly enabled for AI context. |
