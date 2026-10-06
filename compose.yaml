@@ -45,6 +45,30 @@ services:
       interval: 30s
       timeout: 5s
       start_period: 30s
+  log-archiver:
+    build: .
+    restart: unless-stopped
+    command: ["python", "-m", "aiticket", "log-archiver"]
+    volumes:
+      - app-data:/data
+      - app-keys:/keys:ro
+      - network-logs:/logs
+    environment:
+      AITICKET_DATA: /data
+      AITICKET_LOG_DATA: /logs/network-logs.db
+      AITICKET_KEY_FILE: /keys/encryption.key
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m
+    healthcheck:
+      test: ["CMD", "python", "-c", "from aiticket.db import Store; from aiticket.log_archive import archive_status; import sys; sys.exit(0 if archive_status(Store('/data/app.db'))['available'] else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
 volumes:
   network-logs:
   app-data:

@@ -9,6 +9,7 @@ import os
 import re
 import sqlite3
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from .diagnostics import redact
@@ -33,6 +34,8 @@ CREATE INDEX IF NOT EXISTS log_device ON events(device_mac,received DESC);
 CREATE TABLE IF NOT EXISTS event_hosts(event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,machine_id TEXT NOT NULL,PRIMARY KEY(event_id,machine_id));
 CREATE INDEX IF NOT EXISTS log_hosts ON event_hosts(machine_id,event_id DESC);
 CREATE TABLE IF NOT EXISTS collector_status(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS archive_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS smb_outbox(id INTEGER PRIMARY KEY AUTOINCREMENT,event_key TEXT NOT NULL UNIQUE,payload TEXT NOT NULL,size INTEGER NOT NULL,received REAL NOT NULL);
 '''
 
 
@@ -168,6 +171,15 @@ class Archive:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as c:
             c.executescript(SCHEMA)
+            c.execute('BEGIN IMMEDIATE')
+            columns = {r['name'] for r in c.execute('PRAGMA table_info(events)')}
+            if 'event_key' not in columns:
+                c.execute('ALTER TABLE events ADD COLUMN event_key TEXT')
+                c.execute('ALTER TABLE events ADD COLUMN archived INTEGER NOT NULL DEFAULT 0')
+            c.execute("INSERT OR IGNORE INTO archive_meta VALUES('identity',?)", (str(uuid.uuid4()),))
+            identity = c.execute("SELECT value FROM archive_meta WHERE key='identity'").fetchone()[0]
+            c.execute('UPDATE events SET event_key=? || id WHERE event_key IS NULL', (identity+'-',))
+            c.execute('CREATE UNIQUE INDEX IF NOT EXISTS log_event_key ON events(event_key)')
         os.chmod(self.path, 0o600)
 
     @contextlib.contextmanager
@@ -183,19 +195,52 @@ class Archive:
         finally:
             c.close()
 
-    def append(self, events):
+    def append(self, events, mirror=None):
         with self.connect() as c:
+            c.execute('BEGIN IMMEDIATE')
+            queued = c.execute('SELECT coalesce(sum(size),0) FROM smb_outbox').fetchone()[0] if mirror else 0
             for event in events:
-                row = {**event, 'fields': json.dumps(event['fields']), 'associations': json.dumps(event['associations'])}
+                row = {**event, 'event_key': str(uuid.uuid4()), 'archived': 0, 'fields': json.dumps(event['fields']), 'associations': json.dumps(event['associations'])}
                 row['size'] = len(json.dumps(row).encode()) + 512
                 keys = list(row)
                 cur = c.execute('INSERT INTO events('+','.join(keys)+') VALUES('+','.join('?' for _ in keys)+')', [row[k] for k in keys])
                 c.executemany('INSERT OR IGNORE INTO event_hosts VALUES(?,?)', [(cur.lastrowid, a['machine_id']) for a in event['associations']])
+                if mirror and mirror.get('enabled'):
+                    payload = json.dumps({**row, 'id': cur.lastrowid}, separators=(',', ':'))
+                    size = len(payload.encode()) + 256
+                    if queued + size <= mirror['buffer_mb'] * 1048576:
+                        c.execute('INSERT INTO smb_outbox(event_key,payload,size,received) VALUES(?,?,?,?)', (row['event_key'], payload, size, row['received']))
+                        queued += size
 
-    def retain(self, config, now=None):
+    def enqueue_existing(self, budget, limit=500):
+        """Backfill bounded batches of local history; new events use the same transaction as collection."""
+        with self.connect() as c:
+            c.execute('BEGIN IMMEDIATE')
+            queued = c.execute('SELECT coalesce(sum(size),0) FROM smb_outbox').fetchone()[0]
+            rows = c.execute('SELECT * FROM events WHERE archived=0 AND NOT EXISTS (SELECT 1 FROM smb_outbox q WHERE q.event_key=events.event_key) ORDER BY received LIMIT ?', (limit,)).fetchall()
+            for row in rows:
+                payload = json.dumps(dict(row), separators=(',', ':'))
+                size = len(payload.encode()) + 256
+                if queued + size > budget * 1048576: break
+                c.execute('INSERT INTO smb_outbox(event_key,payload,size,received) VALUES(?,?,?,?)', (row['event_key'], payload, size, row['received']))
+                queued += size
+
+    def backlog(self):
+        with self.connect() as c:
+            row = c.execute('SELECT count(*),coalesce(sum(size),0),min(received) FROM smb_outbox').fetchone()
+            return {'pending': row[0], 'pending_bytes': row[1], 'oldest_pending': row[2],
+                    'waiting_local': c.execute('SELECT count(*) FROM events WHERE archived=0 AND NOT EXISTS (SELECT 1 FROM smb_outbox q WHERE q.event_key=events.event_key)').fetchone()[0],
+                    'gaps': int((c.execute("SELECT value FROM archive_meta WHERE key='gaps'").fetchone() or ['0'])[0])}
+
+    def retain(self, config, now=None, mirrored=False):
         now = time.time() if now is None else now
         with self.connect() as c:
-            c.execute('DELETE FROM events WHERE received<?', (now - config['days'] * 86400,))
+            c.execute('BEGIN IMMEDIATE')
+            if mirrored:
+                # Count only unconfirmed copies that are not protected by the durable upload queue.
+                c.execute('CREATE TEMP TABLE missing_copies AS SELECT event_key FROM events WHERE archived=0 AND NOT EXISTS (SELECT 1 FROM smb_outbox q WHERE q.event_key=events.event_key)')
+            if config['days']:
+                c.execute('DELETE FROM events WHERE received<?', (now - config['days'] * 86400,))
             c.execute('DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY id DESC LIMIT -1 OFFSET ?)', (config['rows'],))
             # Approximate event bytes plus generous index overhead; trim in chunks.
             remaining = c.execute('SELECT coalesce(sum(size),0) FROM events').fetchone()[0]
@@ -204,6 +249,20 @@ class Archive:
                 old = c.execute('SELECT id,size FROM events ORDER BY id LIMIT 500').fetchall()
                 if not old: break
                 c.execute('DELETE FROM events WHERE id<=?', (old[-1]['id'],)); remaining -= sum(r['size'] for r in old)
+            if mirrored:
+                gaps = c.execute('SELECT count(*) FROM missing_copies m WHERE NOT EXISTS (SELECT 1 FROM events e WHERE e.event_key=m.event_key)').fetchone()[0]
+                if gaps:
+                    old = int((c.execute("SELECT value FROM archive_meta WHERE key='gaps'").fetchone() or ['0'])[0])
+                    c.execute("INSERT INTO archive_meta VALUES('gaps',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(old+gaps),))
+            # Bound abandoned pending uploads even when SMB is disabled. Explicitly count archival gaps.
+            if config.get('buffer_mb'):
+                queued = c.execute('SELECT coalesce(sum(size),0) FROM smb_outbox').fetchone()[0]
+                while queued > config['buffer_mb'] * 1048576:
+                    row = c.execute('SELECT id,size,event_key FROM smb_outbox ORDER BY id LIMIT 1').fetchone()
+                    c.execute('DELETE FROM smb_outbox WHERE id=?', (row['id'],)); queued -= row['size']
+                    if not c.execute('SELECT 1 FROM events WHERE event_key=?', (row['event_key'],)).fetchone():
+                        old = int((c.execute("SELECT value FROM archive_meta WHERE key='gaps'").fetchone() or ['0'])[0])
+                        c.execute("INSERT INTO archive_meta VALUES('gaps',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(old+1),))
             c.execute('PRAGMA incremental_vacuum(1000)')
 
     def status(self, values):
@@ -265,20 +324,29 @@ def query(c, *, machine=None, source=None, device=None, port=None, severity=None
             deadline = time.monotonic() + 0.25
             logs.set_progress_handler(lambda: int(time.monotonic() > deadline), 2000)
             rows = logs.execute('SELECT * FROM events WHERE '+' AND '.join(clauses)+' ORDER BY at DESC,id DESC LIMIT ? OFFSET ?', (*args, limit + 1, offset)).fetchall()
-        items = []
-        bindings = {(r['source_id'], r['mac']): r['machine_id'] for r in c.execute('SELECT * FROM log_host_bindings')}
-        from .policies import maintained
-        for row in rows[:limit]:
-            item = dict(row)
-            item['fields'] = json.loads(item['fields']); item['associations'] = json.loads(item['associations'])
-            manual = bindings.get((item['source_id'], item['client_mac']))
-            if manual:
-                item['associations'] = [a for a in item['associations'] if a['role'] != 'client'] + [{'machine_id': manual, 'method': 'Administrator MAC association', 'role': 'client'}]
-            item['maintenance'] = any(maintained(c, a['machine_id'], item['at']) for a in item['associations'])
-            items.append(item)
+        items = decorate(c, rows[:limit])
         return {'items': items, 'next_offset': offset + limit if len(rows) > limit and offset + limit <= 10000 else None, 'truncated': len(rows) > limit and offset + limit > 10000, 'available': True}
     except (sqlite3.Error, OSError):
         return {'items': [], 'next_offset': None, 'available': False}
+
+
+def decorate(c, rows):
+    bindings = {(r['source_id'], r['mac']): r['machine_id'] for r in c.execute('SELECT * FROM log_host_bindings')}
+    from .policies import maintained
+    items = []; seen = set()
+    for row in rows:
+        item = dict(row)
+        identity = item.get('event_key', item['id'])
+        if identity in seen: continue
+        seen.add(identity)
+        item['fields'] = json.loads(item['fields']) if isinstance(item['fields'], str) else item['fields']
+        item['associations'] = json.loads(item['associations']) if isinstance(item['associations'], str) else item['associations']
+        manual = bindings.get((item['source_id'], item['client_mac']))
+        if manual:
+            item['associations'] = [a for a in item['associations'] if a['role'] != 'client'] + [{'machine_id': manual, 'method': 'Administrator MAC association', 'role': 'client'}]
+        item['maintenance'] = any(maintained(c, a['machine_id'], item['at']) for a in item['associations'])
+        items.append(item)
+    return sorted(items, key=lambda e: (e['at'], e['received']), reverse=True)
 
 
 def event(c, identifier):

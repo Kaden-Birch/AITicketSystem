@@ -12,7 +12,7 @@ from .security import Vault
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['init', 'serve', 'worker', 'reset-password', 'rotate-key', 'log-receiver'])
+    parser.add_argument('command', choices=['init', 'serve', 'worker', 'reset-password', 'rotate-key', 'log-receiver', 'log-archiver'])
     parser.add_argument('--data', default=os.environ.get('AITICKET_DATA', 'data'))
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', default=None, type=int)
@@ -48,6 +48,10 @@ def main():
         receive(store, args.host, 5514 if args.port is None else args.port)
         return
     vault = Vault(key_path)
+    if args.command == 'log-archiver':
+        from .log_archive import run as archive
+        archive(store, vault)
+        return
     if args.command == 'reset-password':
         from .administration import change_password
         password = getpass.getpass('New administrator password: ')

@@ -2032,5 +2032,5 @@ def create_app(data_dir=None, testing=False):
     from .workspace_features import register
     register(app,store,vault,login_required)
     from .network_logs_ui import register as register_logs
-    register_logs(app,store,login_required)
+    register_logs(app,store,vault,login_required)
     return app

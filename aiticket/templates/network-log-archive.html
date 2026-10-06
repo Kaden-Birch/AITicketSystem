@@ -1,0 +1,29 @@
+{% extends 'base.html' %}{% block content %}
+<link rel="stylesheet" href="{{ url_for('static',filename='network-logs.css') }}">
+<a href="/network-events">← Local network events</a>
+<div class="host-heading"><div><p class="eyebrow">LONG TERM NETWORK EVIDENCE</p><h1>SMB history</h1><p class="hint">Search any month retained on your SMB share. Completed results stay available locally for 24 hours.</p></div><a class="button" href="/settings/network-logs">Storage settings</a></div>
+{% if error %}<p class="notice" role="alert">{{ error }}</p>{% endif %}
+{% if not archive_status.available %}<p class="notice">The archive service is unavailable. Local logs remain available; queued searches resume when the service returns.</p>{% endif %}
+<section id="archive-search-editor" {% if error %}data-live-preserve{% endif %}>
+<form method="post" class="log-filters">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label>From (UTC)<input type="datetime-local" name="start" value="{{ values.start }}" required></label>
+  <label>Until (UTC)<input type="datetime-local" name="end" value="{{ values.end }}" required></label>
+  <label>Host<select name="machine"><option value="">All hosts</option>{% for host in hosts %}<option value="{{ host.id }}" {% if values.machine==host.id %}selected{% endif %}>{{ host.name }}</option>{% endfor %}</select></label>
+  <label>Source<select name="source"><option value="">All sources</option>{% for source in sources %}<option value="{{ source.id }}" {% if values.source==source.id %}selected{% endif %}>{{ source.name }}</option>{% endfor %}</select></label>
+  <label>Severity<select name="severity">{% for value,label in [('','All severities'),('4','Warning and high'),('7','High')] %}<option value="{{ value }}" {% if values.severity==value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+  <label>Search<input name="q" value="{{ values.q }}" maxlength="200" placeholder="Message, event, IP or MAC"></label>
+  <button class="primary">Search archive</button>
+</form><p class="hint">Choose a range of up to 31 days. Searches run in the background and return up to 200 matches; narrow the range or filters if a search reaches its limit.</p></section>
+{% if task %}<section data-live-key="archive-search-{{ task.id }}">
+  <div class="row"><h2>Search results</h2><span class="badge">{{ task.state }}</span></div>
+  {% if task.error %}<p class="notice" role="alert">{{ task.error }}</p>{% endif %}
+  {% if task.state=='expired' %}<p class="notice">This result cache has expired. Run the search again to read the retained SMB history.</p>{% endif %}
+  {% if task.state in ['pending','running'] %}<p role="status">Checking SMB history. This page updates automatically; local collection continues.</p>
+  {% elif task.state=='complete' %}
+    {% if task.result.truncated %}<p class="notice">Partial results: the search reached a batch, scan or result limit. Narrow the range or filters to retrieve more.</p>{% endif %}
+    <p class="hint">{{ items|length }} unique matches · {{ task.result.scanned }} records examined. Results come from the SMB tier; they may also exist locally.</p>
+    {% include 'network-event-list.html' %}
+  {% endif %}
+</section>{% endif %}
+{% endblock %}

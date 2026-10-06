@@ -1,6 +1,10 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 41
+CURRENT_VERSION = 42
 MIGRATIONS = {
+    42: (
+        "CREATE TABLE IF NOT EXISTS log_archive_jobs(id TEXT PRIMARY KEY,kind TEXT NOT NULL,params TEXT NOT NULL,connection TEXT NOT NULL,state TEXT NOT NULL,created REAL NOT NULL,updated REAL NOT NULL,result TEXT,error TEXT)",
+        "CREATE INDEX IF NOT EXISTS log_archive_queue ON log_archive_jobs(state,created)",
+    ),
     41: (
         "CREATE TABLE log_sources(id TEXT PRIMARY KEY,name TEXT NOT NULL,sender_ip TEXT NOT NULL UNIQUE,connection_id TEXT REFERENCES unifi_connections(id),enabled INTEGER NOT NULL DEFAULT 1,created REAL NOT NULL)",
         "CREATE TABLE log_host_bindings(source_id TEXT NOT NULL REFERENCES log_sources(id),mac TEXT NOT NULL,machine_id TEXT NOT NULL REFERENCES machines(id),created REAL NOT NULL,PRIMARY KEY(source_id,mac))",

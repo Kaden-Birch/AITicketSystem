@@ -120,4 +120,4 @@ TrueNAS SCALE / HexOS can be added directly through **Hosts → Add host → Tru
 
 [Settings, knowledge and diagnostics](docs/settings-and-knowledge.md): grouped settings, simpler Hermes activation, normal Hermes status queries, optional knowledge articles and AI drafting, container details/logs/trends, observed change history and allowlisted Telegram conversations.
 
-UniFi syslog/CEF collection, searchable network events and AI troubleshooting evidence: [setup and limits](docs/network-logs.md).
+UniFi syslog/CEF collection, searchable network events, independently retained local/SMB storage tiers and AI troubleshooting evidence: [setup and limits](docs/network-logs.md).

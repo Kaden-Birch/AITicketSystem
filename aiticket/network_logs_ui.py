@@ -1,10 +1,12 @@
 """Authenticated network evidence and collector configuration."""
 import time
+from datetime import datetime, timezone
 from flask import abort, flash, redirect, render_template, request
 from . import network_logs as logs
+from . import log_archive as archive
 
 
-def register(app, store, login_required):
+def register(app, store, vault, login_required):
     @app.context_processor
     def log_helpers():
         def recent(machine):
@@ -23,6 +25,7 @@ def register(app, store, login_required):
             if not rows: abort(404)
             values = {**rows[0], 'enabled': 'yes' if rows[0]['enabled'] else ''}
         retention = {**logs.DEFAULTS, **store.setting('network_log_retention', {})}
+        smb = archive.config(store); smb_error = None
         if request.method == 'POST':
             values = dict(request.form)
             try:
@@ -32,10 +35,23 @@ def register(app, store, login_required):
                         validated = {k:int(v) for k,v in retention.items()}
                     except ValueError:
                         raise ValueError('Enter whole numbers for days, storage budget and maximum events.')
-                    if not 1 <= validated['days'] <= 30 or not 10 <= validated['megabytes'] <= 2000 or not 1000 <= validated['rows'] <= 1000000:
-                        raise ValueError('Choose 1–30 days, 10–2,000 MB and 1,000–1,000,000 events.')
+                    if not 0 <= validated['days'] <= 365 or not 10 <= validated['megabytes'] <= 2000 or not 1000 <= validated['rows'] <= 1000000:
+                        raise ValueError('Choose 0–365 days (0 is indefinite), 10–2,000 MB and 1,000–1,000,000 events.')
                     store.save_many({'network_log_retention': validated}, actor='administrator')
                     flash('Retention saved. The collector applies it within a few seconds.')
+                elif values.get('operation') in ('smb_save', 'smb_test'):
+                    cfg = archive.validate(store, vault, values)
+                    if values['operation'] == 'smb_test':
+                        archive.save(store, cfg)
+                        identifier = archive.submit(store, vault, 'test', cfg)
+                        flash('SMB settings saved. Connection test queued; the result appears below.')
+                        return redirect('/settings/network-logs?test='+identifier)
+                    archive.save(store, cfg)
+                    flash('SMB archive settings saved. Local collection continues independently; existing local history will be copied in batches.')
+                elif values.get('operation') == 'smb_disable':
+                    smb['enabled'] = False
+                    store.save('network_log_smb', smb)
+                    flash('SMB uploads paused. Local collection continues; pending copies remain queued.')
                 else:
                     if not values.get('id') and len(store.rows('SELECT id FROM log_sources')) >= 32:
                         raise ValueError('Up to 32 sender sources are supported. Edit an existing source.')
@@ -43,10 +59,57 @@ def register(app, store, login_required):
                     flash('Log source saved. Configure UniFi to send CEF logs to this server on port 5514.')
                 return redirect('/settings/network-logs')
             except (ValueError, TypeError) as exc:
-                error = str(exc) if str(exc) else 'Enter valid numbers.'
+                if values.get('operation', '').startswith('smb_'):
+                    smb_error = str(exc) or 'Enter valid SMB settings.'
+                    smb = {**smb, **{key: values.get('smb_'+key, '') for key in ('server','share','folder','username','domain','days','buffer_mb')}}
+                    smb.update(enabled=values.get('smb_enabled')=='yes', encrypt=values.get('smb_encrypt')=='yes')
+                else: error = str(exc) if str(exc) else 'Enter valid numbers.'
+                values.pop('smb_password', None)
         return render_template('network-log-settings.html', values=values, error=error, retention=retention,
                                sources=store.rows('SELECT * FROM log_sources ORDER BY name'),
-                               connections=store.rows('SELECT id,name FROM unifi_connections WHERE deleted IS NULL ORDER BY name'), collector=logs.status(store))
+                               connections=store.rows('SELECT id,name FROM unifi_connections WHERE deleted IS NULL ORDER BY name'), collector=logs.status(store),
+                               smb=smb, smb_error=smb_error, periods=archive.PERIODS, archive_status=archive.archive_status(store),
+                               smb_test=archive.job(store, request.args['test']) if request.args.get('test') else None,
+                               smb_password_saved=bool(store.setting('network_log_smb_secret')))
+
+    @app.route('/network-events/archive', methods=['GET', 'POST'])
+    @login_required
+    def network_archive():
+        now = time.time(); error = None
+        values = {'start':datetime.fromtimestamp(now-30*86400,timezone.utc).strftime('%Y-%m-%dT%H:%M'),
+                  'end':datetime.fromtimestamp(now+60,timezone.utc).strftime('%Y-%m-%dT%H:%M'), 'source':'', 'machine':'', 'q':'', 'severity':''}
+        task = archive.job(store, request.args['job']) if request.args.get('job') else None
+        if task and task['kind'] != 'search': abort(404)
+        if request.method == 'POST':
+            values = {**values, **dict(request.form)}
+            try:
+                if not archive.config(store)['server']: raise ValueError('Configure an SMB archive connection in Network logs first.')
+                start = datetime.fromisoformat(values['start']).replace(tzinfo=timezone.utc).timestamp()
+                end = datetime.fromisoformat(values['end']).replace(tzinfo=timezone.utc).timestamp()
+                if not 0 < end-start <= 31*86400 or start < 0:
+                    raise ValueError('Choose a time range of up to 31 days. You can search any month in the archive.')
+                severity = int(values['severity']) if values.get('severity') else None
+                if severity is not None and severity not in (4,7): raise ValueError('Choose a supported severity.')
+                params = {**{k:values.get(k,'')[:200] for k in ('source','machine','q')}, 'start':start, 'end':end, 'severity':severity}
+                params['display'] = {k:values[k] for k in ('start','end','source','machine','q','severity')}
+                identifier = archive.submit(store, vault, 'search', archive.connection(store,vault), params)
+                return redirect('/network-events/archive?job='+identifier)
+            except (ValueError, TypeError) as exc: error = str(exc) or 'Enter a valid time range.'
+        elif task: values.update(task['params'].get('display',{}))
+        items = archive.search_results(store, task['id']) if task else []
+        for item in items: item['archive_job'] = task['id']
+        return render_template('network-log-archive.html', values=values, error=error, task=task, items=items, available=True,
+                               sources=store.rows('SELECT id,name FROM log_sources ORDER BY name'),
+                               hosts=store.rows('SELECT id,name FROM machines ORDER BY name'), archive_status=archive.archive_status(store))
+
+    @app.get('/network-events/archive/<identifier>/<event_key>')
+    @login_required
+    def network_archive_event(identifier, event_key):
+        items = archive.search_results(store, identifier)
+        item = next((item for item in items if item.get('event_key') == event_key), None)
+        if not item: abort(404)
+        return render_template('network-event.html', event=item, error=None, selected=None, archived=True, archive_job=identifier,
+                               hosts=store.rows('SELECT id,name FROM machines ORDER BY name'), sources=store.rows('SELECT id,name FROM log_sources'))
 
     @app.get('/network-events')
     @login_required
@@ -56,14 +119,14 @@ def register(app, store, login_required):
         try:
             offset = max(0, min(10000, int(request.args.get('offset', 0))))
             hours = int(request.args.get('hours', 24))
-            if hours not in (1, 6, 24, 168, 720): hours = 24
+            if hours not in (0, 1, 6, 24, 168, 720, 4320, 8760): hours = 24
             severity = int(filters['severity']) if filters['severity'] else None
             if severity is not None and severity not in (0, 4, 7): raise ValueError('Choose a supported severity.')
         except ValueError:
             offset, hours, severity = 0, 24, None
             error = 'Choose a valid time range, severity and page.'
         with store.connect() as c:
-            result = logs.query(c, machine=filters['machine'], source=filters['source'], device=filters['device'], port=filters['port'], category=filters['category'], text=filters['q'], severity=severity, start=time.time() - hours * 3600, offset=offset)
+            result = logs.query(c, machine=filters['machine'], source=filters['source'], device=filters['device'], port=filters['port'], category=filters['category'], text=filters['q'], severity=severity, start=0 if hours==0 else time.time() - hours * 3600, offset=offset)
         return render_template('network-events.html', **result, filters=filters, hours=hours, offset=offset, error=error,
                                collector=logs.status(store), hosts=store.rows('SELECT id,name FROM machines ORDER BY name'),
                                sources=store.rows('SELECT id,name FROM log_sources ORDER BY name'))

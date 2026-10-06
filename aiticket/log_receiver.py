@@ -54,6 +54,8 @@ class Collector:
             self.devices = [(r['connection_id'], r['machine_id'], json.loads(r['data']).get('device', {})) for r in c.execute('SELECT * FROM unifi_devices WHERE deleted IS NULL')]
             self.consoles = {r['id']: r['machine_id'] for r in c.execute('SELECT id,machine_id FROM unifi_connections WHERE deleted IS NULL')}
         self.config = {**logs.DEFAULTS, **self.store.setting('network_log_retention', {})}
+        self.mirror = self.store.setting('network_log_smb', {})
+        self.config['buffer_mb'] = self.mirror.get('buffer_mb', 256)
 
     def match(self, event, source):
         result = []
@@ -95,10 +97,10 @@ class Collector:
     def flush(self, now=None):
         now = time.time() if now is None else now
         try:
-            self.archive.retain(self.config, now)
-            self.archive.append(self.pending)
+            self.archive.retain(self.config, now, mirrored=self.mirror.get('enabled', False))
+            self.archive.append(self.pending, self.mirror if self.mirror.get('enabled') else None)
             self.pending.clear()
-            self.archive.retain(self.config, now)
+            self.archive.retain(self.config, now, mirrored=self.mirror.get('enabled', False))
             self.archive.status({**self.stats, 'heartbeat': now, 'sources': self.last_source})
         except (OSError, logs.sqlite3.Error):
             self.stats['storage_errors'] += 1
