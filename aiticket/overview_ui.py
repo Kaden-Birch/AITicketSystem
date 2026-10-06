@@ -106,6 +106,7 @@ def dashboard_data(store,now=None):
             'queued':sum(r['category']=='new' for r in rows),'host_health':states,'check_health':checks,
             'hosts_attention':states['warning']+states['unreachable'],'notification_review':notifications,
             'ai_enabled':bool(store.setting('hermes_config',{}).get('enabled')),
+            'daily':[{'date':str(day),'opened':counts[i],'resolved':resolved_counts[i],'resolution':mean_resolution[i]*60 if mean_resolution[i] is not None else None,'backlog':backlog[i],'manual':manual[i]} for i,day in enumerate(days)],
             'charts':[],'ticket_charts':[flow,plot('Open ticket backlog',backlog),plot('Average time to resolution',mean_resolution,'h')],
             'date_start':str(days[0]),'date_end':str(days[-1])}
 

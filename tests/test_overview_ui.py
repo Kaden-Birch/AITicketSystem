@@ -15,7 +15,7 @@ def monitored(store,kind='agent',severity='medium',machine=None):
 def test_compact_pages_search_and_auth(signed_in):
     client,store,vault,csrf=signed_in;machine,check=monitored(store)
     observe(store,check,False,{'reason':'lost heartbeat'})
-    assert b'Example host' not in client.get('/').data
+    assert b'Example host' in client.get('/').data  # Featured open ticket now includes its host.
     hosts=client.get('/hosts').data
     assert b'Example host' in hosts and b'Monitoring checks' not in hosts and b'Add machine' not in hosts
     assert b'Heartbeat' in client.get('/tickets').data

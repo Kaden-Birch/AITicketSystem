@@ -200,7 +200,10 @@ def create_app(data_dir=None, testing=False):
         from .overview_ui import dashboard_data
         from .reliability import issues
         from .attention import collect
-        return render_template('dashboard.html',summary=dashboard_data(store),monitoring_attention=len(issues(store)),attention_count=len(collect(store)))
+        from .dashboard_view import build
+        summary=dashboard_data(store); dashboard=build(store,summary)
+        dashboard['monitoring_attention']=len(issues(store)); dashboard['attention_count']=len(collect(store))
+        return render_template('dashboard.html',summary=summary,dashboard=dashboard)
 
     from .ticket_updates import readable
     app.jinja_env.filters['readable_update']=readable
