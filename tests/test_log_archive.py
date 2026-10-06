@@ -1,4 +1,6 @@
 import gzip
+import errno
+import socket
 import hashlib
 import json
 import time
@@ -222,3 +224,47 @@ def test_smb_timeout_is_bounded_and_never_puts_secrets_in_arguments(monkeypatch)
     with pytest.raises(OSError,match='timed out'):archive.operation({'password':'hidden-secret'},'test')
     assert 'hidden-secret' not in ' '.join(captured['args'])
     assert captured['timeout']==30 and json.loads(captured['input'])['connection']['password']=='hidden-secret'
+
+
+@pytest.mark.parametrize('failure, expected', [
+    (TimeoutError('secret timeout details'), 'timed out'),
+    (ConnectionRefusedError(errno.ECONNREFUSED, 'secret connection details'), 'connection refused'),
+    (socket.gaierror(-2, 'secret DNS details'), 'hostname could not be resolved'),
+    (OSError(errno.EHOSTUNREACH, 'secret routing details'), 'server is unreachable'),
+    (ConnectionResetError(errno.ECONNRESET, 'secret reset details'), 'closed the connection'),
+])
+def test_real_smb_transport_wrapped_errors_reach_worker_output(monkeypatch, capsys, failure, expected):
+    import io
+    import socket
+    from smbprotocol.transport import Tcp
+    def fail(*args, **kwargs): raise failure
+    monkeypatch.setattr(socket, 'create_connection', fail)
+    def execute(request): Tcp('private-server.example', 445, timeout=5).connect()
+    monkeypatch.setattr(smb_archive_io, 'execute', execute)
+    monkeypatch.setattr(smb_archive_io.sys, 'stdin', io.StringIO(json.dumps({'connection':{'password':'secret'}})))
+    with pytest.raises(SystemExit) as result: smb_archive_io.main()
+    assert result.value.code == 1
+    output = json.loads(capsys.readouterr().out)
+    assert not output['ok'] and expected in output['error']
+    assert 'secret' not in output['error'] and 'private-server' not in output['error']
+
+
+@pytest.mark.parametrize('status, expected', [
+    ('STATUS_ACCESS_DENIED', 'access denied'),
+    ('STATUS_LOGON_FAILURE', 'login failed'),
+    ('STATUS_WRONG_PASSWORD', 'login failed'),
+    ('STATUS_BAD_NETWORK_NAME', 'share not found'),
+    ('STATUS_DISK_FULL', 'storage is full'),
+])
+def test_smb_file_status_errors_are_classified_without_paths(status, expected):
+    from smbprotocol.header import NtStatus
+    from smbprotocol.exceptions import SMBOSError
+    error = SMBOSError(getattr(NtStatus,status), r'\\private-server\private-share\secret')
+    result = smb_archive_io.error_message(error)
+    assert expected in result
+    assert 'private' not in result and 'secret' not in result
+
+
+def test_unknown_smb_errors_remain_redacted():
+    result = smb_archive_io.error_message(ValueError('password=secret username=private'))
+    assert result.startswith('SMB operation failed.') and 'secret' not in result and 'private' not in result

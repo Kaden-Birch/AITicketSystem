@@ -7,6 +7,8 @@ import sys
 import time
 import uuid
 import math
+import errno
+import socket
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -151,19 +153,46 @@ def execute(request):
     raise ValueError('Unknown SMB operation.')
 
 
+def error_message(exc):
+    """Classify wrapped failures without returning SMB exception text or secrets."""
+    from smbprotocol.header import NtStatus
+    from smbprotocol.exceptions import LogonFailure, WrongPassword, AccessDenied, BadNetworkName, SMBUnsupportedFeature
+    chain = []; seen = set()
+    while exc is not None and id(exc) not in seen and len(chain) < 8:
+        seen.add(id(exc)); chain.append(exc)
+        exc = exc.__cause__ or exc.__context__
+    statuses = {getattr(item, 'ntstatus', getattr(item, 'status', None)) for item in chain
+                if isinstance(getattr(item, 'ntstatus', getattr(item, 'status', None)), int)}
+    if any(isinstance(item, (LogonFailure, WrongPassword)) for item in chain) or statuses & {NtStatus.STATUS_LOGON_FAILURE, NtStatus.STATUS_WRONG_PASSWORD}:
+        return 'SMB login failed. Check the username, domain and password.'
+    if any(isinstance(item, (PermissionError, AccessDenied)) for item in chain) or NtStatus.STATUS_ACCESS_DENIED in statuses:
+        return 'SMB access denied. The archive folder requires read, write, rename and delete permissions.'
+    if any(isinstance(item, BadNetworkName) for item in chain) or NtStatus.STATUS_BAD_NETWORK_NAME in statuses:
+        return 'SMB share not found. Check the share name.'
+    if any(isinstance(item, socket.gaierror) for item in chain):
+        return 'SMB server hostname could not be resolved. Check DNS or use the server IP address.'
+    if any(isinstance(item, TimeoutError) or getattr(item, 'errno', None) == errno.ETIMEDOUT for item in chain):
+        return 'SMB connection timed out. Check routing and firewall access from the application server to the SMB server on TCP port 445.'
+    if any(isinstance(item, ConnectionRefusedError) or getattr(item, 'errno', None) == errno.ECONNREFUSED for item in chain):
+        return 'SMB connection refused on TCP port 445. Check that the SMB service is running and accepting connections on the selected server.'
+    if any(getattr(item, 'errno', None) in (errno.ENETUNREACH, errno.EHOSTUNREACH) for item in chain):
+        return 'SMB server is unreachable. Check routing and firewall access from the application server to TCP port 445.'
+    if any(getattr(item, 'errno', None) in (errno.ECONNRESET, errno.ECONNABORTED, errno.EPIPE) for item in chain):
+        return 'SMB server closed the connection. Check the SMB service and any intervening firewall.'
+    if any(isinstance(item, SMBUnsupportedFeature) for item in chain):
+        return 'SMB server does not support a required connection feature. Check SMB protocol, signing and encryption support.'
+    if NtStatus.STATUS_DISK_FULL in statuses or any(getattr(item, 'errno', None) == errno.ENOSPC for item in chain):
+        return 'SMB archive storage is full. Free space on the share before retrying.'
+    return 'SMB operation failed. Check the server, share, permissions and available space; test the connection again.'
+
+
 def main():
     try:
         request = json.load(sys.stdin)
         result = execute(request)
         print(json.dumps({'ok': True, **result}))
     except Exception as exc:
-        # Never return exception text: SMB errors can contain usernames, paths or credentials.
-        from smbprotocol.exceptions import LogonFailure, WrongPassword, AccessDenied, BadNetworkName
-        message = ('SMB login failed. Check the username, domain and password.' if isinstance(exc, (LogonFailure, WrongPassword)) else
-                   'SMB access denied. The archive folder requires read, write, rename and delete permissions.' if isinstance(exc, PermissionError | AccessDenied) else
-                   'SMB share not found. Check the share name.' if isinstance(exc, BadNetworkName) else
-                   'SMB operation failed. Check the server, share, permissions and available space; test the connection again.')
-        print(json.dumps({'ok': False, 'error': message}))
+        print(json.dumps({'ok': False, 'error': error_message(exc)}))
         sys.exit(1)
 
 
