@@ -57,7 +57,7 @@ def config(store):
 
 def save(store, result):
     values = dict(result); secret = values.pop('secret')
-    store.save_many({'network_log_smb': values, 'network_log_smb_secret': secret}, actor='administrator')
+    store.save_many({'network_log_smb': values, 'network_log_smb_secret': secret,**({'telemetry_capture_enabled':True} if values['enabled'] else {})}, actor='administrator')
 
 
 def connection(store, vault):
@@ -123,6 +123,10 @@ def search_results(store, identifier, strict=False):
         if path.stat().st_size > 8 * 1048576: raise ValueError('Search cache exceeds its size limit.')
         records = json.loads(path.read_text())
         if not isinstance(records,list) or any(not isinstance(r,dict) for r in records):raise ValueError('Invalid search cache.')
+        if task['params'].get('dataset')=='telemetry':
+            from .telemetry_archive import sanitize,validate_document
+            if any(not validate_document(r) for r in records):raise ValueError('Invalid telemetry cache.')
+            return sanitize(records)
         with store.connect() as c:
             return logs.decorate(c, records)
     except (OSError, ValueError, KeyError,TypeError):
@@ -142,12 +146,22 @@ class Archiver:
         self.directory = self.archive.path.parent / 'smb-transfer'
         self.directory.mkdir(exist_ok=True, mode=0o700)
         self.state = store.setting('network_log_archive_status', {})
+        from .telemetry_archive import Exporter
+        self.telemetry=Exporter(store,io,self.directory)
         self.next_upload = self.next_cleanup = 0
         self.failures = 0
         self.configuration = hashlib.sha256(json.dumps(connection(store,vault),sort_keys=True).encode()).hexdigest()
 
     def publish(self, **values):
-        self.state.update(heartbeat=time.time(), **values, **self.archive.backlog())
+        from .telemetry_archive import status
+        telemetry=status(self.store);backlog=self.archive.backlog()
+        backlog['pending']+=(telemetry['pending'] or 0)
+        backlog['pending_bytes']+=telemetry['pending_bytes']
+        oldest=[t for t in (backlog.get('oldest_pending'),telemetry['oldest']) if t]
+        backlog['oldest_pending']=min(oldest) if oldest else None
+        successes=[t for t in (self.state.get('last_success'),self.store.setting('telemetry_archive_success',{}).get('at')) if t]
+        if successes:self.state['last_success']=max(successes)
+        self.state.update(heartbeat=time.time(), **values, **backlog,telemetry=telemetry)
         self.store.save('network_log_archive_status', self.state)
 
     def pending_batch(self):
@@ -233,11 +247,11 @@ class Archiver:
                         if not ai_job or params['machine'] not in machines(c,ai_job['incident_id']):raise OSError('Archive search authorization expired or its target was removed.')
                 if params.get('machine'):
                     params['bindings'] = self.store.rows('SELECT source_id,mac,machine_id FROM log_host_bindings')
-                catalog = self.io(cfg, 'catalog', start=params['start'], end=params['end'])
+                catalog = self.io(cfg, 'catalog', **({'dataset':'telemetry'} if params.get('dataset')=='telemetry' else {}), start=params['start'], end=params['end'])
                 files = select_files(catalog['files'], params)
                 path = results_path(self.store, row['id']); path.parent.mkdir(exist_ok=True, mode=0o700)
                 maximum=min(100,max(1,int(params.get('max_files',100))))
-                result = self.io(cfg, 'search', timeout=30 if params.get('ai_job') else 60, names=[f['name'] for f in files[:maximum]], params=params, file=str(path))
+                result = self.io(cfg, 'search', timeout=30 if params.get('ai_job') else 60, names=[f['name'] for f in files[:maximum]], params=params, file=str(path), **({'dataset':'telemetry'} if params.get('dataset')=='telemetry' else {}))
                 if path.stat().st_size > 8 * 1048576:
                     path.unlink(); raise OSError('Search result exceeded its size limit. Narrow the time range.')
                 os.chmod(path, 0o600)
@@ -259,6 +273,7 @@ class Archiver:
 
     def step(self):
         self.publish()
+        if config(self.store)['enabled']:self.telemetry.capture_dashboard()
         if self.process_job(): self.publish(); return
         cfg = connection(self.store, self.vault)
         token = hashlib.sha256(json.dumps(cfg, sort_keys=True).encode()).hexdigest()
@@ -273,6 +288,7 @@ class Archiver:
             # Small batches wait up to five minutes after the first successful upload.
             if not (self.state.get('last_success') and not backlog['waiting_local'] and backlog['pending'] < 1000 and backlog['oldest_pending'] and time.time()-backlog['oldest_pending'] < 300):
                 self.upload(cfg)
+            self.telemetry.step(cfg,force=False)
             if time.monotonic() >= self.next_cleanup: self.cleanup(cfg)
             self.failures = 0; self.state['error'] = None
             self.state['next_retry'] = None; self.state['error_since'] = None

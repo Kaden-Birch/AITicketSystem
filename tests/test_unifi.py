@@ -161,6 +161,8 @@ def test_migration_detaches_existing_connection_preserving_history(environment):
         c.execute('UPDATE checks SET machine_id=? WHERE id=?',('host',row['check_id']))
         c.execute('UPDATE incidents SET machine_id=?',('host',))
         c.execute('DELETE FROM machines WHERE id=?',(row['machine_id'],))
+        from conftest import remove_schema44
+        remove_schema44(c)
         c.execute('DROP TABLE unifi_devices')
         c.execute('ALTER TABLE unifi_connections DROP COLUMN deleted')
         c.execute('DROP TABLE health_rules')

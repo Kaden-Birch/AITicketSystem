@@ -7,6 +7,8 @@ from . import log_archive as archive
 
 
 def register(app, store, vault, login_required):
+    from .telemetry_archive_ui import register as register_telemetry
+    register_telemetry(app,store,vault,login_required)
     @app.context_processor
     def log_helpers():
         def recent(machine):
@@ -27,6 +29,7 @@ def register(app, store, vault, login_required):
             result['url']='/incidents/'+incident+'/troubleshooting' if incident else '/hosts/'+machine+'/troubleshooting'
             return result
         return {'recent_network_events': recent, 'troubleshooting_summary':troubleshooting,
+                'telemetry_archive_enabled':bool(archive.config(store)['enabled'] or store.setting('telemetry_capture_enabled',False)),
                 'network_event_host_names': {r['id']:r['name'] for r in store.rows('SELECT id,name FROM machines')} }
 
     @app.get('/hosts/<machine_id>/troubleshooting')
@@ -145,7 +148,7 @@ def register(app, store, vault, login_required):
         values = {'start':datetime.fromtimestamp(now-30*86400,timezone.utc).strftime('%Y-%m-%dT%H:%M'),
                   'end':datetime.fromtimestamp(now+60,timezone.utc).strftime('%Y-%m-%dT%H:%M'), 'source':'', 'machine':'', 'q':'', 'severity':''}
         task = archive.job(store, request.args['job']) if request.args.get('job') else None
-        if task and task['kind'] != 'search': abort(404)
+        if task and (task['kind'] != 'search' or task['params'].get('dataset')=='telemetry'): abort(404)
         if request.method == 'POST':
             values = {**values, **dict(request.form)}
             try:

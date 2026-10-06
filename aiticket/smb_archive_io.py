@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 # Names carry receipt/event time bounds and a checksum. Only our archive namespace is managed.
-NAME = re.compile(r'^logs-(\d+)-(\d+)-(\d+)-([a-f0-9]{32})-([a-f0-9]{64})\.jsonl\.gz$')
+NAME = re.compile(r'^(?:logs|telemetry)-(\d+)-(\d+)-(\d+)-([a-f0-9]{32})-([a-f0-9]{64})\.jsonl\.gz$')
 MAX_FILE = 16 * 1048576
 MAX_EXPANDED = 32 * 1048576
 
@@ -27,6 +27,8 @@ def metadata(name):
 
 def execute(request):
     import smbclient
+    dataset=request.get('dataset','network')
+    if dataset not in ('network','telemetry'):raise ValueError('Unsupported archive dataset.')
     cfg = request['connection']
     # No DFS referrals or implicit credential fallback to other servers.
     smbclient.ClientConfig(skip_dfs=True)
@@ -36,12 +38,12 @@ def execute(request):
                                encrypt=bool(cfg.get('encrypt')))
     root = '\\\\' + cfg['server'] + '\\' + cfg['share']
     folder = cfg.get('folder', '').replace('/', '\\').strip('\\')
-    root += ('\\' + folder if folder else '') + '\\aiticket-network-logs\\' + cfg['namespace']
+    root += ('\\' + folder if folder else '') + ('\\aiticket-telemetry\\' if dataset=='telemetry' else '\\aiticket-network-logs\\') + cfg['namespace']
     smbclient.makedirs(root, exist_ok=True)
     operation = request['operation']
 
     def remote(name):
-        if not NAME.fullmatch(name): raise ValueError('Invalid archive filename.')
+        if not NAME.fullmatch(name) or not name.startswith('telemetry-' if dataset=='telemetry' else 'logs-'): raise ValueError('Invalid archive filename.')
         day = datetime.fromtimestamp(metadata(name)['received'], timezone.utc).strftime('%Y-%m-%d')
         return root + '\\' + day + '\\' + name
 
@@ -104,7 +106,7 @@ def execute(request):
         for day in sorted(directories, reverse=not bool(request.get('cutoff'))):
             for entry in smbclient.scandir(root+'\\'+day):
                 scanned += 1
-                item = metadata(entry.name)
+                item = metadata(entry.name) if entry.name.startswith('telemetry-' if dataset=='telemetry' else 'logs-') else None
                 if item and entry.is_file(follow_symlinks=False):
                     if request.get('cutoff') and item['received'] >= request['cutoff']: continue
                     if request.get('start') is not None and item['end'] < request['start']: continue
@@ -122,7 +124,7 @@ def execute(request):
         return {'deleted': len(request['names'][:100])}
 
     if operation == 'search':
-        params = request['params']; results = []; scanned = 0; truncated = False; seen = set()
+        params = request['params']; results = []; scanned = 0; truncated = False; seen = set(); result_bytes=0
         for name in request['names'][:100]:
             data = read_bytes(name)
             import io
@@ -133,6 +135,20 @@ def execute(request):
                 scanned += 1
                 if scanned > min(100000,max(1,int(params.get('scan_limit',100000)))): truncated = True; break
                 event = json.loads(line)
+                if dataset=='telemetry':
+                    from .telemetry_archive import validate_document
+                    if not validate_document(event):raise ValueError('Invalid telemetry archive record.')
+                    if event['record_key'] in seen:continue
+                    seen.add(event['record_key'])
+                    if not params['start']<=event['at']<=params['end']:continue
+                    if params.get('machine') and event.get('machine_id')!=params['machine']:continue
+                    if params.get('kind') and event.get('kind')!=params['kind']:continue
+                    if params.get('q') and params['q'].lower() not in json.dumps(event['data']).lower():continue
+                    size=len(json.dumps(event).encode())
+                    if result_bytes+size>6*1048576:truncated=True;break
+                    result_bytes+=size;results.append(event)
+                    if len(results)>=min(200,max(1,int(params.get('result_limit',200)))):truncated=True;break
+                    continue
                 if not isinstance(event, dict) or not isinstance(event.get('event_key'), str) or len(event['event_key']) > 100:
                     raise ValueError('Invalid archive event identity.')
                 if event['event_key'] in seen: continue

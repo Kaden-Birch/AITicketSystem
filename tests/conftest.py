@@ -30,8 +30,14 @@ def signed_in(environment):
     return client, store, vault, csrf
 
 
+def remove_schema44(c):
+    for row in c.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'telemetry_%'").fetchall():c.execute('DROP TRIGGER '+row[0])
+    for table in ('telemetry_records','telemetry_archive_meta'):c.execute('DROP TABLE IF EXISTS '+table)
+
+
 def remove_schema38(c):
     """Reconstruct old fixtures by removing the new schema before lowering its marker."""
+    remove_schema44(c)
     for table in ('log_host_bindings','log_sources'):c.execute('DROP TABLE '+table)
     for table in ('kb_workflow_events','kb_workflow_runs','kb_workflows'):c.execute('DROP TABLE '+table)
     for table in ('kb_requests','kb_versions','kb_articles','kb_folders','change_events','telegram_updates','telegram_outbox'):c.execute('DROP TABLE '+table)

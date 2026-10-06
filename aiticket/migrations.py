@@ -1,6 +1,9 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 43
+from .telemetry_archive import migration as telemetry_migration
+
+CURRENT_VERSION = 44
 MIGRATIONS = {
+    44: telemetry_migration(),
     43: (
         "CREATE TABLE IF NOT EXISTS log_problem_rules(id TEXT PRIMARY KEY,name TEXT NOT NULL,kind TEXT NOT NULL,source_id TEXT REFERENCES log_sources(id),config TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 0,created REAL NOT NULL,updated REAL NOT NULL)",
         "CREATE TABLE IF NOT EXISTS log_problems(id TEXT PRIMARY KEY,rule_id TEXT NOT NULL REFERENCES log_problem_rules(id),fingerprint TEXT NOT NULL,source_id TEXT NOT NULL,data TEXT NOT NULL,state TEXT NOT NULL,first_seen REAL NOT NULL,last_seen REAL NOT NULL,event_count INTEGER NOT NULL,check_id TEXT REFERENCES checks(id),incident_id TEXT REFERENCES incidents(id),updated REAL NOT NULL,UNIQUE(rule_id,fingerprint))",

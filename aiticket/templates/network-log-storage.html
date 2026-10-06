@@ -1,16 +1,17 @@
 <section id="smb-storage-editor" {% if smb_error %}data-live-preserve{% endif %}>
-  <div class="row"><div><p class="eyebrow">SECOND STORAGE TIER</p><h3>SMB log archive</h3></div><span class="badge {{ 'healthy' if smb.enabled and archive_status.available and not archive_status.error else 'unknown' }}">{{ 'Paused' if not smb.enabled else 'Service unavailable' if not archive_status.available else 'Retrying' if archive_status.error else 'Running' }}</span></div>
-  <p class="hint">Events save locally first. The archive service copies them to SMB in verified, compressed batches. Local retention and SMB retention are independent.</p>
+  <div class="row"><div><p class="eyebrow">SECOND STORAGE TIER</p><h3>SMB evidence archive</h3></div><span class="badge {{ 'healthy' if smb.enabled and archive_status.available and not archive_status.error else 'unknown' }}">{{ 'Paused' if not smb.enabled else 'Service unavailable' if not archive_status.available else 'Retrying' if archive_status.error else 'Running' }}</span></div>
+  <p class="hint">Network events, agent readings, API snapshots, diagnostics and dashboard snapshots save locally first. The archive service copies them to SMB in verified, compressed batches. Local retention and SMB retention are independent.</p>
   {% if smb_error %}<p class="notice" role="alert">{{ smb_error }}</p>{% endif %}
   {% if smb_test %}<div class="notice" role="status" data-live-key="archive-test-{{ smb_test.id }}"><strong>Connection test · {{ smb_test.state }}</strong><p>{{ smb_test.error or smb_test.result.message or 'The archive service will verify create, write, rename, read and delete permissions.' }}</p>{% if not archive_status.available and smb_test.state=='pending' %}<p>The archive service is unavailable. Start the log-archiver service to run this test.</p>{% endif %}</div>{% endif %}
   {% if smb.enabled and archive_status.error %}<p class="notice" role="status">{{ archive_status.error }}{% if archive_status.next_retry %} Next retry {{ archive_status.next_retry|timestamp }}.{% endif %}</p>{% endif %}
   {% if archive_status.gaps|default(0) %}<p class="notice" role="alert">{{ archive_status.gaps }} events lost their pending archive copy after local limits were reached. The SMB archive may have gaps. Increase the upload buffer or restore the connection.</p>{% endif %}
   <div class="log-stats">
     <div><small>Last verified upload</small><strong>{{ archive_status.last_success|default(none)|timestamp }}</strong></div>
-    <div><small>Pending copies</small><strong>{{ archive_status.pending|default(0) }} events</strong><small>{{ ((archive_status.pending_bytes|default(0))/1048576)|round(1) }} / {{ smb.buffer_mb }} MB</small></div>
+    <div><small>Pending copies</small><strong>{{ archive_status.pending|default(0) }} records</strong><small>{{ ((archive_status.pending_bytes|default(0))/1048576)|round(1) }} MB pending · {{ smb.buffer_mb }} MB buffer per stream</small></div>
     <div><small>Waiting in local history</small><strong>{{ archive_status.waiting_local|default(0) }}</strong></div>
     <div><small>SMB retention</small><strong>{% for value,label in periods if value|string==smb.days|string %}{{ label }}{% endfor %}</strong><small>{{ archive_status.uploaded_events|default(0) }} events copied by this installation</small></div>
   </div>
+  {% set telemetry=archive_status.telemetry|default({}) %}<p class="hint">Telemetry: {{ telemetry.records|default(0) }} local records · {{ telemetry.pending|default(0) }} pending · <a href="/telemetry-history">Browse history</a>. Dashboard data is captured every five minutes. Secrets and connection credentials are excluded.</p>{% if telemetry.dropped|default(0) %}<p class="notice" role="alert">{{ telemetry.dropped }} telemetry records could not be queued because the upload buffer was full. History has gaps; restore SMB access or increase the buffer.</p>{% endif %}
   <form method="post" class="smb-storage-form">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <div class="log-config">
@@ -26,13 +27,13 @@
       </div>
     </div>
     <div class="log-config">
-      <label>Keep SMB events<select name="smb_days">{% for value,label in periods %}<option value="{{ value }}" {% if smb.days|string==value|string %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+      <label>Keep SMB evidence<select name="smb_days">{% for value,label in periods %}<option value="{{ value }}" {% if smb.days|string==value|string %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
       <label>Pending upload buffer (MB)<input type="number" name="smb_buffer_mb" value="{{ smb.buffer_mb }}" min="16" max="16384" required></label>
     </div>
-    <label class="checkbox"><input type="checkbox" name="smb_enabled" value="yes" {% if smb.enabled %}checked{% endif %}>Copy logs to this SMB archive</label>
+    <label class="checkbox"><input type="checkbox" name="smb_enabled" value="yes" {% if smb.enabled %}checked{% endif %}>Copy logs and collected telemetry to this SMB archive</label>
     <details><summary>Connection options</summary><label class="checkbox"><input type="checkbox" name="smb_encrypt" value="yes" {% if smb.encrypt %}checked{% endif %}>Require SMB encryption (server must support SMB 3)</label><p class="hint">SMB signing is required. Passwords are stored encrypted. No operating-system mount or administrator privileges are needed.</p></details>
-    <div class="row"><button class="primary" name="operation" value="smb_test">Save and test connection</button><button name="operation" value="smb_save">Save settings</button><a class="button" href="/network-events/archive">Search SMB history</a></div>
+    <div class="row"><button class="primary" name="operation" value="smb_test">Save and test connection</button><button name="operation" value="smb_save">Save settings</button><a class="button" href="/network-events/archive">Search network logs</a><a class="button" href="/telemetry-history">Telemetry history</a></div>
   </form>
   {% if smb.enabled %}<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><button name="operation" value="smb_disable">Pause SMB uploads</button></form>{% endif %}
-  <p class="hint">Copies upload in batches, normally within five minutes. Pending copies survive restarts and remain outside local event retention. If the buffer fills, newer events remain eligible for upload while they exist locally; local expiry can cause archive gaps. Indefinite SMB retention never deletes completed batches automatically. The app manages only its own archive subfolder. Changing the share does not migrate old SMB history.</p>
+  <p class="hint">Copies upload in batches, normally within five minutes. Pending copies survive restarts and remain outside local event retention. If the buffer fills, newer events remain eligible for upload while they exist locally; local expiry can cause archive gaps. Indefinite SMB retention never deletes completed batches automatically. Telemetry uses a separate compressed archive subfolder and the same SMB retention. Local time, size and record budgets apply separately to each stream; original monitoring history remains independent. Pausing uploads continues bounded telemetry capture. The app manages only its own archive subfolders. Changing the share does not migrate old SMB history.</p>
 </section>

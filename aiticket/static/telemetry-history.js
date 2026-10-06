@@ -1,0 +1,1 @@
+(() => {const form=document.getElementById('telemetry-search-form'),tier=document.getElementById('telemetry-tier');if(!form||!tier)return;const sync=()=>{const remote=tier.value==='smb';form.method=remote?'post':'get';form.querySelector('[name=csrf]').disabled=!remote;};tier.addEventListener('change',sync);sync();})();

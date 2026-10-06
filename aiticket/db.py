@@ -39,6 +39,8 @@ class Store:
     def connect(self):
         c = sqlite3.connect(self.path, timeout=15)
         c.row_factory = sqlite3.Row
+        from .telemetry_archive import encode
+        c.create_function('telemetry_json',1,encode)
         c.execute('PRAGMA foreign_keys=ON')
         c.execute('PRAGMA journal_mode=WAL')
         c.execute('PRAGMA synchronous=FULL')
