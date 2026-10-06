@@ -115,16 +115,19 @@ def results_path(store, identifier):
     return Path(store.path).parent / 'log-archive-results' / (identifier + '.json')
 
 
-def search_results(store, identifier):
+def search_results(store, identifier, strict=False):
     task = job(store, identifier)
     if not task or task['kind'] != 'search' or task['state'] != 'complete': return []
     path = results_path(store, identifier)
     try:
-        if path.stat().st_size > 8 * 1048576: return []
+        if path.stat().st_size > 8 * 1048576: raise ValueError('Search cache exceeds its size limit.')
         records = json.loads(path.read_text())
+        if not isinstance(records,list) or any(not isinstance(r,dict) for r in records):raise ValueError('Invalid search cache.')
         with store.connect() as c:
             return logs.decorate(c, records)
-    except (OSError, ValueError, KeyError): return []
+    except (OSError, ValueError, KeyError,TypeError):
+        if strict:raise ValueError('Search cache is unavailable or invalid.')
+        return []
 
 
 def select_files(files, params):
@@ -141,7 +144,7 @@ class Archiver:
         self.state = store.setting('network_log_archive_status', {})
         self.next_upload = self.next_cleanup = 0
         self.failures = 0
-        self.configuration = None
+        self.configuration = hashlib.sha256(json.dumps(connection(store,vault),sort_keys=True).encode()).hexdigest()
 
     def publish(self, **values):
         self.state.update(heartbeat=time.time(), **values, **self.archive.backlog())
@@ -222,16 +225,23 @@ class Archiver:
             if row['kind'] == 'test': result = self.io(cfg, 'test')
             else:
                 params = json.loads(row['params'])
+                if params.get('ai_job'):
+                    with self.store.connect() as c:
+                        from .commands import ai_allowed
+                        from .ticket_groups import machines
+                        ai_job=ai_allowed(c,params['ai_job'])
+                        if not ai_job or params['machine'] not in machines(c,ai_job['incident_id']):raise OSError('Archive search authorization expired or its target was removed.')
                 if params.get('machine'):
                     params['bindings'] = self.store.rows('SELECT source_id,mac,machine_id FROM log_host_bindings')
                 catalog = self.io(cfg, 'catalog', start=params['start'], end=params['end'])
                 files = select_files(catalog['files'], params)
                 path = results_path(self.store, row['id']); path.parent.mkdir(exist_ok=True, mode=0o700)
-                result = self.io(cfg, 'search', timeout=60, names=[f['name'] for f in files[:100]], params=params, file=str(path))
+                maximum=min(100,max(1,int(params.get('max_files',100))))
+                result = self.io(cfg, 'search', timeout=30 if params.get('ai_job') else 60, names=[f['name'] for f in files[:maximum]], params=params, file=str(path))
                 if path.stat().st_size > 8 * 1048576:
                     path.unlink(); raise OSError('Search result exceeded its size limit. Narrow the time range.')
                 os.chmod(path, 0o600)
-                result['truncated'] = result.get('truncated', False) or len(files) > 100 or catalog.get('truncated', False)
+                result['truncated'] = result.get('truncated', False) or len(files) > maximum or catalog.get('truncated', False)
             self.finish(row['id'], 'complete', result=result)
         except Exception as exc:
             if row['kind']=='search':
@@ -255,7 +265,7 @@ class Archiver:
         if self.configuration != token:
             self.configuration = token
             self.next_upload = self.next_cleanup = self.failures = 0
-            self.state.update(error=None, next_retry=None)
+            self.state.update(error=None, error_since=None, next_retry=None)
         if not cfg['enabled']: return
         if time.monotonic() < self.next_upload: return
         try:
@@ -265,14 +275,14 @@ class Archiver:
                 self.upload(cfg)
             if time.monotonic() >= self.next_cleanup: self.cleanup(cfg)
             self.failures = 0; self.state['error'] = None
-            self.state['next_retry'] = None
+            self.state['next_retry'] = None; self.state['error_since'] = None
             backlog = self.archive.backlog()
             self.next_upload = time.monotonic() + (1 if backlog['pending'] >= 1000 or backlog['waiting_local'] else 5)
         except OSError as exc:
             self.failures += 1
             delay = min(300, 15 * 2 ** min(self.failures-1, 5))
             self.next_upload = time.monotonic() + delay
-            self.state.update(error=str(exc)[:300], next_retry=time.time()+delay)
+            self.state.update(error=str(exc)[:300], error_since=self.state.get('error_since') or time.time(), next_retry=time.time()+delay)
         self.publish()
 
     def expire_jobs(self):
@@ -305,6 +315,7 @@ def run(store, vault):
                 if time.monotonic()-last_expiry > 300:
                     worker.expire_jobs(); last_expiry = time.monotonic()
             except Exception:
+                worker.state['error_since']=worker.state.get('error_since') or time.time()
                 worker.state['error'] = 'Archive service could not complete its work. Check the service logs and test the connection.'
                 try: worker.publish()
                 except Exception: pass

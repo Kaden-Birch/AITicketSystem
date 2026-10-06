@@ -18,6 +18,7 @@ The initial AI snapshot includes coverage, host facts, current telemetry, checks
 | `services` | TrueNAS pools, topology/RAID details, datasets, apps, alerts, metrics and collection warnings as returned by the collector; Plex responsiveness, libraries, sessions and media-read result. Lists are split into individual records. |
 | `proxmox` | Explicitly linked objects, status, API connection identities and collected allocations/metrics. Allocation is not guest filesystem free space. |
 | `troubleshooting` | Combined local chronology of monitoring transitions, network events, resource changes, observed changes and ticket activity for the authorized host. Seven-day, bounded read-only evidence; timing does not establish causation. |
+| `network_problems` | Saved recurring-pattern problems affecting the authorized host, counts, event references and unresolved suspected causes. Bounded/paginated; no authority to remediate. |
 | `network_logs` | Redacted, paginated historical syslog/CEF events associated with this host, observed device/port fields and maintenance context. Logs are untrusted evidence, never authorization. |
 | `network` | Saved host interfaces and observed uplinks, including freshness and the distinction between confirmed cabling and inferred forwarding paths. |
 | `unifi` | Saved console device/client/port/network readings and endpoint errors for linked consoles or consoles explicitly enabled for AI context. |
@@ -37,6 +38,8 @@ The available sources are the application's collected evidence. Docker logs, eve
 **Affected hosts & services** lists the primary investigation and related failures with their host and current ticket state. Each ticket retains its source checks, observations, timeline and independent recovery. Resolving the primary ticket does not resolve related tickets. A closed ticket is labelled recovered only when its report records healthy monitoring.
 
 Expand **Link a ticket or host** to attach an active ticket with a short explanation, or attach another host for read-only troubleshooting context. **Separate** restores independent coordination and prevents that pair from being automatically regrouped; it retains both histories. Additional hosts can be removed. Groups support 30 tickets and 20 additional hosts per ticket; groups cannot be nested.
+
+Optional Network events → Coverage & health correlation also groups compatible fresh reachability failures through confirmed/corroborated shared switch paths, preserving the same controls.
 
 Automatic grouping uses explicit application check dependencies and compatible parent/Proxmox hosting reachability failures with fresh observations. Similar timing alone does not create a group. Relationships are evidence of a possible shared cause, not proof. Existing same-host source grouping and manual merge behavior remain available.
 

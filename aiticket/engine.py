@@ -157,7 +157,7 @@ def claim(store, table, now=None, lease=60):
     with store.connect() as c:
         c.execute('BEGIN IMMEDIATE')
         if table == 'checks':
-            row = c.execute('SELECT * FROM checks WHERE enabled=1 AND kind NOT IN ("process","smb","docker") AND next_run<=? AND (lease_until IS NULL OR lease_until<=?) ORDER BY next_run LIMIT 1', (now, now)).fetchone()
+            row = c.execute('SELECT * FROM checks WHERE enabled=1 AND kind NOT IN ("process","smb","docker","network_problem","log_health") AND next_run<=? AND (lease_until IS NULL OR lease_until<=?) ORDER BY next_run LIMIT 1', (now, now)).fetchone()
         else:
             c.execute("UPDATE deliveries SET state='expired',lease_until=NULL WHERE expires<=? AND state IN ('pending','leased')", (now,))
             row = c.execute("SELECT * FROM deliveries WHERE ((state='pending' AND next_attempt<=?) OR (state='leased' AND lease_until<=?)) AND expires>? ORDER BY created LIMIT 1", (now, now, now)).fetchone()
@@ -199,7 +199,7 @@ def resolution_tick(store,now=None):
             if c.execute("SELECT 1 FROM command_jobs WHERE machine_id=? AND state IN ('awaiting','pending','dispatched','running','cancelling','unknown')",(job['machine_id'],)).fetchone() or c.execute("SELECT 1 FROM proxmox_api_jobs WHERE machine_id=? AND state IN ('awaiting','dispatched','unknown')",(job['machine_id'],)).fetchone(): continue
             if c.execute("SELECT 1 FROM power_jobs WHERE machine_id=? AND state IN ('awaiting','approved','dispatched','authorized','verifying','unknown')",(job['machine_id'],)).fetchone(): continue
             if c.execute("SELECT 1 FROM action_proposals WHERE incident_id=? AND state IN ('awaiting','approved','dispatched','authorized','verifying','unknown')",(job['incident_id'],)).fetchone(): continue
-            checks=c.execute("SELECT c.*,o.at AS observed_at,o.health AS latest_health FROM checks c LEFT JOIN observations o ON o.id=(SELECT id FROM observations WHERE check_id=c.id ORDER BY at DESC LIMIT 1) WHERE c.machine_id=? AND c.enabled=1",(job['machine_id'],)).fetchall()
+            checks=c.execute("SELECT c.*,o.at AS observed_at,o.health AS latest_health FROM checks c LEFT JOIN observations o ON o.id=(SELECT id FROM observations WHERE check_id=c.id ORDER BY at DESC LIMIT 1) WHERE c.machine_id=? AND c.enabled=1 AND (c.kind!='network_problem' OR c.health='down' OR c.id IN (SELECT check_id FROM incident_sources WHERE incident_id=?))",(job['machine_id'],job['incident_id'])).fetchall()
             if not checks or any(r['health']!='healthy' or r['latest_health']!='healthy' or r['observed_at'] is None or r['observed_at']<json.loads(job['report']).get('verification_requested_at',job['created']) or now-r['observed_at']>max(180,r['interval']*3) for r in checks): continue
             sources=c.execute('SELECT c.enabled,s.report FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=?',(job['incident_id'],)).fetchall()
             if any(not r['enabled'] or json.loads(r['report']).get('observed')!='healthy' or now-json.loads(r['report']).get('observed_at',0)>180 for r in sources): continue

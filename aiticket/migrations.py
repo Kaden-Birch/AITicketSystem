@@ -1,6 +1,12 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 42
+CURRENT_VERSION = 43
 MIGRATIONS = {
+    43: (
+        "CREATE TABLE IF NOT EXISTS log_problem_rules(id TEXT PRIMARY KEY,name TEXT NOT NULL,kind TEXT NOT NULL,source_id TEXT REFERENCES log_sources(id),config TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 0,created REAL NOT NULL,updated REAL NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS log_problems(id TEXT PRIMARY KEY,rule_id TEXT NOT NULL REFERENCES log_problem_rules(id),fingerprint TEXT NOT NULL,source_id TEXT NOT NULL,data TEXT NOT NULL,state TEXT NOT NULL,first_seen REAL NOT NULL,last_seen REAL NOT NULL,event_count INTEGER NOT NULL,check_id TEXT REFERENCES checks(id),incident_id TEXT REFERENCES incidents(id),updated REAL NOT NULL,UNIQUE(rule_id,fingerprint))",
+        "CREATE INDEX IF NOT EXISTS log_problem_active ON log_problems(state,updated)",
+        "CREATE TABLE IF NOT EXISTS ai_archive_searches(id TEXT PRIMARY KEY REFERENCES log_archive_jobs(id) ON DELETE CASCADE,job_id TEXT NOT NULL REFERENCES ai_jobs(id),machine_id TEXT NOT NULL REFERENCES machines(id),fingerprint TEXT NOT NULL,created REAL NOT NULL,UNIQUE(job_id,fingerprint))",
+    ),
     42: (
         "CREATE TABLE IF NOT EXISTS log_archive_jobs(id TEXT PRIMARY KEY,kind TEXT NOT NULL,params TEXT NOT NULL,connection TEXT NOT NULL,state TEXT NOT NULL,created REAL NOT NULL,updated REAL NOT NULL,result TEXT,error TEXT)",
         "CREATE INDEX IF NOT EXISTS log_archive_queue ON log_archive_jobs(state,created)",

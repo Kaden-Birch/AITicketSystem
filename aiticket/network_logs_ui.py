@@ -54,6 +54,34 @@ def register(app, store, vault, login_required):
                                name=target['name'],back='/incidents/'+incident_id if incident_id else '/hosts/'+machine_id,
                                incident_id=incident_id)
 
+    @app.route('/network-events/problems',methods=['GET','POST'])
+    @login_required
+    def network_problems():
+        from . import log_problems as problems
+        values={};error=None
+        if request.args.get('rule'):
+            rule=next((r for r in problems.rules(store) if r['id']==request.args['rule']),None)
+            if not rule:abort(404)
+            values={**rule,**rule['config'],'minutes':rule['config']['window']//60,'event_names':'\n'.join(rule['config']['event_names']),'enabled':'yes' if rule['enabled'] else '', 'tickets':'yes' if rule['config']['tickets'] else ''}
+        if request.method=='POST':
+            values=dict(request.form)
+            try:
+                problems.save_rule(store,values);flash('Pattern rule saved. Evaluation runs in the application worker.');return redirect('/network-events/problems')
+            except (ValueError,TypeError) as exc:error=str(exc)
+        return render_template('network-log-problems.html',values=values,error=error,kinds=problems.KINDS,supported=problems.NAMES,rules=problems.rules(store),problems=problems.problems(store),scan=store.setting('network_problem_scan',{}),sources=store.rows('SELECT id,name FROM log_sources ORDER BY name'),host_names={r['id']:r['name'] for r in store.rows('SELECT id,name FROM machines')})
+
+    @app.route('/network-events/coverage',methods=['GET','POST'])
+    @login_required
+    def network_log_coverage():
+        from . import log_coverage as coverage
+        cfg=store.setting('network_log_health',{});error=None
+        values={'health_machine':cfg.get('machine'),'failure_minutes':cfg.get('delay',900)//60,'health_enabled':'yes' if cfg.get('enabled') else '', 'correlation':'yes' if store.setting('network_log_correlation',False) else ''}
+        if request.method=='POST':
+            values=dict(request.form)
+            try:coverage.save(store,values);flash('Collection health and correlation settings saved.');return redirect('/network-events/coverage')
+            except (ValueError,TypeError) as exc:error=str(exc)
+        return render_template('network-log-coverage.html',coverage=coverage.view(store),values=values,error=error,hosts=store.rows('SELECT id,name FROM machines ORDER BY name'))
+
     @app.route('/settings/network-logs', methods=['GET', 'POST'])
     @login_required
     def network_log_settings():
@@ -173,7 +201,7 @@ def register(app, store, vault, login_required):
     @login_required
     def network_event(identifier):
         with store.connect() as c: item = logs.event(c, identifier)
-        if not item: abort(404)
+        if not item or request.args.get('event_key') not in (None,item['event_key']): abort(404)
         error = None
         if request.method == 'POST':
             try:

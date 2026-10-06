@@ -128,4 +128,4 @@ def incident_paused(c,incident_id):
     sources=c.execute('SELECT c.kind,c.enabled,c.config FROM incident_sources s JOIN checks c ON c.id=s.check_id WHERE s.incident_id=?',(incident_id,)).fetchall()
     if not sources:
         sources=c.execute('SELECT c.kind,c.enabled,c.config FROM incidents i JOIN checks c ON c.id=i.check_id WHERE i.id=?',(incident_id,)).fetchall()
-    return bool(sources) and all(r['kind']=='agent_metric' and not r['enabled'] and json.loads(r['config']).get('health_rule') for r in sources)
+    return bool(sources) and all(not r['enabled'] and (r['kind'] in ('network_problem','log_health') or r['kind']=='agent_metric' and json.loads(r['config']).get('health_rule')) for r in sources)

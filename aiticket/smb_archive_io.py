@@ -131,7 +131,7 @@ def execute(request):
             if len(expanded) > MAX_EXPANDED: raise ValueError('Expanded archive exceeds size limit.')
             for line in expanded.splitlines():
                 scanned += 1
-                if scanned > 100000: truncated = True; break
+                if scanned > min(100000,max(1,int(params.get('scan_limit',100000)))): truncated = True; break
                 event = json.loads(line)
                 if not isinstance(event, dict) or not isinstance(event.get('event_key'), str) or len(event['event_key']) > 100:
                     raise ValueError('Invalid archive event identity.')
@@ -150,7 +150,7 @@ def execute(request):
                     if not any(a['machine_id']==params['machine'] for a in associations): continue
                 # Return a bounded result even for very broad historical searches.
                 results.append(event)
-                if len(results) >= 200: truncated = True; break
+                if len(results) >= min(200,max(1,int(params.get('result_limit',200)))): truncated = True; break
             if truncated: break
         Path(request['file']).write_text(json.dumps(results, separators=(',', ':'), allow_nan=False))
         return {'count': len(results), 'scanned': scanned, 'truncated': truncated}

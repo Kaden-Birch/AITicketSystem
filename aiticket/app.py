@@ -517,7 +517,7 @@ def create_app(data_dir=None, testing=False):
 
     def command_tool_action_impl(payload,ai_job=None,external=False):
         from .commands import queue,view,decide
-        if not isinstance(payload,dict) or set(payload)-{'action','machine_id','incident_id','command','id','connection_id','method','path','params','summary','source','offset','limit','query','article_id','category','folder','title','body','tags','operation','target','phase','outcome'}: raise ValueError('Invalid command tool envelope.')
+        if not isinstance(payload,dict) or set(payload)-{'action','machine_id','incident_id','command','id','connection_id','method','path','params','summary','source','offset','limit','query','article_id','category','folder','title','body','tags','operation','target','phase','outcome','start','end'}: raise ValueError('Invalid command tool envelope.')
         if any(k in payload and (not isinstance(payload[k],str) or len(payload[k])>100) for k in ('id','machine_id','incident_id')): raise ValueError('Invalid command target identity.')
         action=payload.get('action')
         if ai_job:
@@ -527,13 +527,13 @@ def create_app(data_dir=None, testing=False):
                 if not job: abort(403)
                 incident=store.rows('SELECT machine_id FROM incidents WHERE id=?',(job['incident_id'],))[0]
                 machine=incident['machine_id'];incident_id=job['incident_id']
-                if json.loads(job['evidence']).get('workflow_test') and action not in ('targets','evidence','network','block','resolve'):
+                if json.loads(job['evidence']).get('workflow_test') and action not in ('targets','evidence','network','archive_search','archive_status','block','resolve'):
                     raise ValueError('Workflow tests only inspect supplied context and request verification. Host operations are disabled.')
         else:
             machine=payload.get('machine_id');incident_id=payload.get('incident_id')
-        if ai_job and json.loads(store.rows('SELECT report FROM incidents WHERE id=?',(incident_id,))[0]['report']).get('knowledge_task') and action not in ('targets','evidence','knowledge','changes','ticket_history','block'):raise ValueError('Article creation only reads saved evidence; host operations are disabled.')
+        if ai_job and json.loads(store.rows('SELECT report FROM incidents WHERE id=?',(incident_id,))[0]['report']).get('knowledge_task') and action not in ('targets','evidence','archive_search','archive_status','knowledge','changes','ticket_history','block'):raise ValueError('Article creation only reads saved evidence; host operations are disabled.')
         original_machine=machine
-        if ai_job and action in ('targets','evidence','network','refresh','knowledge','changes','ticket_history','knowledge_write') and payload.get('machine_id'):
+        if ai_job and action in ('targets','evidence','archive_search','archive_status','network','refresh','knowledge','changes','ticket_history','knowledge_write') and payload.get('machine_id'):
             with store.connect() as c:
                 from .ticket_groups import machines as affected_machines
                 if payload['machine_id'] not in affected_machines(c,incident_id):abort(403)
@@ -623,6 +623,10 @@ def create_app(data_dir=None, testing=False):
             with store.connect() as c:
                 from .evidence import summary
                 return {'state':'refreshed','evidence_available':summary(c,machine)}
+        if action in ('archive_search','archive_status'):
+            if not ai_job:abort(403)
+            from .log_archive_ai import search,result
+            return search(store,vault,ai_job,machine,payload) if action=='archive_search' else result(store,ai_job,machine,payload.get('id'))
         if action=='evidence':
             with store.connect() as c:
                 if external and not c.execute('SELECT 1 FROM command_policies WHERE machine_id=? AND enabled=1 AND external=1',(machine,)).fetchone():abort(403)

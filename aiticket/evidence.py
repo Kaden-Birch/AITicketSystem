@@ -1,7 +1,7 @@
 """Readable coverage summaries and bounded, paginated read-only troubleshooting facts."""
 import json,time
 
-SOURCES=('metrics','checks','processes','containers','services','proxmox','network','unifi','history','check_history','network_logs','troubleshooting')
+SOURCES=('metrics','checks','processes','containers','services','proxmox','network','unifi','history','check_history','network_logs','troubleshooting','network_problems')
 
 
 def summary(c,machine,now=None):
@@ -78,7 +78,11 @@ def page(c,machine,source,offset=0,limit=20,now=None):
             if size>20000:item={'id':row['id'],'at':row['at'],'name':row['name'],'message':row['message'][:1000],'truncated':True,'note':'Open this network event in the UI for structured fields.'}
             items.append(item);used+=len(json.dumps(item))
         return {'machine_id':machine,'source':source,'offset':offset,'items':items,'total':None,'next_offset':offset+len(items) if len(items)<len(result['items']) else result['next_offset'],'available':result['available'],'history_truncated':result.get('truncated',False),**meta}
-    if source=='metrics':
+    if source=='network_problems':
+        data=[dict(r)|{'data':json.loads(r['data'])} for r in c.execute("SELECT p.id,p.state,p.event_count,p.first_seen,p.last_seen,p.data,p.incident_id FROM log_problems p LEFT JOIN checks ch ON ch.id=p.check_id WHERE ch.machine_id=? OR EXISTS (SELECT 1 FROM json_each(p.data,'$.hosts') WHERE value=?) ORDER BY p.updated DESC LIMIT 100",(machine,machine))]
+        for item in data:item['data'].pop('seen_keys',None)
+        meta['note']='Counts are bounded observed facts, not proven causes. Quiet/expired patterns do not verify recovery. Articles and workflows remain optional and require current prerequisites and host permissions.'
+    elif source=='metrics':
         row=c.execute('SELECT sampled_at,last_seen,telemetry FROM agents WHERE machine_id=? AND revoked=0',(machine,)).fetchone()
         if row:
             data=[{'metric':k,'value':v} for k,v in sorted(evidence_snapshot(json.loads(row['telemetry'] or '{}')).items())];meta.update(sampled_at=row['sampled_at'],received_at=row['last_seen'])

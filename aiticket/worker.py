@@ -22,6 +22,10 @@ def tick(store, vault):
     from .power import tick as power_tick
     powered=power_tick(store,vault)
     notifications(store)
+    from .log_problems import tick as problem_tick
+    from .log_coverage import tick as log_health_tick
+    problem_tick(store)
+    log_health_tick(store)
     from .proxmox import scheduled_refresh
     refreshed=scheduled_refresh(store,vault)
     with store.connect() as c:
