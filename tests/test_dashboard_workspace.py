@@ -67,14 +67,50 @@ def test_unifi_link_speeds_drive_media_and_stale_readings(signed_in):
     def get(self,path,params=None):
         if path.endswith('/devices'):return {'data':[device]}
         if path.endswith('/devices/d1'):return device
-        if path.endswith('/statistics/latest'):return {'cpuUtilizationPct':10}
+        if path.endswith('/statistics/latest'):return {'cpuUtilizationPct':10,'interfaces':{},'uplink':{'rxRateBps':125000,'txRateBps':5000}}
         return {'data':[]}
     with patch.object(unifi.Client,'get',get):unifi.refresh(store,vault,identifier)
     data=payload(client);d=data['network'][0]
     assert [p['speed'] for p in d['ports']]==[100,1000,2500,10000,25000,0]
+    assert d['connected']==5
     assert [d['media'] for d in d['drives']]==['HDD','SSD']
     assert 'fixture-secret' not in json.dumps(data)
     with store.connect() as c:c.execute('UPDATE unifi_devices SET last_seen=?',(time.time()-3600,))
     d=payload(client)['network'][0]
     assert not d['fresh'] and all(p['speed'] is None for p in d['ports'])
     assert all(d['state']=='unknown' for d in d['drives'])
+
+
+def test_realistic_unifi_radio_statistics_keep_configuration_and_uplink(signed_in):
+    from unittest.mock import patch
+    from aiticket import unifi
+    client,store,vault,_=signed_in
+    identifier=unifi.save(store,vault,{'name':'LAN','url':'https://unifi.invalid','secret':'fixture-secret','kind':'network','site':'site1'})
+    device={'id':'ap1','name':'U7 Pro','model':'U7 Pro','state':'ONLINE','uplink':{'deviceId':'switch1'},'interfaces':{'ports':[{'idx':1,'state':'UP','speedMbps':2500,'poe':{'enabled':True,'state':'UP','standard':'802.3at','type':2}}],'radios':[{'frequencyGHz':2.4,'channel':6,'channelWidthMHz':20,'wlanStandard':'802.11ax'},{'frequencyGHz':5,'channel':149,'channelWidthMHz':80,'wlanStandard':'802.11be'}]}}
+    statistics={'cpuUtilizationPct':5,'memoryUtilizationPct':40,'uplink':{'rxRateBps':125000,'txRateBps':5000},'interfaces':{'radios':[{'frequencyGHz':5,'txRetriesPct':12.5},{'frequencyGHz':2.4,'txRetriesPct':0}]}}
+    def get(self,path,params=None):
+        if path.endswith('/devices'):result={'data':[device]}
+        elif path.endswith('/devices/ap1'):result=device
+        elif path.endswith('/statistics/latest'):result=statistics
+        else:result={'data':[]}
+        return unifi.clean(result)
+    with patch.object(unifi.Client,'get',get):unifi.refresh(store,vault,identifier)
+    view=payload(client)['network'][0]
+    assert view['connected']==1 and view['ports'][0]['speed']==2500
+    assert view['uplink']['deviceId']=='switch1' and view['uplink']['rxRateBps']==125000
+    assert [(r['channel'],r['txRetriesPct']) for r in view['radios']]==[(6,0),(149,12.5)]
+    assert view['radios'][1]['wlanStandard']=='802.11be'
+    assert all(r['airtimePct'] is None for r in view['radios'])
+    assert not view['ports'][0]['uplink']  # Parent identity does not identify its physical port.
+    response=client.get(view['href'])
+    assert response.status_code==200
+    assert b'Channel 149' in response.data and b'80 MHz' in response.data
+    assert b'api-radio-5-txRetriesPct' in response.data and b'12.5' in response.data
+    assert b'Uplink device' in response.data and b'switch1' in response.data
+    metrics=json.loads(store.rows('SELECT metrics FROM metric_samples WHERE entity_id=?',(view['id'],))[0]['metrics'])
+    assert metrics['radio.5.txRetriesPct']==12.5 and metrics['radio.2.4.txRetriesPct']==0
+    assert not any(key.endswith('airtimePct') for key in metrics)
+    with store.connect() as c:c.execute('UPDATE unifi_devices SET last_seen=?',(time.time()-3600,))
+    stale=payload(client)['network'][0]
+    assert stale['connected'] is None and stale['radios'][1]['channel']==149
+    assert all(r['txRetriesPct'] is None and r['airtimePct'] is None for r in stale['radios'])

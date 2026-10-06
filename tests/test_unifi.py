@@ -377,3 +377,43 @@ def test_network_history_uses_only_device_uplink_rates(environment):
         c.execute('INSERT INTO metric_samples VALUES(?,?,?,?)',('other','unifi',now,json.dumps({'statistics.uplink.rxRateBps':999e9})))
     view=build(store,'router',{'device':{'state':'ONLINE'}},True,{}, {},'30d')
     assert view['window']=='30d' and view['samples']==[{'at':now*1000,'read':2,'write':0}]
+
+
+def test_radio_matching_bounds_and_missing_link_speed(environment):
+    from aiticket.unifi_network_view import build
+    from aiticket.unifi_telemetry import radios,radio_metrics
+    _,store,_=environment
+    device={'state':'ONLINE','interfaces':{'ports':[{'idx':1,'state':'UP'},{'idx':2,'state':'DOWN','speedMbps':10000},{'idx':3,'state':'UP','speedMbps':float('inf')}],'radios':[{'frequencyGHz':5,'channel':36},{'frequencyGHz':5,'channel':149},{'frequencyGHz':6,'channel':37}]}}
+    statistics={'interfaces':{'radios':[{'frequencyGHz':5,'txRetriesPct':30},{'frequencyGHz':6,'txRetriesPct':101,'airtimePct':float('nan')},{'frequencyGHz':2.4,'txRetriesPct':10,'airtimePct':25}]}}
+    rows=radios(device,statistics)
+    assert [r['txRetriesPct'] for r in rows]==[None,None,None,10]
+    assert [r['airtimePct'] for r in rows]==[None,None,None,25]
+    assert radio_metrics({'device':device,'statistics':statistics})=={'radio.2.4.txRetriesPct':10,'radio.2.4.airtimePct':25}
+    view=build(store,'test',{'device':device,'statistics':statistics},True,{}, {})
+    assert view['connected']==2 and [p['speed'] for p in view['ports']]==[None,0,None]
+    assert len(view['radio_history']['labels'])==4  # Duplicate bands are not duplicate graphs.
+
+
+def test_radio_history_tracks_bands_across_array_reordering(environment):
+    from aiticket.unifi_network_view import build
+    _,store,_=environment
+    now=time.time()-10
+    records=[{'statistics.interfaces.radios.1.frequencyGHz':5,'statistics.interfaces.radios.1.txRetriesPct':20,'statistics.interfaces.radios.2.frequencyGHz':2.4,'statistics.interfaces.radios.2.txRetriesPct':0}, {'radio.5.txRetriesPct':10,'radio.2.4.txRetriesPct':2,'radio.5.airtimePct':40}]
+    with store.connect() as c:
+        for i,record in enumerate(records):c.execute('INSERT INTO metric_samples VALUES(?,?,?,?)',('ap','unifi',now+i,json.dumps(record)))
+        c.execute('INSERT INTO metric_samples VALUES(?,?,?,?)',('other','unifi',now,json.dumps({'radio.5.txRetriesPct':99})))
+    view=build(store,'ap',{'device':{'state':'ONLINE','interfaces':{'radios':[{'frequencyGHz':2.4},{'frequencyGHz':5}]}},'statistics':{'interfaces':{'radios':[{'frequencyGHz':5,'txRetriesPct':10,'airtimePct':40}]}}},True,{}, {})
+    samples=view['radio_history']['samples']
+    assert [s['api-radio-5-txRetriesPct'] for s in samples]==[20,10]
+    assert [s['api-radio-2.4-txRetriesPct'] for s in samples]==[0,2]
+    assert 'api-radio-5-airtimePct' not in samples[0] and samples[1]['api-radio-5-airtimePct']==40
+    assert view['radio_history']['basis']=='API radio reading'
+
+
+def test_large_port_inventory_does_not_crowd_out_live_statistics():
+    from aiticket.unifi import numeric_metrics
+    device={'interfaces':{'ports':[{'idx':i,'speedMbps':1000,'maxSpeedMbps':10000,'rxBytes':123,'txBytes':456,'rxPackets':23,'txPackets':45} for i in range(1,101)],'radios':[{'frequencyGHz':5,'channel':149}]}}
+    values=numeric_metrics({'device':device,'statistics':{'cpuUtilizationPct':12,'memoryUtilizationPct':40,'uplink':{'rxRateBps':125000,'txRateBps':5000},'interfaces':{'radios':[{'frequencyGHz':5,'txRetriesPct':15}]}}})
+    assert values['statistics.cpuUtilizationPct']==12 and values['statistics.memoryUtilizationPct']==40
+    assert values['statistics.uplink.rxRateBps']==125000 and values['radio.5.txRetriesPct']==15
+    assert len(values)==200

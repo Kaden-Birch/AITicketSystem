@@ -48,6 +48,7 @@ def build(store, summary, now=None):
     network=[]
     for connection in store.rows('SELECT u.id,u.name,u.kind,u.machine_id,u.snapshot,c.interval FROM unifi_connections u LEFT JOIN checks c ON c.id=u.check_id WHERE u.deleted IS NULL ORDER BY u.name'):
         snapshot=json.loads(connection['snapshot'] or '{}');entries=[]
+        device_names={r['device_id']:json.loads(r['data']).get('device',{}).get('name',r['device_id']) for r in store.rows('SELECT device_id,data FROM unifi_devices WHERE connection_id=? AND deleted IS NULL',(connection['id'],))}
         if connection['kind']=='drive':entries.append((connection['name'],connection['machine_id'],snapshot.get('sampled_at'),snapshot.get('readings',{}),'/network-devices/'+connection['id'],True))
         else:
             for device in store.rows('SELECT * FROM unifi_devices WHERE connection_id=? AND deleted IS NULL ORDER BY device_id',(connection['id'],)):
@@ -55,18 +56,13 @@ def build(store, summary, now=None):
         for name,machine,at,readings,href,is_nas in entries:
             fresh=bool(at and 0<=now-at<=max(180,3*(connection['interval'] or 60)))
             view=drive_view(store,machine,readings,fresh,snapshot.get('errors',{})) if is_nas else network_view(store,machine,readings,fresh,snapshot.get('errors',{}),{})
-            device=view['device'];rawports=device.get('interfaces',{}).get('ports',device.get('ports',[])) if isinstance(device.get('interfaces',{}),dict) else []
-            ports=[]
-            for port in view.get('ports',[]):
-                raw=next((p for p in rawports if isinstance(p,dict) and port['number'] in [p.get(k) for k in ('idx','index','portIndex','portIdx')]),{})
-                speed=raw.get('speedMbps') if fresh and port['state'] in ('healthy','warning') else 0 if fresh and port['state']=='idle' else None
-                ports.append({**port,'speed':speed if type(speed) in (int,float) else None})
+            device=view['device'];ports=view.get('ports',[])
             drives=[]
             rawdisks=readings.get('storage',device.get('storage',{}));rawdisks=rawdisks.get('disks',[]) if isinstance(rawdisks,dict) else []
             for disk in view['disks']:
                 raw=next((d for d in rawdisks if isinstance(d,dict) and str(d.get('slotId'))==disk['slot']),{})
                 media=str(raw.get('mediaType',raw.get('type',''))).upper()
                 drives.append({**disk,'media':media if media in ('HDD','SSD') else '?','title':'Drive '+disk['slot']})
-            interfaces=device.get('interfaces',{});radios=interfaces.get('radios',[]) if isinstance(interfaces,dict) else []
-            network.append({'id':machine,'name':name,'href':href,'model':view['model'],'fresh':fresh,'state':view['state'],'metrics':view['metrics'],'ports':ports,'drives':drives,'pools':view['pools'],'radios':radios if isinstance(radios,list) and fresh else [],'kind':str(device.get('type','')).lower(),'clients':readings.get('statistics',{}).get('clientCount') if fresh else None})
+            radios=view.get('radios',[])
+            network.append({'id':machine,'name':name,'href':href,'model':view['model'],'fresh':fresh,'state':view['state'],'metrics':view['metrics'],'ports':ports,'connected':view.get('connected') if fresh and any(p['state']!='unknown' for p in ports) else None,'uplink':view.get('uplink',{}),'uplink_name':device_names.get(view.get('uplink',{}).get('deviceId')),'drives':drives,'pools':view['pools'],'radios':radios,'kind':str(device.get('type','')).lower(),'clients':readings.get('statistics',{}).get('clientCount') if fresh else None})
     return {'summary':summary,'tickets':compact[:5],'attention':sorted([r for r in compact if r['category']=='manual'],key=lambda r:-r['updated'])[:3],'nodes':nodes,'nas':nas,'network':network,'services':services,'monitoring_attention':0}

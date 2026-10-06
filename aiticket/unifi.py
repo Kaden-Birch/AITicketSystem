@@ -11,7 +11,7 @@ from .security import validate_url
 NETWORK = '/proxy/network/integration/v1'
 DRIVE = {'storage':'/proxy/drive/api/v2/storage', 'device':'/proxy/drive/api/v2/systems/device-info', 'throughput':'/proxy/drive/api/v2/systems/network-io'}
 # Deliberately discard unknown fields, credentials, client names and raw error bodies.
-FIELDS = {'uplinkDeviceId','portId','chassisId','lldp','neighbors','portIdSubtype','ifname'} | set('idx index portIndex speedMbps maxSpeedMbps connector media poe standard txBytes rxBytes txPackets rxPackets txErrors rxErrors errors dropped nativeNetworkId taggedNetworkIds networkName ipv4Configuration subnet gateway dhcpConfiguration address clientId uplinkPortIndex lastHeartbeatAt nextHeartbeatAt radios frequency channel channelWidth txPower utilizationPct signalDbm traffic rxBytesPerSecond txBytesPerSecond'.split()) | set('id name model macAddress ipAddress state status firmwareVersion firmwareUpdatable uptime uptimeSec cpuUtilizationPct memoryUtilizationPct loadAverage interfaces ports uplink speed maxSpeed linkSpeed connected enabled vlanId networkId type connectionType deviceId portIdx management default data offset limit totalCount count pools disks cacheSlots number capacity usage raidGroups currentLevel configLevel currentProtection expectedProtection slotId poolId size temperature powerOnHours badSectorCount uncorrectableSectorCount readErrorRate healthScore cpu currentload memory free total available networkInterfaces interfaceName version receiveKBPS transmitKBPS timestamp txRateBps rxRateBps'.split())
+FIELDS = set('wlanStandard features switching accessPoint gateway adoptedAt provisionedAt configurationId frequencyGHz channelWidthMHz'.split()) | {'uplinkDeviceId','portId','chassisId','lldp','neighbors','portIdSubtype','ifname'} | set('idx index portIndex speedMbps maxSpeedMbps connector media poe standard txBytes rxBytes txPackets rxPackets txErrors rxErrors errors dropped nativeNetworkId taggedNetworkIds networkName ipv4Configuration subnet gateway dhcpConfiguration address clientId uplinkPortIndex lastHeartbeatAt nextHeartbeatAt radios frequency channel channelWidth txPower utilizationPct signalDbm traffic rxBytesPerSecond txBytesPerSecond'.split()) | set('id name model macAddress ipAddress state status firmwareVersion firmwareUpdatable uptime uptimeSec cpuUtilizationPct memoryUtilizationPct loadAverage interfaces ports uplink speed maxSpeed linkSpeed connected enabled vlanId networkId type connectionType deviceId portIdx management default data offset limit totalCount count pools disks cacheSlots number capacity usage raidGroups currentLevel configLevel currentProtection expectedProtection slotId poolId size temperature powerOnHours badSectorCount uncorrectableSectorCount readErrorRate healthScore cpu currentload memory free total available networkInterfaces interfaceName version receiveKBPS transmitKBPS timestamp txRateBps rxRateBps'.split())
 
 
 def clean(value, depth=0):
@@ -177,7 +177,8 @@ def save(store,vault,form):
 
 
 def numeric_metrics(readings):
-    values={}
+    from .unifi_telemetry import radio_metrics
+    values=radio_metrics(readings)
     def walk(value,path=''):
         if len(values)>=200:return
         if isinstance(value,dict):
@@ -187,7 +188,9 @@ def numeric_metrics(readings):
         elif isinstance(value,list):
             for index,item in enumerate(value):walk(item,path+'.'+str(index+1))
         elif type(value) in (int,float) and math.isfinite(value):values[path]=value
-    walk(readings)
+    # Prioritize live resource/uplink/radio readings before large port inventories.
+    walk(readings.get('statistics',{}),'statistics')
+    walk({k:v for k,v in readings.items() if k!='statistics'})
     device=readings.get('device',{})
     device=device if isinstance(device,dict) else {}
     cpu=device.get('cpu',{}); memory=device.get('memory',{})

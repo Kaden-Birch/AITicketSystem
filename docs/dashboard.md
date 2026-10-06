@@ -15,3 +15,11 @@ Unlinked equipment sections are hidden. Device, node, guest, drive and workload 
 Resolution charts support seven or thirty days, mouse/touch inspection and keyboard arrow keys for exact daily values. Days without closures leave resolution gaps. Graph values use the configured display timezone for daily aggregation.
 
 Update/rebuild the main application to install this dashboard. No agent update or database migration is required.
+
+UniFi port tiles use the same normalized UP/DOWN state and negotiated speed as
+the device workspace, even when the statistics response contains empty
+interfaces. Connected ports without a reported speed have a green outline;
+dashed tiles indicate unavailable link state. AP cards preserve channel details
+and display actual airtime when explicitly reported, otherwise clearly labelled
+transmit retries. Airtime is not part of the documented Integration API schema.
+Uplink parent names appear when that parent is present in the linked inventory.

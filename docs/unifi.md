@@ -101,3 +101,32 @@ Settings, manual refresh, monitoring checks, ticket creation/history, network/cl
 ## Network log collection
 
 For independent CEF/syslog ingestion, event search, host associations and AI evidence, see [Network events setup](network-logs.md). Log collection supplements the API and does not change ticket thresholds.
+
+### Network interface and radio readings
+
+Device details and latest statistics are complementary responses. Statistics may
+contain an empty `interfaces` object and uplink traffic without a parent ID. The
+presentation joins these with device details, preserving physical port states,
+negotiated speeds, radio channels, channel widths, wireless standards and uplink
+parent identity. Dashboard tiles and port drawers use the same normalized port
+readings. An UP port with an unavailable speed stays connected; unavailable or
+stale readings are not treated as disconnected. A parent device ID alone does
+not identify an uplink port. PoE state, enabled status, standard and type are
+shown when reported.
+
+The [UniFi Network Integration API schema](https://developer.ui.com/network/v10.3.58/openapi.json)
+reports per-band transmit retries (`txRetriesPct`), but does not document airtime
+utilization. Retries are never converted to airtime. AP cards show retries when
+no explicit airtime reading is available; device pages show band configuration,
+current readings and bounded API history with exact-value mouse, touch and
+keyboard inspection. Radios are matched by frequency, not array position;
+ambiguous duplicate bands are not assigned another radio's measurements.
+Explicit valid airtime/utilization percentages can be displayed if a response
+includes them. Event-time airtime received through network logs remains in the
+separate Wi-Fi observations section, with its own source and coverage.
+
+API radio history uses existing seven-day metric retention and the selected
+Network activity time range. It does not reconstruct past readings. Existing
+retained per-band retry samples are supported even if array order changed.
+Collection remains read-only and bounded by the existing endpoint, device-count,
+response-size and time limits; this does not change monitoring or ticket rules.
