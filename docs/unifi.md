@@ -87,3 +87,13 @@ They do not represent disk I/O. Hover, tap or use arrow keys for the nearest exa
 recorded sample and timestamp. Gaps are preserved. Retention remains seven days,
 so the month view displays only available history. Additional performance history,
 monitoring checks, tickets, settings and retained diagnostics remain accessible.
+
+### Network equipment workspace
+
+Discovered switches, routers and access points use a visual workspace: compact CPU/RAM/temperature cards, reported Ethernet and fiber ports as rounded status tiles, port detail drawers, an at-a-glance status panel, and device uplink history. Port counts follow telemetry rather than a product catalog. Gray DOWN ports are unused/disconnected, not automatically faults. Blue uplink tiles require an explicitly reported port association. Missing or stale measurements remain unavailable. Resource colors are presentation thresholds and do not change check or ticket decisions.
+
+History offers 10 minutes through one month, with exact retained samples on hover/tap or keyboard. Retention remains seven days; longer views show available history. Cumulative port counters are shown in port details and are not plotted as rates. Network rates follow the existing `rxRateBps`/`txRateBps` byte-rate convention; no inferred traffic or invented PoE wattage is displayed.
+
+When a network device reports its own storage disks or slot count, NVR bays appear inside the equipment illustration and open the same drive detail drawer as the NAS workspace. The documented [Network API](https://developer.ui.com/network/v10.0.162/openapi.json) does not guarantee Protect/NVR storage telemetry. The workspace does not invent bay counts from model names or fetch undocumented Protect endpoints. A separate supported Protect telemetry integration is needed where disk information is absent.
+
+Settings, manual refresh, monitoring checks, ticket creation/history, network/client observations and retained diagnostic readings remain available.

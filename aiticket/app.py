@@ -1468,7 +1468,10 @@ def create_app(data_dir=None, testing=False):
             fresh=bool(observed and 0<=time.time()-observed<=max(180,3*max([c['interval'] for c in checks] or [60])))
             nas=build(store,machine,readings,fresh,snapshot.get('errors',{}),request.args.get('window','1h'),max([c['interval'] for c in checks] or [60]))
             return render_template('unifi-nas.html',connection=connection,name=name,machine=machine,observed=observed,fresh=fresh,nas=nas,history=history(store,machine,request.args.get('window','1h')),checks=checks,tickets=tickets,facts=facts(readings),errors=snapshot.get('errors',{}))
-        return render_template('network-device.html',network_names=network_names,device_names=device_names,connection=connection,device_id=device_id,name=name,machine=machine,observed=observed,readings=readings,device=device_info,children=children,checks=checks,tickets=tickets,history=history(store,machine,request.args.get('window','6h')),facts=facts(readings),errors=snapshot.get('errors',{}),fresh=bool(observed and 0<=time.time()-observed<=max(180,3*max([c['interval'] for c in checks] or [60]))))
+        from .unifi_network_view import build
+        fresh=bool(observed and 0<=time.time()-observed<=max(180,3*max([c['interval'] for c in checks] or [60])))
+        network=build(store,machine,readings,fresh,snapshot.get('errors',{}),network_names,request.args.get('window','1h'),max([c['interval'] for c in checks] or [60]))
+        return render_template('network-device.html',nas=network,network_names=network_names,device_names=device_names,connection=connection,device_id=device_id,name=name,machine=machine,observed=observed,readings=readings,device=device_info,children=children,checks=checks,tickets=tickets,history=history(store,machine,request.args.get('window','6h')),facts=facts(readings),errors=snapshot.get('errors',{}),fresh=bool(observed and 0<=time.time()-observed<=max(180,3*max([c['interval'] for c in checks] or [60]))))
 
     @app.get('/network-devices/<identifier>/settings')
     @app.get('/network-devices/<identifier>/devices/<device_id>/settings')

@@ -348,3 +348,32 @@ def test_nas_presentation_stale_and_throughput_history(environment):
     assert result['window']=='10m'
     # Display warnings do not alter the check's stored status or ticket state.
     assert store.rows('SELECT health FROM checks WHERE id=?',(row['check_id'],))[0]['health']=='unknown'
+
+
+def test_network_presentation_dynamic_ports_storage_and_stale(environment):
+    from aiticket.unifi_network_view import build
+    _,store,_=environment
+    readings={'device':{'state':'ONLINE','model':'Future router','interfaces':{'ports':[{'idx':i,'state':'DOWN' if i==1 else 'UP','connector':'SFPPLUS' if i==32 else 'RJ45','speedMbps':1000,'poe':{'state':'LIMITED' if i==3 else 'DOWN'}} for i in range(1,33)]},'uplink':{'portIndex':32},'storage':{'slotCount':2,'disks':[{'slotId':1,'state':'failed','model':'NVR drive'}]}},'statistics':{'cpuUtilizationPct':82,'memoryUtilizationPct':40}}
+    view=build(store,'test',readings,True,{}, {})
+    assert len(view['ports'])==32 and view['ports'][0]['state']=='idle'
+    assert view['ports'][2]['state']=='warning'
+    assert view['ports'][-1]['fiber'] and view['ports'][-1]['uplink']
+    assert view['state']=='failed' and len(view['disks'])==2
+    assert view['metrics'][0]['value']==82 and view['metrics'][1]['value'] is None
+    stale=build(store,'test',readings,False,{}, {})
+    assert stale['state']=='unknown' and all(p['state']=='unknown' for p in stale['ports'])
+    assert all(m['value'] is None for m in stale['metrics'])
+    readings['device'].pop('storage')
+    assert build(store,'test',readings,True,{}, {})['disks']==[]
+
+
+def test_network_history_uses_only_device_uplink_rates(environment):
+    from aiticket.unifi_network_view import build
+    _,store,_=environment
+    now=time.time()-5
+    values={'statistics.uplink.rxRateBps':2e6,'statistics.uplink.txRateBps':0,'device.interfaces.ports.1.rxBytes':999e9,'throughput.receiveKBPS':999e9}
+    with store.connect() as c:
+        c.execute('INSERT INTO metric_samples VALUES(?,?,?,?)',('router','unifi',now,json.dumps(values)))
+        c.execute('INSERT INTO metric_samples VALUES(?,?,?,?)',('other','unifi',now,json.dumps({'statistics.uplink.rxRateBps':999e9})))
+    view=build(store,'router',{'device':{'state':'ONLINE'}},True,{}, {},'30d')
+    assert view['window']=='30d' and view['samples']==[{'at':now*1000,'read':2,'write':0}]
