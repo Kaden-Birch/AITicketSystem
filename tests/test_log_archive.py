@@ -41,6 +41,7 @@ class FakeSMB:
     """Exercise the real helper operations with a filesystem implementing SMB file calls."""
     def __init__(self, root):
         self.root = root; self.sessions = []; self.calls = []
+        self.missing_status = 'STATUS_OBJECT_NAME_NOT_FOUND'
     def ClientConfig(self, **kwargs): assert kwargs['skip_dfs']
     def register_session(self, server, **kwargs): self.sessions.append((server,kwargs))
     def path(self, path):
@@ -48,9 +49,22 @@ class FakeSMB:
         assert '..' not in parts
         return self.root.joinpath(*parts)
     def makedirs(self, path, **kwargs): self.path(path).mkdir(parents=True, **kwargs)
-    def open_file(self, path, mode): self.calls.append(('open',path,mode)); return self.path(path).open(mode)
-    def rename(self, old, new): self.calls.append(('rename',old,new)); self.path(old).rename(self.path(new))
-    def remove(self, path): self.calls.append(('remove',path)); self.path(path).unlink()
+    def missing(self, path):
+        from smbprotocol.header import NtStatus
+        from smbprotocol.exceptions import SMBOSError
+        return SMBOSError(getattr(NtStatus,self.missing_status),path)
+    def open_file(self, path, mode):
+        self.calls.append(('open',path,mode))
+        try: return self.path(path).open(mode)
+        except FileNotFoundError as exc: raise self.missing(path) from exc
+    def rename(self, old, new):
+        self.calls.append(('rename',old,new))
+        try: self.path(old).rename(self.path(new))
+        except FileNotFoundError as exc: raise self.missing(old) from exc
+    def remove(self, path):
+        self.calls.append(('remove',path))
+        try: self.path(path).unlink()
+        except FileNotFoundError as exc: raise self.missing(path) from exc
     def scandir(self, path):
         import os
         return os.scandir(self.path(path))
@@ -268,3 +282,48 @@ def test_smb_file_status_errors_are_classified_without_paths(status, expected):
 def test_unknown_smb_errors_remain_redacted():
     result = smb_archive_io.error_message(ValueError('password=secret username=private'))
     assert result.startswith('SMB operation failed.') and 'secret' not in result and 'private' not in result
+
+
+@pytest.mark.parametrize('missing_status', ['STATUS_OBJECT_NAME_NOT_FOUND', 'STATUS_OBJECT_PATH_NOT_FOUND', 'STATUS_NOT_FOUND'])
+def test_real_smb_missing_file_status_allows_test_upload_and_delete_retry(environment,smb,missing_status):
+    _,store,vault=environment;cfg=configure(store,vault);fake,io=smb
+    fake.missing_status=missing_status
+    task=archive.submit(store,vault,'test',cfg)
+    worker=archive.Archiver(store,vault,io)
+    assert worker.process_job()
+    assert archive.job(store,task)['state']=='complete'
+    assert not list(fake.root.rglob('connection-test-*'))
+    receive(store,count=2)
+    worker.upload(cfg)
+    assert worker.archive.backlog()['pending']==0
+    names=[item['name'] for item in io(cfg,'catalog')['files']]
+    assert len(names)==1
+    # Repeated retention deletion is harmless if the completed archive is already gone.
+    io(cfg,'delete',names=names)
+    io(cfg,'delete',names=names)
+    assert io(cfg,'catalog')['files']==[]
+    # History reads must still report unavailable files rather than return an empty successful search.
+    from smbprotocol.exceptions import SMBOSError
+    with pytest.raises(SMBOSError):
+        io(cfg,'search',names=names,params={'start':0,'end':time.time()+60},file=str(fake.root/'result.json'))
+
+
+def test_smb_cleanup_and_existing_upload_denied_access_are_not_ignored(environment,smb,monkeypatch):
+    import smbclient
+    from smbprotocol.exceptions import SMBOSError
+    from smbprotocol.header import NtStatus
+    _,store,vault=environment;cfg=configure(store,vault);fake,io=smb
+    def denied(*args,**kwargs): raise SMBOSError(NtStatus.STATUS_ACCESS_DENIED,'private-file')
+    with monkeypatch.context() as change:
+        change.setattr(smbclient,'remove',denied)
+        with pytest.raises(SMBOSError) as error: io(cfg,'test')
+        assert error.value.ntstatus==NtStatus.STATUS_ACCESS_DENIED
+    receive(store)
+    worker=archive.Archiver(store,vault,io)
+    with monkeypatch.context() as change:
+        change.setattr(smbclient,'open_file',denied)
+        with pytest.raises(SMBOSError): worker.upload(cfg)
+    assert worker.archive.backlog()['pending']==1
+    with monkeypatch.context() as change:
+        change.setattr(smbclient,'remove',denied)
+        with pytest.raises(SMBOSError): io(cfg,'delete',names=[worker.pending_batch()[0]['name']])

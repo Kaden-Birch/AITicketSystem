@@ -65,7 +65,9 @@ def execute(request):
         finally:
             for path in (probe, renamed):
                 try: smbclient.remove(path)
-                except FileNotFoundError: pass
+                except OSError as exc:
+                    # smbclient reports missing files as SMBOSError(ENOENT), not FileNotFoundError.
+                    if exc.errno != errno.ENOENT: raise
         return {'message': 'Connection verified: create, write, rename, read and delete succeeded.'}
 
     if operation == 'upload':
@@ -76,7 +78,8 @@ def execute(request):
             raise ValueError('Invalid local archive.')
         try:
             if read_bytes(name) == data: return {'bytes': len(data)}
-        except FileNotFoundError: pass
+        except OSError as exc:
+            if exc.errno != errno.ENOENT: raise
         partial = target + '.partial'
         with smbclient.open_file(partial, 'wb') as f:
             f.write(data); f.flush()
@@ -114,7 +117,8 @@ def execute(request):
     if operation == 'delete':
         for name in request['names'][:100]:
             try: smbclient.remove(remote(name))
-            except FileNotFoundError: pass
+            except OSError as exc:
+                if exc.errno != errno.ENOENT: raise
         return {'deleted': len(request['names'][:100])}
 
     if operation == 'search':
