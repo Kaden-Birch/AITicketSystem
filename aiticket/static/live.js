@@ -76,6 +76,7 @@
       const current = document.querySelector('main');
       const next = page.querySelector('main');
       if (current && next) sync(current, next);
+      document.dispatchEvent(new CustomEvent('aiticket:live-updated'));
       status.textContent = 'Updated ' + new Date().toLocaleTimeString();
     } catch (error) {
       if (!stopped) status.textContent = 'Updates unavailable — retrying';

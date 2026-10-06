@@ -154,8 +154,8 @@ def test_multiple_endpoints_shared_credentials_and_atomic_validation(signed_in):
 def test_discovery_uses_another_cluster_endpoint(environment):
     _,store,vault=environment
     setup(store,vault)
-    with patch.object(Client,'get',side_effect=[OSError('node down'),inventory()]) as call:
+    with patch.object(Client,'get',side_effect=[OSError('node down'),inventory(),PermissionError('HA denied')]) as call:
         assert discover(store,vault,'p1')==len(inventory())
-        assert call.call_count==2
+        assert call.call_count==3
     assert len(store.rows('SELECT * FROM proxmox_objects'))==len(inventory())
     assert all(r['last_discovery'] for r in store.rows('SELECT * FROM proxmox_connections'))

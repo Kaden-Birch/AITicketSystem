@@ -144,7 +144,19 @@ def cluster_inventory(store,vault,connection):
     last_error=None
     for endpoint in endpoints:
         try:
-            return normalize(Client(endpoint,vault).get('/cluster/resources')),endpoint['id']
+            client=Client(endpoint,vault)
+            objects=normalize(client.get('/cluster/resources'))
+            # Optional read permission: a denied HA query must not break inventory.
+            try:
+                ha=client.get('/cluster/ha/resources')
+                if not isinstance(ha,list) or len(ha)>10000 or any(not isinstance(r,dict) or not isinstance(r.get('sid'),str) for r in ha):raise ValueError('Invalid HA inventory')
+                managed={r['sid'] for r in ha}
+                for item in objects:
+                    if item['kind'] in ('qemu','lxc'):
+                        sid=('vm' if item['kind']=='qemu' else 'ct')+':'+item['key'].split('/')[-1]
+                        item['metrics']['_ha_managed']=sid in managed
+            except Exception:pass
+            return objects,endpoint['id']
         except Exception as exc:
             last_error=exc
     raise last_error or ValueError('No cluster endpoints are available.')

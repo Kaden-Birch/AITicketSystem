@@ -66,7 +66,8 @@ def test_dashboard_metrics_guest_tree_stale_and_history(signed_in):
     assert data['host']['sample']['disk']==25
     assert b'Web VM' in client.get('/hosts').data
     response=client.get('/hosts/'+nodeid)
-    assert response.status_code==200 and b'Guests on this Proxmox node' in response.data and b'qemu/209' in response.data
+    assert response.status_code==200
+    assert b'px-workspace' in response.data and b'Guest' in response.data
     assert len(detail(store,nodeid)['guests'])==2
     with store.connect() as c: c.execute('UPDATE proxmox_objects SET last_seen=1')
     assert not next(m for m in overview(store) if m['id']==mid)['sample']['fresh']

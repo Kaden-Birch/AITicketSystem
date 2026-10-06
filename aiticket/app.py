@@ -9,7 +9,7 @@ import os
 import secrets
 import time
 from pathlib import Path
-from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
+from flask import Flask, abort, flash, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
 from .db import Store, uid
 from .engine import SEVERITIES
@@ -385,6 +385,8 @@ def create_app(data_dir=None, testing=False):
         from .truenas_view import build as truenas_overview
         nas=next((x for x in data['connections'] if x['kind']=='truenas'),None)
         data['truenas_ui']=truenas_overview(store,data['host'],nas,request.args.get('window','1h')) if nas else None
+        from .proxmox_view import build as proxmox_overview
+        data['proxmox_ui']=proxmox_overview(store,data['host'])
         return render_template('host-detail.html',**data)
 
     @app.get('/hosts/<machine_id>/checks/new')
@@ -764,6 +766,17 @@ def create_app(data_dir=None, testing=False):
         rows=store.rows('SELECT machine_id FROM power_jobs WHERE id=?',(job_id,))
         return redirect(url_for('host_detail',machine_id=rows[0]['machine_id']))
 
+    @app.get('/proxmox/resources/<object_id>/workspace-data')
+    @login_required
+    def proxmox_workspace_data(object_id):
+        from .proxmox_view import guest_history
+        from .power import availability
+        obj=next(iter(store.rows("SELECT * FROM proxmox_objects WHERE id=? AND present=1 AND kind IN ('qemu','lxc')",(object_id,))),None)
+        if not obj:abort(404)
+        power=availability(store,vault,obj['machine_id']) if obj['machine_id'] and not obj['template'] else {'start':False,'restart':False,'shutdown':False,'reason':'Link this guest to a host to use power controls.'}
+        if request.args.get('power_only')=='1':return jsonify(power=power)
+        return jsonify(history=guest_history(store,obj,request.args.get('window','1h')),power=power)
+
     @app.get('/proxmox/resources/<object_id>')
     @login_required
     def resource_detail(object_id):
@@ -775,6 +788,8 @@ def create_app(data_dir=None, testing=False):
         data['proxmox_api_jobs']=[]
         from .metric_history import charts
         data['history']=charts(store,data['host'],request.args.get('window','6h'))
+        from .proxmox_view import build as proxmox_overview
+        data['proxmox_ui']=proxmox_overview(store,data['host'])
         return render_template('host-detail.html',**data)
 
     @app.route('/hosts', methods=['GET', 'POST'])

@@ -33,3 +33,14 @@ cluster schedule to consolidate older per-endpoint schedules. For older endpoint
 with different credentials, replace the cluster credential to synchronize them.
 
 When linking an enrolled host from Host settings, choose **Online / running** or **Intentionally offline / stopped**. The application maps this to the selected resource: online/offline for nodes and running/stopped for VMs and containers. Enrollment and agent credentials are preserved.
+
+
+## Visual node workspace
+
+Open a Proxmox node from **Hosts** (including an unassigned inventory node) to see the cluster's compute cards and guests grouped by current node. Select **All nodes** to broaden the guest list. Search and filter guests, follow their names to host/inventory pages, or open **Details** for current metrics and recorded history. Monitoring coverage appears below the full-width guest list.
+
+Compute lights show the higher of CPU and RAM usage. The three featured running guests are ranked by their combined share of node CPU and RAM; stale or missing readings are excluded. Colors are presentation thresholds only and do not change alert policies. Updates animate sequential lights and resource bars, with reduced-motion support.
+
+HA badges indicate membership returned by the optional read-only `/cluster/ha/resources` query, not cluster quorum or readiness. A denied query leaves membership unknown. IP addresses use fresh enrolled-agent interface inventory. Guest filesystem usage requires agent telemetry or LXC-reported usage; QEMU allocated capacity is displayed separately.
+
+Guest history exposes exact recorded sample timestamps and values on hover, tap, or arrow keys. Missing readings remain gaps. **Start**, **Restart**, and **Stop** respect existing host permissions and confirmation requirements; Stop requests graceful shutdown. Unassigned guests must be linked and explicitly enabled for power operations.
