@@ -97,3 +97,7 @@ History offers 10 minutes through one month, with exact retained samples on hove
 When a network device reports its own storage disks or slot count, NVR bays appear inside the equipment illustration and open the same drive detail drawer as the NAS workspace. The documented [Network API](https://developer.ui.com/network/v10.0.162/openapi.json) does not guarantee Protect/NVR storage telemetry. The workspace does not invent bay counts from model names or fetch undocumented Protect endpoints. A separate supported Protect telemetry integration is needed where disk information is absent.
 
 Settings, manual refresh, monitoring checks, ticket creation/history, network/client observations and retained diagnostic readings remain available.
+
+## Network log collection
+
+For independent CEF/syslog ingestion, event search, host associations and AI evidence, see [Network events setup](network-logs.md). Log collection supplements the API and does not change ticket thresholds.

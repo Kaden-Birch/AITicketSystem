@@ -1,7 +1,7 @@
 /* Update server-rendered information while preserving active edits and disclosures. */
 (() => {
   'use strict';
-  const paths = [/^\/settings\/(ai|telegram)$/, /^\/knowledge$/ ,/^\/services\/(?!new$)[^/]+$/, /^\/fleet\/(?!preview$)[^/]+$/,/^\/$/, /^\/hosts(?:\/[^/]+(?:\/settings)?)?$/, /^\/incidents\/[^/]+$/, /^\/network-devices(?:\/[^/]+(?:\/devices\/[^/]+)?)?$/, /^\/proxmox\/resources\/[^/]+$/, /^\/(tickets|history|queue|audit|hermes|proxmox|unifi|applications|monitoring-health|attention)$/];
+  const paths = [/^\/network-events$/, /^\/settings\/network-logs$/, /^\/settings\/(ai|telegram)$/, /^\/knowledge$/ ,/^\/services\/(?!new$)[^/]+$/, /^\/fleet\/(?!preview$)[^/]+$/,/^\/$/, /^\/hosts(?:\/[^/]+(?:\/settings)?)?$/, /^\/incidents\/[^/]+$/, /^\/network-devices(?:\/[^/]+(?:\/devices\/[^/]+)?)?$/, /^\/proxmox\/resources\/[^/]+$/, /^\/(tickets|history|queue|audit|hermes|proxmox|unifi|applications|monitoring-health|attention)$/];
   if (!paths.some(pattern => pattern.test(location.pathname))) return;
   const dirty = new WeakSet();
   document.addEventListener('input', event => { if (event.target.form) dirty.add(event.target.form); });

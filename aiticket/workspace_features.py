@@ -3,7 +3,7 @@ import json
 from flask import request,render_template,redirect,abort,flash,session
 from . import knowledge,telegram
 
-SETTINGS=[('General','/settings'),('AI & Hermes','/settings/ai'),('Notifications','/settings?view=notifications'),('Telegram','/settings/telegram'),('AI budgets','/settings?view=budgets'),('Policies','/policies'),('Agent health','/resources'),('Recovery','/recovery-policy'),('Administration','/administration')]
+SETTINGS=[('General','/settings'),('AI & Hermes','/settings/ai'),('Notifications','/settings?view=notifications'),('Telegram','/settings/telegram'),('Network logs','/settings/network-logs'),('AI budgets','/settings?view=budgets'),('Policies','/policies'),('Agent health','/resources'),('Recovery','/recovery-policy'),('Administration','/administration')]
 
 
 def register(app,store,vault,login_required):

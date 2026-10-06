@@ -1,6 +1,10 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
-CURRENT_VERSION = 40
+CURRENT_VERSION = 41
 MIGRATIONS = {
+    41: (
+        "CREATE TABLE log_sources(id TEXT PRIMARY KEY,name TEXT NOT NULL,sender_ip TEXT NOT NULL UNIQUE,connection_id TEXT REFERENCES unifi_connections(id),enabled INTEGER NOT NULL DEFAULT 1,created REAL NOT NULL)",
+        "CREATE TABLE log_host_bindings(source_id TEXT NOT NULL REFERENCES log_sources(id),mac TEXT NOT NULL,machine_id TEXT NOT NULL REFERENCES machines(id),created REAL NOT NULL,PRIMARY KEY(source_id,mac))",
+    ),
     40: (
         "UPDATE integrations SET config=json_set(config,'$.deep_monitoring',json('true'),'$.library_ids',json(CASE WHEN coalesce(json_extract(config,'$.library_id'),'')!='' THEN json_array(json_extract(config,'$.library_id')) ELSE '[]' END)) WHERE kind='plex'",
         "CREATE TABLE kb_workflows(article_id TEXT PRIMARY KEY REFERENCES kb_articles(id),version INTEGER NOT NULL,article_version INTEGER NOT NULL,steps TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1,updated REAL NOT NULL)",

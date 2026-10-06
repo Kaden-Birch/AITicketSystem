@@ -32,6 +32,7 @@ def signed_in(environment):
 
 def remove_schema38(c):
     """Reconstruct old fixtures by removing the new schema before lowering its marker."""
+    for table in ('log_host_bindings','log_sources'):c.execute('DROP TABLE '+table)
     for table in ('kb_workflow_events','kb_workflow_runs','kb_workflows'):c.execute('DROP TABLE '+table)
     for table in ('kb_requests','kb_versions','kb_articles','kb_folders','change_events','telegram_updates','telegram_outbox'):c.execute('DROP TABLE '+table)
     c.execute('ALTER TABLE ai_jobs DROP COLUMN read_only')

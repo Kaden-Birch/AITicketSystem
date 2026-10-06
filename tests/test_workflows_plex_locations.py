@@ -129,6 +129,7 @@ def test_schema40_upgrades_existing_plex_connections(environment):
     _,store,vault=environment;machine(store)
     service=integrations.save(store,vault,'m','plex','Plex',{'url':'http://plex','interval':60,'library_id':'4'},'token')
     with store.connect() as c:
+        for table in ('log_host_bindings','log_sources'):c.execute('DROP TABLE '+table)
         for table in ('kb_workflow_events','kb_workflow_runs','kb_workflows'):c.execute('DROP TABLE '+table)
         c.execute('UPDATE schema_version SET version=39')
     from aiticket.db import Store

@@ -12,10 +12,10 @@ from .security import Vault
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['init', 'serve', 'worker', 'reset-password', 'rotate-key'])
+    parser.add_argument('command', choices=['init', 'serve', 'worker', 'reset-password', 'rotate-key', 'log-receiver'])
     parser.add_argument('--data', default=os.environ.get('AITICKET_DATA', 'data'))
     parser.add_argument('--host', default='127.0.0.1')
-    parser.add_argument('--port', default=8080, type=int)
+    parser.add_argument('--port', default=None, type=int)
     parser.add_argument('--new-key', help='New, nonexistent key file for offline rotation')
     args = parser.parse_args()
     directory = Path(args.data)
@@ -43,6 +43,10 @@ def main():
         print('Initialized. Protect the encryption key separately from the database.')
         return
     store = Store(directory / 'app.db')
+    if args.command == 'log-receiver':
+        from .log_receiver import run as receive
+        receive(store, args.host, 5514 if args.port is None else args.port)
+        return
     vault = Vault(key_path)
     if args.command == 'reset-password':
         from .administration import change_password
@@ -77,7 +81,7 @@ def main():
         thread = threading.Thread(target=run, args=(store, vault, stop), daemon=True)
         thread.start()
         try:
-            serve(create_app(directory), host=args.host, port=args.port, threads=4)
+            serve(create_app(directory), host=args.host, port=8080 if args.port is None else args.port, threads=4)
         finally:
             stop.set()
             thread.join(timeout=15)

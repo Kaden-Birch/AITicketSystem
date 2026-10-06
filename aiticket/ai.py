@@ -189,6 +189,10 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
         from .changes import context as change_context
         from .knowledge import related_scope
         affected=related_scope(c,group_machines(c,incident_id))
+        from .network_logs import evidence as log_evidence
+        log_targets=[incident['machine_id']]+sorted(group_machines(c,incident_id)-{incident['machine_id']})
+        upstream=[r[0] for machine in log_targets[:8] for r in c.execute('SELECT d.machine_id FROM network_links l JOIN unifi_devices d ON d.connection_id=l.connection_id AND d.device_id=l.device_id WHERE l.machine_id=? AND d.deleted IS NULL',(machine,))]
+        document['network_events']=log_evidence(c,log_targets+upstream+sorted(affected),incident['last_seen'],limit=5)
         document['knowledge']=kb_context(c,affected)
         document['recent_changes']=[{k:v for k,v in item.items() if k!='details'} for item in change_context(c,affected)[:8]]
         from .knowledge import ticket_context
@@ -208,6 +212,7 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
         if len(evidence)>14500:
             document['knowledge']={'coverage':'Search knowledge for saved articles; optional article creation only when useful.'}
             document['recent_changes']={'coverage':'Use changes for observed change history.'}
+            document['network_events']={'coverage':'Retrieve network_logs evidence for untrusted historical events; no extra permissions granted.'}
             if not report.get('knowledge_task'):document['ticket_history']={'coverage':'Use ticket_history to retrieve prior tickets.'}
             evidence=json.dumps(evidence_snapshot(document))
         if codex and bridge.get('command_tools'):
