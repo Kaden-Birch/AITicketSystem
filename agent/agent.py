@@ -13,7 +13,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-VERSION = '0.12.0'
+VERSION = '0.13.0'
 UPDATE_REQUIREMENTS = {'protocol':1,'operations':['process_summary','service_status','service_logs','container_logs']}
 
 
@@ -82,6 +82,59 @@ def telemetry(state=None):
                 result['memory_pressure_percent']=float(dict(field.split('=') for field in line.split()[1:])['avg10'])
     return result
 
+
+
+def filesystems():
+    """Local persistent mounts only: avoid remote/FUSE probes and duplicate binds."""
+    import hashlib,re
+    allowed={'ext2','ext3','ext4','xfs','btrfs','zfs','f2fs','vfat','exfat','ntfs','ntfs3','ufs'}
+    try:
+        with Path('/proc/self/mountinfo').open() as stream:lines=stream.read(524288).splitlines()
+    except OSError:return None
+    mounts=[]
+    for line in lines:
+        try:
+            left,right=line.split(' - ',1);fields=left.split();extra=right.split()
+            mount=re.sub(r'\\([0-7]{3})',lambda match:chr(int(match[1],8)),fields[4])
+            if len(mount)>512 or any(ord(ch)<32 for ch in mount):continue
+            if extra[0] in allowed or mount=='/':mounts.append((mount,extra[0],extra[1]))
+        except (ValueError,IndexError):continue
+    result=[];seen=set()
+    for mount,kind,source in sorted(mounts,key=lambda item:(item[0]!='/',len(item[0]),item[0])):
+        try:
+            disk=os.statvfs(mount)
+            total=disk.f_blocks*disk.f_frsize;free=disk.f_bavail*disk.f_frsize
+            if not 0<total or not 0<=free<=total:continue
+            fsid=getattr(disk,'f_fsid',0)
+            identity=kind+':'+str(fsid if fsid else source)
+            if identity in seen:continue
+            seen.add(identity)
+            result.append({'id':hashlib.sha256(identity.encode()).hexdigest(),'mount':mount,'filesystem':kind,'total_bytes':total,'free_bytes':free})
+            if len(result)>=64:break
+        except OSError:continue
+    return result or None
+
+
+_filesystem_worker=None
+_filesystem_latest=None
+_filesystem_started=float('-inf')
+
+
+def filesystem_inventory():
+    """One daemon probe at a time: a stalled secondary disk cannot stall heartbeats."""
+    global _filesystem_worker,_filesystem_started
+    import threading
+    def collect():
+        global _filesystem_latest
+        try:
+            at=time.time();values=filesystems()
+            if values is not None:_filesystem_latest=(values,at)
+        except Exception:pass
+    if (_filesystem_worker is None or not _filesystem_worker.is_alive()) and time.monotonic()-_filesystem_started>=60:
+        _filesystem_started=time.monotonic()
+        _filesystem_worker=threading.Thread(target=collect,daemon=True)
+        _filesystem_worker.start()
+    return _filesystem_latest
 
 def discovery(state):
     from monitoring import discover
@@ -274,6 +327,10 @@ def main():
                     advertised.pop('actions',None)
                     advertised.pop('action_services',None)
                 pending = {'event_id': str(uuid.uuid4()), 'version': VERSION, 'telemetry': telemetry(state), 'sampled_at':time.time(), 'capabilities':advertised,'host_info':host_info(),'network':network_info()}
+                try:
+                    inventory=filesystem_inventory()
+                    if inventory is not None:pending['filesystems'],pending['filesystems_at']=inventory
+                except Exception:pass # Optional disk inventory must not suppress a heartbeat.
                 try:pending['discovery']=bounded_discovery(discovery(state))
                 except Exception:pending['discovery']={'warnings':['Discovery is unavailable.']}
                 state['pending'] = pending

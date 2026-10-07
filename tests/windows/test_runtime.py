@@ -225,3 +225,13 @@ def test_process_discovery_is_read_only_and_named(runtime):
     assert inventory['processes'] and len(inventory['processes'])<=200
     assert all(p['name'] and p['target'] and p['memory_bytes']>=0 for p in inventory['processes'])
     assert all('commandline' not in p and 'cpu_seconds' not in p for p in inventory['processes'])
+
+
+def test_fixed_local_drive_capacity_and_volume_identity(runtime):
+    _,backend=runtime
+    values=backend.filesystems()
+    assert values and len(values)<=64
+    assert all(v['mount'].endswith('\\') and v['id'].startswith('\\\\?\\Volume{') for v in values)
+    assert all(0<=v['free_bytes']<=v['total_bytes'] and v['total_bytes']>0 for v in values)
+    from aiticket.host_storage import validate
+    assert validate(values)==values

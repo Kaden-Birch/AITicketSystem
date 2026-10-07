@@ -22,6 +22,28 @@ def telemetry(state=None):
     return result
 
 
+
+def filesystems():
+    """Fixed local Windows drives; volume GUIDs survive drive-letter changes."""
+    kernel=ctypes.windll.kernel32
+    buffer=ctypes.create_unicode_buffer(1024)
+    if not kernel.GetLogicalDriveStringsW(len(buffer),buffer):return None
+    result=[];seen=set()
+    for mount in buffer[:].split('\0'):
+        if not mount or kernel.GetDriveTypeW(ctypes.c_wchar_p(mount))!=3:continue
+        volume=ctypes.create_unicode_buffer(160)
+        if not kernel.GetVolumeNameForVolumeMountPointW(ctypes.c_wchar_p(mount),volume,len(volume)):continue
+        identity=volume.value
+        if identity in seen:continue
+        available=ctypes.c_ulonglong();total=ctypes.c_ulonglong();free=ctypes.c_ulonglong()
+        if not kernel.GetDiskFreeSpaceExW(ctypes.c_wchar_p(mount),ctypes.byref(available),ctypes.byref(total),ctypes.byref(free)):continue
+        if not total.value or available.value>total.value:continue
+        filesystem=ctypes.create_unicode_buffer(32)
+        ok=kernel.GetVolumeInformationW(ctypes.c_wchar_p(mount),None,0,None,None,None,filesystem,len(filesystem))
+        seen.add(identity);result.append({'id':identity,'mount':mount,'filesystem':filesystem.value if ok and filesystem.value else 'Not reported','total_bytes':total.value,'free_bytes':available.value})
+        if len(result)>=64:break
+    return result or None
+
 def host_info():
     return {'hostname':platform.node()[:200],'os':'Windows '+platform.release(),'kernel':platform.version()[:200],'architecture':platform.machine()[:80]}
 

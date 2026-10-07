@@ -291,6 +291,8 @@ class Archiver:
     def step(self):
         from .capacity_forecasts import backfill,sample_local
         backfill(self.store)
+        from .host_storage import backfill as backfill_hosts
+        backfill_hosts(self.store)
         if time.monotonic()>=self.next_capacity:
             sample_local(self.store)
             self.next_capacity=time.monotonic()+300

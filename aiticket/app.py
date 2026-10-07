@@ -390,6 +390,8 @@ def create_app(data_dir=None, testing=False):
         data['truenas_ui']=truenas_overview(store,data['host'],nas,request.args.get('window','1h')) if nas else None
         from .proxmox_view import build as proxmox_overview
         data['proxmox_ui']=proxmox_overview(store,data['host'])
+        from .host_storage import build as host_storage
+        data['host_storage']=host_storage(store,data['host'])
         return render_template('host-detail.html',**data)
 
     @app.get('/hosts/<machine_id>/checks/new')
@@ -1365,6 +1367,14 @@ def create_app(data_dir=None, testing=False):
         host_info=payload.get('host_info',{})
         if not isinstance(host_info,dict) or set(host_info)-{'hostname','os','kernel','architecture'} or any(not isinstance(v,str) or len(v)>200 for v in host_info.values()):
             abort(400)
+        from .host_storage import validate as validate_filesystems
+        if 'filesystems' in payload:
+            try:telemetry={**telemetry,'filesystems':validate_filesystems(payload['filesystems'])}
+            except ValueError:abort(400)
+            if 'filesystems_at' in payload:
+                from .capacity_forecasts import valid
+                if not valid(payload['filesystems_at']) or not 0<=payload['filesystems_at']<=time.time()+86400:abort(400)
+                telemetry['filesystems_at']=payload['filesystems_at']
         from .topology import validate as validate_network
         network=validate_network(payload.get('network',{}))
         from .discovery import validate as validate_discovery
@@ -1407,6 +1417,8 @@ def create_app(data_dir=None, testing=False):
             c.execute('UPDATE agents SET last_seen=?,address=?,version=?,telemetry=?,capabilities=?,sampled_at=? WHERE id=?', (now, request.remote_addr, str(payload.get('version', ''))[:32], json.dumps(telemetry), json.dumps(capabilities),sampled_at,row['id']))
             from .metric_history import record
             record(c,row['machine_id'],'agent',sampled_at or now,telemetry)
+            from .host_storage import retain as retain_storage
+            retain_storage(c,row['machine_id'],row['id'],telemetry,host_info,sampled_at if sampled_at is not None else now)
             if discovery is not None:
                 for container in discovery['containers']:record(c,row['machine_id']+':container:'+container['target'],'container',sampled_at or now,container)
             if discovery is not None:c.execute('INSERT INTO agent_discovery VALUES(?,?,?) ON CONFLICT(machine_id) DO UPDATE SET at=excluded.at,data=excluded.data',(row['machine_id'],sampled_at if sampled_at is not None else now,json.dumps(discovery)))
