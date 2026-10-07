@@ -65,6 +65,9 @@ class FakeSMB:
         self.calls.append(('remove',path))
         try: self.path(path).unlink()
         except FileNotFoundError as exc: raise self.missing(path) from exc
+    def stat_volume(self,path):
+        from types import SimpleNamespace
+        return SimpleNamespace(total_size=1024**4,actual_available_size=600*1024**3,caller_available_size=500*1024**3)
     def scandir(self, path):
         import os
         return os.scandir(self.path(path))
@@ -74,7 +77,7 @@ class FakeSMB:
 def smb(monkeypatch, tmp_path):
     import smbclient
     fake = FakeSMB(tmp_path/'remote')
-    for name in ('ClientConfig','register_session','makedirs','open_file','rename','remove','scandir'):
+    for name in ('ClientConfig','register_session','makedirs','open_file','rename','remove','scandir','stat_volume'):
         monkeypatch.setattr(smbclient,name,getattr(fake,name))
     def io(cfg, action, timeout=30, **kwargs):
         return {'ok':True, **smb_archive_io.execute({'connection':cfg,'operation':action,**kwargs})}

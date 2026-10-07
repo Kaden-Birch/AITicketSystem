@@ -148,7 +148,7 @@ class Archiver:
         self.state = store.setting('network_log_archive_status', {})
         from .telemetry_archive import Exporter
         self.telemetry=Exporter(store,io,self.directory)
-        self.next_upload = self.next_cleanup = 0
+        self.next_upload = self.next_cleanup = self.next_storage = 0
         self.failures = 0
         self.configuration = hashlib.sha256(json.dumps(connection(store,vault),sort_keys=True).encode()).hexdigest()
 
@@ -271,7 +271,21 @@ class Archiver:
             c.execute('UPDATE log_archive_jobs SET state=?,updated=?,result=?,error=?,connection=? WHERE id=?',
                       (state, time.time(), json.dumps(result or {}), error, '', identifier))
 
+    def refresh_storage(self,cfg):
+        from .archive_storage import identity
+        target=identity(cfg);prior=self.store.setting('archive_storage',{})
+        if not cfg.get('server'):return
+        if prior.get('target')==target and time.monotonic()<self.next_storage:return
+        try:
+            result=self.io(cfg,'capacity',timeout=15)
+            self.store.save('archive_storage',{'target':target,'at':time.time(),**result})
+            self.next_storage=time.monotonic()+300
+        except OSError:
+            self.store.save('archive_storage',{**(prior if prior.get('target')==target else {}),'target':target,'error':'SMB capacity could not be read. Check connectivity and share permissions.','attempted':time.time()})
+            self.next_storage=time.monotonic()+60
+
     def step(self):
+        self.refresh_storage(connection(self.store,self.vault))
         self.publish()
         if config(self.store)['enabled']:self.telemetry.capture_dashboard()
         if self.process_job(): self.publish(); return

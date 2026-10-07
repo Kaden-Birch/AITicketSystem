@@ -1,3 +1,4 @@
+{% include 'archive-storage-usage.html' %}
 <section id="smb-storage-editor" {% if smb_error %}data-live-preserve{% endif %}>
   <div class="row"><div><p class="eyebrow">SECOND STORAGE TIER</p><h3>SMB evidence archive</h3></div><span class="badge {{ 'healthy' if smb.enabled and archive_status.available and not archive_status.error else 'unknown' }}">{{ 'Paused' if not smb.enabled else 'Service unavailable' if not archive_status.available else 'Retrying' if archive_status.error else 'Running' }}</span></div>
   <p class="hint">Network events, agent readings, API snapshots, diagnostics and dashboard snapshots save locally first. The archive service copies them to SMB in verified, compressed batches. Local retention and SMB retention are independent.</p>

@@ -39,8 +39,8 @@ def execute(request):
     root = '\\\\' + cfg['server'] + '\\' + cfg['share']
     folder = cfg.get('folder', '').replace('/', '\\').strip('\\')
     root += ('\\' + folder if folder else '') + ('\\aiticket-telemetry\\' if dataset=='telemetry' else '\\aiticket-network-logs\\') + cfg['namespace']
-    smbclient.makedirs(root, exist_ok=True)
     operation = request['operation']
+    if operation!='capacity':smbclient.makedirs(root, exist_ok=True)
 
     def remote(name):
         if not NAME.fullmatch(name) or not name.startswith('telemetry-' if dataset=='telemetry' else 'logs-'): raise ValueError('Invalid archive filename.')
@@ -54,6 +54,34 @@ def execute(request):
         if hashlib.sha256(data).hexdigest() != metadata(name)['checksum']:
             raise ValueError('Archive checksum did not match.')
         return data
+
+    if operation == 'capacity':
+        from .archive_storage import meter
+        stats=smbclient.stat_volume(root.rsplit('\\',2)[0])
+        result=meter(stats.total_size,stats.actual_available_size,stats.caller_available_size)
+        size=0;scanned=0;partial=False
+        try:
+            base=root.rsplit('\\',2)[0]
+            roots=[base+'\\'+name+'\\'+cfg['namespace'] for name in ('aiticket-network-logs','aiticket-telemetry')]
+            for location in roots:
+                try:days=smbclient.scandir(location)
+                except OSError as exc:
+                    if exc.errno==errno.ENOENT:continue
+                    raise
+                for day in days:
+                    scanned+=1
+                    if scanned>100000:partial=True;break
+                    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}',day.name) or not day.is_dir(follow_symlinks=False):continue
+                    for entry in smbclient.scandir(location+'\\'+day.name):
+                        scanned+=1
+                        if scanned>100000:partial=True;break
+                        name=entry.name.removesuffix('.partial')
+                        if NAME.fullmatch(name) and entry.is_file(follow_symlinks=False):size+=entry.stat(follow_symlinks=False).st_size
+                    if partial:break
+                if partial:break
+            result.update(archive_bytes=size,archive_partial=partial)
+        except OSError:result.update(archive_bytes=None,archive_partial=True)
+        return result
 
     if operation == 'test':
         probe = root + '\\connection-test-' + uuid.uuid4().hex

@@ -1,0 +1,1 @@
+(() => {const draw=()=>document.querySelectorAll('[data-capacity-percent]').forEach(fill=>{const value=Number(fill.dataset.capacityPercent);fill.style.width=`${Number.isFinite(value)?Math.max(0,Math.min(100,value)):0}%`;});draw();document.addEventListener('aiticket:live-updated',draw);})();
