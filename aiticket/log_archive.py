@@ -277,11 +277,11 @@ class Archiver:
         if not cfg.get('server'):return
         if prior.get('target')==target and time.monotonic()<self.next_storage:return
         try:
-            result=self.io(cfg,'capacity',timeout=15)
+            result=self.io(cfg,'usage',timeout=15)
             self.store.save('archive_storage',{'target':target,'at':time.time(),**result})
             self.next_storage=time.monotonic()+300
         except OSError:
-            self.store.save('archive_storage',{**(prior if prior.get('target')==target else {}),'target':target,'error':'SMB capacity could not be read. Check connectivity and share permissions.','attempted':time.time()})
+            self.store.save('archive_storage',{**(prior if prior.get('target')==target else {}),'target':target,'error':'SMB archive file usage could not be read. Check connectivity and share permissions.','attempted':time.time()})
             self.next_storage=time.monotonic()+60
 
     def step(self):

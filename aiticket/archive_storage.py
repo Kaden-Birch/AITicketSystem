@@ -1,9 +1,8 @@
-"""Read-only backing-volume capacity, distinct from retention/queue budgets."""
+"""Evidence payload usage, excluding database and filesystem overhead."""
 import hashlib
 import json
-import os
+import sqlite3
 import time
-from pathlib import Path
 from . import network_logs as logs
 
 
@@ -20,34 +19,35 @@ def meter(total,free,available):
 
 def human(value):
     if value is None:return 'Unavailable'
-    for unit in ('B','KiB','MiB','GiB','TiB','PiB'):
-        if value<1024 or unit=='PiB':return f'{value:,.2f} {unit}' if unit!='B' else f'{value:,} B'
-        value/=1024
+    unit,divisor=('GB',1_000_000_000) if value>=1_000_000_000 else ('MB',1_000_000)
+    if 0<value/divisor<0.001:return '<0.001 '+unit
+    return f'{value/divisor:,.3f} {unit}'
 
 
 def local(store):
-    result=[];by_device={}
-    for label,path in [('Application & telemetry',Path(store.path)),('Network logs',logs.database(store))]:
-        folder=path.parent
-        if not folder.exists():
-            result.append({'label':label,'error':'Storage volume is not available.'});continue
+    # Persisted telemetry size includes a fixed queue-budget allowance. Remove it;
+    # counting that allowance would misrepresent the collected JSON payload.
+    telemetry=store.rows('SELECT coalesce(sum(max(size-128,0)),0) used FROM telemetry_records')[0]['used']
+    network=0;error=None
+    if logs.database(store).exists():
         try:
-            device=folder.stat().st_dev
-            if device not in by_device:
-                if hasattr(os,'statvfs'):
-                    stat=os.statvfs(folder);unit=stat.f_frsize or stat.f_bsize
-                    measured=meter(stat.f_blocks*unit,stat.f_bfree*unit,stat.f_bavail*unit)
-                else:
-                    import shutil
-                    stat=shutil.disk_usage(folder);measured=meter(stat.total,stat.free,stat.free)
-                item={'label':label,**measured,'database_bytes':0}
-                by_device[device]=item;result.append(item)
-            else:item=by_device[device];item['label']+=' + '+label
-            for filename in (str(path),str(path)+'-wal',str(path)+'-shm'):
-                try:item['database_bytes']+=Path(filename).stat().st_size
-                except FileNotFoundError:pass
-        except (OSError,ValueError):result.append({'label':label,'error':'Storage volume capacity is unavailable.'})
-    return result
+            with logs.reader(store) as c:
+                c.execute('BEGIN')  # One snapshot prevents expiry/upload races from double counting.
+                # SIEM's persisted serialized-record size adds a 512-byte budget allowance.
+                network=c.execute('SELECT coalesce(sum(max(size-512,0)),0) FROM events').fetchone()[0]
+                # Expired events can still await upload. Count their queued payload
+                # once, without counting a second copy of retained events.
+                network+=c.execute('SELECT coalesce(sum(max(size-256,0)),0) FROM smb_outbox q WHERE NOT EXISTS (SELECT 1 FROM events e WHERE e.event_key=q.event_key)').fetchone()[0]
+        except sqlite3.Error:error='Local SIEM record usage is temporarily unavailable.';network=None
+    return {'telemetry_bytes':telemetry,'network_bytes':network,'record_bytes':None if network is None else telemetry+network,'error':error}
+
+
+def comparison(store,cfg):
+    local_data=local(store);remote_data=remote(store,cfg)
+    largest=max(local_data.get('record_bytes') or 0,remote_data.get('archive_bytes') or 0,1)
+    local_data['percent']=(local_data.get('record_bytes') or 0)/largest*100
+    remote_data['percent']=(remote_data.get('archive_bytes') or 0)/largest*100
+    return {'local_storage':local_data,'smb_storage':remote_data}
 
 
 def remote(store,cfg):

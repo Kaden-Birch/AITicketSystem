@@ -3,7 +3,7 @@ import time
 import json
 from datetime import datetime,timezone
 from flask import abort,redirect,render_template,request
-from . import log_archive as archive,telemetry_archive as telemetry
+from . import log_archive as archive,telemetry_archive as telemetry,archive_storage
 
 
 def register(app,store,vault,login_required):
@@ -36,7 +36,7 @@ def register(app,store,vault,login_required):
         for item in items[:200]:
             preview=json.dumps(item['data'],indent=2,ensure_ascii=False)
             item['preview']=preview[:2000]+('\n… Open the record for remaining fields.' if len(preview)>2000 else '')
-        return render_template('telemetry-history.html',values=values,error=error,task=task,items=items[:200],truncated=truncated,kinds=telemetry.KINDS,coverage=telemetry.status(store),hosts=store.rows('SELECT id,name FROM machines ORDER BY name'))
+        return render_template('telemetry-history.html',values=values,error=error,task=task,items=items[:200],truncated=truncated,kinds=telemetry.KINDS,coverage=telemetry.status(store),**archive_storage.comparison(store,archive.config(store)),hosts=store.rows('SELECT id,name FROM machines ORDER BY name'))
 
     @app.get('/telemetry-history/records/<record_key>')
     @login_required

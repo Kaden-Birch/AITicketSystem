@@ -140,7 +140,7 @@ def register(app, store, vault, login_required):
                                sources=store.rows('SELECT * FROM log_sources ORDER BY name'),
                                connections=store.rows('SELECT id,name FROM unifi_connections WHERE deleted IS NULL ORDER BY name'), collector=logs.status(store),
                                smb=smb, smb_error=smb_error, periods=archive.PERIODS, archive_status=archive.archive_status(store),
-                               local_storage=archive_storage.local(store),smb_storage=archive_storage.remote(store,archive.config(store)),
+                               **archive_storage.comparison(store,archive.config(store)),
                                smb_test=archive.job(store, request.args['test']) if request.args.get('test') else None,
                                smb_password_saved=bool(store.setting('network_log_smb_secret')))
 

@@ -8,7 +8,7 @@
   {% if archive_status.gaps|default(0) %}<p class="notice" role="alert">{{ archive_status.gaps }} events lost their pending archive copy after local limits were reached. The SMB archive may have gaps. Increase the upload buffer or restore the connection.</p>{% endif %}
   <div class="log-stats">
     <div><small>Last verified upload</small><strong>{{ archive_status.last_success|default(none)|timestamp }}</strong></div>
-    <div><small>Pending copies</small><strong>{{ archive_status.pending|default(0) }} records</strong><small>{{ ((archive_status.pending_bytes|default(0))/1048576)|round(1) }} MB pending · {{ smb.buffer_mb }} MB buffer per stream</small></div>
+    <div><small>Pending copies</small><strong>{{ archive_status.pending|default(0) }} records</strong><small>{{ archive_status.pending_bytes|default(0)|storage_size }} pending · {{ smb.buffer_mb }} MB buffer per stream</small></div>
     <div><small>Waiting in local history</small><strong>{{ archive_status.waiting_local|default(0) }}</strong></div>
     <div><small>SMB retention</small><strong>{% for value,label in periods if value|string==smb.days|string %}{{ label }}{% endfor %}</strong><small>{{ archive_status.uploaded_events|default(0) }} events copied by this installation</small></div>
   </div>

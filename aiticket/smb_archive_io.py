@@ -40,7 +40,7 @@ def execute(request):
     folder = cfg.get('folder', '').replace('/', '\\').strip('\\')
     root += ('\\' + folder if folder else '') + ('\\aiticket-telemetry\\' if dataset=='telemetry' else '\\aiticket-network-logs\\') + cfg['namespace']
     operation = request['operation']
-    if operation!='capacity':smbclient.makedirs(root, exist_ok=True)
+    if operation not in ('capacity','usage'):smbclient.makedirs(root, exist_ok=True)
 
     def remote(name):
         if not NAME.fullmatch(name) or not name.startswith('telemetry-' if dataset=='telemetry' else 'logs-'): raise ValueError('Invalid archive filename.')
@@ -55,15 +55,17 @@ def execute(request):
             raise ValueError('Archive checksum did not match.')
         return data
 
-    if operation == 'capacity':
+    if operation in ('capacity','usage'):
         from .archive_storage import meter
-        stats=smbclient.stat_volume(root.rsplit('\\',2)[0])
-        result=meter(stats.total_size,stats.actual_available_size,stats.caller_available_size)
-        size=0;scanned=0;partial=False
+        result={}
+        if operation=='capacity':
+            stats=smbclient.stat_volume(root.rsplit('\\',2)[0])
+            result=meter(stats.total_size,stats.actual_available_size,stats.caller_available_size)
+        size=0;scanned=0;partial=False;totals={name:0 for name in ('network_bytes','telemetry_bytes')}
         try:
             base=root.rsplit('\\',2)[0]
             roots=[base+'\\'+name+'\\'+cfg['namespace'] for name in ('aiticket-network-logs','aiticket-telemetry')]
-            for location in roots:
+            for location,key in zip(roots,totals):
                 try:days=smbclient.scandir(location)
                 except OSError as exc:
                     if exc.errno==errno.ENOENT:continue
@@ -75,11 +77,12 @@ def execute(request):
                     for entry in smbclient.scandir(location+'\\'+day.name):
                         scanned+=1
                         if scanned>100000:partial=True;break
-                        name=entry.name.removesuffix('.partial')
-                        if NAME.fullmatch(name) and entry.is_file(follow_symlinks=False):size+=entry.stat(follow_symlinks=False).st_size
+                        name=entry.name
+                        if NAME.fullmatch(name) and entry.is_file(follow_symlinks=False):
+                            amount=entry.stat(follow_symlinks=False).st_size;size+=amount;totals[key]+=amount
                     if partial:break
                 if partial:break
-            result.update(archive_bytes=size,archive_partial=partial)
+            result.update(archive_bytes=size,archive_partial=partial,**totals)
         except OSError:result.update(archive_bytes=None,archive_partial=True)
         return result
 
