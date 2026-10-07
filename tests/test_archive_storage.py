@@ -90,13 +90,13 @@ def test_settings_and_history_show_only_record_usage_in_mb_gb(signed_in):
         assert b'0.123 MB' in page and b'stale' in page
         assert b'750,000,000' not in page and b'123,456 bytes' not in page and b'GiB' not in page
         assert b'aria-label="SMB record data"' in page
-        assert b'data-capacity-percent="100.0"' in page and b'/static/archive-storage.js' in page
+        assert b'data-capacity-percent="0.0123456"' in page and b'/static/archive-storage.js' in page
         assert b'style="width:' not in page
     with client.session_transaction() as s:s.clear()
     assert client.get('/telemetry-history').status_code==302
 
 
-def test_usage_ignores_incomplete_files_and_does_not_need_volume_stats(environment,smb,monkeypatch):
+def test_usage_ignores_incomplete_files_and_preserves_usage_if_capacity_unavailable(environment,smb,monkeypatch):
     _,store,vault=environment;cfg=configure(store,vault);receive(store)
     worker=archive.Archiver(store,vault,smb[1]);worker.upload(cfg)
     files=list(smb[0].root.rglob('*.jsonl.gz'));assert files
@@ -107,4 +107,28 @@ def test_usage_ignores_incomplete_files_and_does_not_need_volume_stats(environme
     result=smb[1](cfg,'usage')
     assert result['archive_bytes']==sum(p.stat().st_size for p in files)
     assert result['network_bytes']==result['archive_bytes'] and result['telemetry_bytes']==0
-    assert 'total' not in result and not volume.called
+    assert 'total' not in result and volume.called and result['capacity_error']
+
+
+def test_bar_denominators_use_configured_budget_and_share_capacity(environment):
+    _,store,vault=environment;cfg=configure(store,vault)
+    store.save('network_log_retention',{'megabytes':50})
+    telemetry.record(store,'metrics','m','m',{'cpu_percent':2})
+    store.save('archive_storage',{'target':capacity.identity(cfg),'at':time.time(),'total':1_000_000_000,'available':500_000_000,'archive_bytes':250_000_000})
+    result=capacity.comparison(store,cfg)
+    assert result['local_storage']['total']==50_000_000
+    assert result['local_storage']['percent']==result['local_storage']['record_bytes']/50_000_000*100
+    assert result['smb_storage']['percent']==25
+    assert result['smb_storage']['bar_percent']==25
+    store.save('archive_storage',{'target':capacity.identity(cfg),'at':time.time(),'archive_bytes':1_000})
+    assert capacity.comparison(store,cfg)['smb_storage']['percent'] is None
+
+
+def test_over_budget_values_are_visible_but_bar_is_capped(signed_in,monkeypatch):
+    client,store,vault,_=signed_in;cfg=configure(store,vault)
+    monkeypatch.setattr(capacity,'local',lambda _: {'record_bytes':300_000_000,'network_bytes':100_000_000,'telemetry_bytes':200_000_000})
+    result=capacity.comparison(store,cfg)['local_storage']
+    assert result['percent']==150 and result['bar_percent']==100 and result['color']=='high'
+    page=client.get('/telemetry-history').data
+    assert b'300.000 MB / 200.000 MB' in page and b'150.0% used' in page
+    assert b'aria-valuenow="100"' in page

@@ -58,9 +58,12 @@ def execute(request):
     if operation in ('capacity','usage'):
         from .archive_storage import meter
         result={}
-        if operation=='capacity':
+        try:
             stats=smbclient.stat_volume(root.rsplit('\\',2)[0])
             result=meter(stats.total_size,stats.actual_available_size,stats.caller_available_size)
+        except (OSError,ValueError):
+            if operation=='capacity':raise
+            result['capacity_error']='SMB capacity unavailable; archive file usage is still measured.'
         size=0;scanned=0;partial=False;totals={name:0 for name in ('network_bytes','telemetry_bytes')}
         try:
             base=root.rsplit('\\',2)[0]

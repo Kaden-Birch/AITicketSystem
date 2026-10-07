@@ -1,21 +1,26 @@
-{% macro record_bar(value,label,amount) %}<strong>{{ amount|storage_size }}</strong><div class="archive-capacity-track" role="progressbar" aria-label="{{ label }} record data" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ value.percent|round(2) }}" aria-valuetext="{{ amount|storage_size }} stored; bar compares record sizes"><span class="good" data-capacity-percent="{{ value.percent }}"></span></div>{% endmacro %}
+{% macro record_bar(value,label,amount) %}
+<div class="row archive-capacity-values"><strong>{{ amount|storage_size }} / {{ value.total|default(none)|storage_size }}</strong>{% if value.percent is not none %}<span>{{ value.percent|round(1) }}% used</span>{% endif %}</div>
+{% if value.percent is not none %}<div class="archive-capacity-track" role="progressbar" aria-label="{{ label }} record data" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ value.bar_percent|round(2) }}" aria-valuetext="{{ amount|storage_size }} of {{ value.total|storage_size }}; {{ value.percent|round(1) }} percent used"><span class="{{ value.color }}" data-capacity-percent="{{ value.bar_percent }}"></span></div>{% else %}<div class="archive-capacity-track unavailable" aria-label="{{ label }} capacity unavailable"></div>{% endif %}
+{% endmacro %}
 <section aria-labelledby="archive-storage-heading">
   <div class="row"><h3 id="archive-storage-heading">Collected evidence storage</h3>{% if request.path != '/telemetry-history' %}<a href="/telemetry-history">Telemetry history →</a>{% endif %}</div>
-  <p class="hint">SIEM logs and collected telemetry only. Database files, indexes, SQLite journals and other application data are excluded. Bar lengths compare the two stored sizes; they do not show drive fullness.</p>
+  <p class="hint">SIEM logs and collected telemetry only. Database files, indexes, SQLite journals and other application data are excluded.</p>
   <div class="archive-capacity-grid">
-    <article class="archive-capacity"><h4>Local records</h4><p class="hint">Uncompressed record data</p>
+    <article class="archive-capacity"><h4>Local records</h4><p class="hint">Uncompressed records / Event storage budget</p>
       {% if local_storage.record_bytes is not none %}{{ record_bar(local_storage,'Local',local_storage.record_bytes) }}{% else %}<p>Total unavailable</p><div class="archive-capacity-track unavailable"></div>{% endif %}
       <p class="hint">SIEM logs: {{ local_storage.network_bytes|storage_size }}<br>Telemetry: {{ local_storage.telemetry_bytes|storage_size }}</p>
-      <small>Counts retained records and pending copies that no longer exist in local history. A record awaiting SMB upload is counted once.</small>
+      <small>Counts retained records and pending copies that no longer exist in local history. A record awaiting SMB upload is counted once. Total follows the {{ local_storage.budget_mb }} MB Event storage budget in Network log settings. Retention and pending-upload limits remain separate.</small>
       {% if local_storage.error %}<p class="notice">{{ local_storage.error }}</p>{% endif %}
     </article>
-    <article class="archive-capacity"><h4>SMB archive files</h4><p class="hint">Compressed record data</p>
+    <article class="archive-capacity"><h4>SMB archive files</h4><p class="hint">Compressed archive files / SMB storage capacity</p>
       {% if smb_storage.archive_bytes is defined and smb_storage.archive_bytes is not none %}
         {% if smb_storage.archive_partial %}<small>At least</small>{% endif %}{{ record_bar(smb_storage,'SMB',smb_storage.archive_bytes) }}
         <p class="hint">SIEM logs: {{ smb_storage.network_bytes|default(none)|storage_size }}<br>Telemetry: {{ smb_storage.telemetry_bytes|default(none)|storage_size }}</p>
-        <small>Completed archive files for this installation only. Compression makes this size smaller than the equivalent local records. Measured {{ smb_storage.at|timestamp }}{{ ' · Last known reading — stale' if smb_storage.stale else '' }}.{% if smb_storage.archive_partial %} File scan incomplete; this is a lower bound.{% endif %}</small>
+        <small>Completed archive files for this installation only. Total is the storage capacity reported by the SMB server. Compression makes archive files smaller than the equivalent local records. Measured {{ smb_storage.at|timestamp }}{{ ' · Last known reading — stale' if smb_storage.stale else '' }}.{% if smb_storage.archive_partial %} File scan incomplete; this is a lower bound.{% endif %}</small>
       {% elif smb_storage.configured %}<p>Archive usage unavailable</p><div class="archive-capacity-track unavailable" aria-label="SMB archive usage unavailable"></div><small>The archive service measures files in the background. A missing reading does not mean the archive is empty.</small>
       {% else %}<p>No SMB archive configured</p><a href="/settings/network-logs">Configure archive storage</a>{% endif %}
+      {% if smb_storage.capacity_error %}<p class="hint">{{ smb_storage.capacity_error }}</p>{% endif %}
+      {% if smb_storage.available is defined %}<p class="hint">Available to archive account: {{ smb_storage.available|storage_size }}</p>{% endif %}
       {% if smb_storage.error %}<p class="notice" role="status">{{ smb_storage.error }}</p>{% endif %}
     </article>
   </div>

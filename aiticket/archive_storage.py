@@ -44,9 +44,16 @@ def local(store):
 
 def comparison(store,cfg):
     local_data=local(store);remote_data=remote(store,cfg)
-    largest=max(local_data.get('record_bytes') or 0,remote_data.get('archive_bytes') or 0,1)
-    local_data['percent']=(local_data.get('record_bytes') or 0)/largest*100
-    remote_data['percent']=(remote_data.get('archive_bytes') or 0)/largest*100
+    retention={**logs.DEFAULTS,**store.setting('network_log_retention',{})}
+    # Display the MB budget entered in settings; do not alter retention enforcement.
+    local_data['total']=retention['megabytes']*1_000_000
+    local_data['budget_mb']=retention['megabytes']
+    for data,amount in ((local_data,local_data.get('record_bytes')),(remote_data,remote_data.get('archive_bytes'))):
+        total=data.get('total')
+        percent=amount/total*100 if amount is not None and total else None
+        data['percent']=percent
+        data['bar_percent']=min(percent,100) if percent is not None else None
+        data['color']='high' if percent is not None and percent>=90 else 'moderate' if percent is not None and percent>=75 else 'good'
     return {'local_storage':local_data,'smb_storage':remote_data}
 
 
