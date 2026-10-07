@@ -99,9 +99,15 @@ def test_ai_telemetry_history_scope_references_and_redaction(environment,smb):
     telemetry.record(store,'metrics','m','m',{'cpu_percent':85,'password':'private-value'},now)
     telemetry.record(store,'metrics','other','other',{'cpu_percent':99},now)
     exporter(store,smb[1]).step(cfg)
-    identifier=history.search(store,vault,job,'m',dates(now,archive_type='telemetry',record_type='metrics'))['id']
+    headers={'Authorization':'Bearer '+vault.decrypt(store.rows('SELECT credential FROM ai_jobs WHERE id=?',(job,))[0]['credential'])}
+    client=app.test_client();path='/api/hermes/'+job+'/command'
+    requested=client.post(path,json={'action':'archive_search',**dates(now),'tier':'smb','archive_type':'telemetry','record_type':'metrics'},headers=headers)
+    assert requested.status_code==200,requested.json
+    identifier=requested.json['id']
     assert archive.Archiver(store,vault,smb[1]).process_job()
-    answer=history.result(store,job,'m',identifier)
+    returned=client.post(path,json={'action':'archive_status','id':identifier},headers=headers)
+    assert returned.status_code==200
+    answer=returned.json
     assert answer['state']=='complete' and len(answer['observed_facts'])==1,answer
     assert answer['observed_facts'][0]['data']['cpu_percent']==85
     assert answer['observed_facts'][0]['reference'].startswith('/telemetry-history/records/')

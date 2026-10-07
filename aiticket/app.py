@@ -517,7 +517,7 @@ def create_app(data_dir=None, testing=False):
 
     def command_tool_action_impl(payload,ai_job=None,external=False):
         from .commands import queue,view,decide
-        if not isinstance(payload,dict) or set(payload)-{'action','machine_id','incident_id','command','id','connection_id','method','path','params','summary','source','offset','limit','query','article_id','category','folder','title','body','tags','operation','target','phase','outcome','start','end'}: raise ValueError('Invalid command tool envelope.')
+        if not isinstance(payload,dict) or set(payload)-{'action','machine_id','incident_id','command','id','connection_id','method','path','params','summary','source','offset','limit','query','article_id','category','folder','title','body','tags','operation','target','phase','outcome','start','end','tier','archive_type','record_type'}: raise ValueError('Invalid command tool envelope.')
         if any(k in payload and (not isinstance(payload[k],str) or len(payload[k])>100) for k in ('id','machine_id','incident_id')): raise ValueError('Invalid command target identity.')
         action=payload.get('action')
         if ai_job:

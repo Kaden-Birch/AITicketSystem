@@ -244,3 +244,60 @@ def test_disconnect_uses_client_policy_when_infrastructure_is_also_matched(envir
     entry=problems.problems(store)[0]
     assert set(entry['data']['hosts'])=={'m','switch'}
     assert store.rows('SELECT machine_id FROM incidents WHERE id=?',(entry['incident_id'],))[0]['machine_id']=='m'
+
+
+def test_requested_local_network_logs_without_smb_scope_and_filters(environment):
+    app,store,vault=environment;incident,job=operational(store,vault);now=time.time()
+    with store.connect() as c:c.execute('INSERT INTO network_inventory VALUES(?,?,?)',('m',now,json.dumps({'interfaces':[{'mac':MAC}]})))
+    feed(store,events=[(cef(),now-60+i) for i in range(15)])
+    auth={'Authorization':'Bearer '+vault.decrypt(store.rows('SELECT credential FROM ai_jobs WHERE id=?',(job,))[0]['credential'])}
+    client=app.test_client();path='/api/hermes/'+job+'/command'
+    request={'action':'archive_search','tier':'local',**dates(now),'query':'Disconnected','limit':3}
+    response=client.post(path,json=request,headers=auth)
+    assert response.status_code==200,response.json
+    assert response.json['state']=='complete' and response.json['tier']=='local'
+    assert len(response.json['observed_facts'])==3 and response.json['truncated']
+    assert all(e['reference'].startswith('/network-events/') for e in response.json['observed_facts'])
+    assert not response.json['suspected_causes'] and 'test-secret' not in json.dumps(response.json)
+    assert not store.rows('SELECT 1 FROM log_archive_jobs')
+    assert client.post(path,json={**request,'machine_id':'other'},headers=auth).status_code==403
+    assert client.post(path,json={**request,'limit':21},headers=auth).status_code==400
+    assert not store.rows('SELECT 1 FROM command_jobs')
+
+
+def test_requested_local_telemetry_is_filtered_bounded_and_has_references(environment):
+    app,store,vault=environment;incident,job=operational(store,vault);configure(store,vault);now=time.time()
+    from aiticket import telemetry_archive as telemetry
+    for i in range(12):telemetry.record(store,'metrics','m','m',{'cpu_percent':i,'password':'private-value'},now-60+i)
+    telemetry.record(store,'metrics','other','other',{'cpu_percent':999},now)
+    answer=history.search(store,vault,job,'m',dates(now,tier='local',archive_type='telemetry',record_type='metrics',limit=2))
+    assert answer['state']=='complete' and answer['truncated'] and len(answer['observed_facts'])==2
+    assert all(e['machine_id']=='m' and e['kind']=='metrics' and e['reference'].startswith('/telemetry-history/records/') for e in answer['observed_facts'])
+    assert 'private-value' not in json.dumps(answer) and not store.rows('SELECT 1 FROM log_archive_jobs')
+    assert not history.search(store,vault,job,'m',dates(now,tier='local',archive_type='telemetry',record_type='metrics',query='no matching readings'))['observed_facts']
+    auth={'Authorization':'Bearer '+vault.decrypt(store.rows('SELECT credential FROM ai_jobs WHERE id=?',(job,))[0]['credential'])}
+    request={'action':'archive_search',**dates(now),'tier':'local','archive_type':'telemetry','record_type':'metrics','limit':2}
+    response=app.test_client().post('/api/hermes/'+job+'/command',json=request,headers=auth)
+    assert response.status_code==200 and len(response.json['observed_facts'])==2
+    assert app.test_client().post('/api/hermes/'+job+'/command',json={**request,'machine_id':'other'},headers=auth).status_code==403
+
+
+def test_local_and_smb_history_share_run_quota_and_duplicate_local_requests(environment):
+    _,store,vault=environment;incident,job=operational(store,vault);configure(store,vault);now=time.time()
+    request=dates(now,tier='local',archive_type='telemetry',query='first')
+    history.search(store,vault,job,'m',request);history.search(store,vault,job,'m',request)
+    assert len(store.rows("SELECT 1 FROM audit WHERE action='network_logs.ai_local_search'"))==1
+    history.search(store,vault,job,'m',dates(now,query='smb'))
+    for q in ('second','third'):history.search(store,vault,job,'m',dates(now,tier='local',query=q))
+    with pytest.raises(ValueError,match='four'):history.search(store,vault,job,'m',dates(now,tier='local',query='fifth'))
+    with pytest.raises(ValueError,match='four'):history.search(store,vault,job,'m',dates(now,query='fifth'))
+
+
+def test_local_search_failure_is_unavailable_not_empty_history(environment,monkeypatch):
+    _,store,vault=environment;incident,job=operational(store,vault)
+    from aiticket import telemetry_archive as telemetry
+    def failed(*args,**kwargs):raise OSError('private DB path')
+    monkeypatch.setattr(telemetry,'local_search',failed)
+    answer=history.search(store,vault,job,'m',dates(time.time(),tier='local',archive_type='telemetry'))
+    assert answer['state']=='unavailable' and not answer['observed_facts']
+    assert 'private DB path' not in json.dumps(answer)

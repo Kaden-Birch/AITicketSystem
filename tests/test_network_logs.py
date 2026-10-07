@@ -215,7 +215,8 @@ def test_ai_logs_are_scoped_untrusted_and_manual_readable_in_maintenance(environ
     job=ai.request_job(store,vault,incident,read_only=True)
     row=store.rows('SELECT * FROM ai_jobs WHERE id=?',(job,))[0]
     snapshot=json.loads(row['evidence'])
-    assert snapshot['network_events']['events'] and 'Untrusted' in snapshot['network_events']['note']
+    assert snapshot['network_events']['on_demand'] and 'events' not in snapshot['network_events']
+    assert 'tier local first' in snapshot['historical_archive']['note']
     with store.connect() as c:c.execute("UPDATE ai_jobs SET state='running' WHERE id=?",(job,))
     headers={'Authorization':'Bearer '+vault.decrypt(row['credential'])};client=app.test_client();path='/api/hermes/'+job+'/command'
     response=client.post(path,json={'action':'evidence','source':'network_logs'},headers=headers)

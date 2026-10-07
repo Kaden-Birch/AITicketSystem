@@ -189,11 +189,8 @@ def request_job(store, vault, incident_id, automatic=False, now=None, mode='tria
         from .changes import context as change_context
         from .knowledge import related_scope
         affected=related_scope(c,group_machines(c,incident_id))
-        from .network_logs import evidence as log_evidence
-        log_targets=[incident['machine_id']]+sorted(group_machines(c,incident_id)-{incident['machine_id']})
-        upstream=[r[0] for machine in log_targets[:8] for r in c.execute('SELECT d.machine_id FROM network_links l JOIN unifi_devices d ON d.connection_id=l.connection_id AND d.device_id=l.device_id WHERE l.machine_id=? AND d.deleted IS NULL',(machine,))]
-        document['network_events']=log_evidence(c,log_targets+upstream+sorted(affected),incident['last_seen'],limit=5)
-        document['historical_archive']={'available':bool(store.setting('network_log_smb',{}).get('server')),'note':'Use archive_search with archive_type network or telemetry and archive_status for bounded historical patterns when useful. Cite returned event references as observed facts; causes remain hypotheses. Knowledge articles/workflow reuse are optional, never authorization.'}
+        document['network_events']={'on_demand':True,'note':'Logs are not attached automatically. Request host-specific logs only when they can answer an investigation question.'}
+        document['historical_archive']={'local_available':True,'available':bool(store.setting('network_log_smb',{}).get('server')),'note':'Use archive_search with tier local first, or tier smb for older history; choose archive_type network or telemetry, machine_id, an explicit start/end interval and optional query/record_type. Start with limit 10 and narrow filters. Local results return immediately; poll SMB searches using archive_status and id without resubmitting. Request evidence only when useful; cite references as observed facts, never proven causes or repair authority.'}
         document['knowledge']=kb_context(c,affected)
         document['recent_changes']=[{k:v for k,v in item.items() if k!='details'} for item in change_context(c,affected)[:8]]
         from .knowledge import ticket_context

@@ -122,13 +122,17 @@ def status(store):
     return row
 
 
-def local_search(store,params):
+def local_search(store,params,limit=201,timeout=None):
     clauses=['at>=?','at<=?'];args=[params['start'],params['end']]
     for key,col in [('machine','machine_id'),('kind','kind')]:
         if params.get(key):clauses.append(col+'=?');args.append(params[key])
     if params.get('q'):clauses.append("instr(lower(payload),lower(?))>0");args.append(params['q'])
-    args.append(201)
-    return [document(row) for row in store.rows('SELECT * FROM telemetry_records WHERE '+' AND '.join(clauses)+' ORDER BY at DESC,id DESC LIMIT ?',args)]
+    args.append(limit)
+    with store.connect() as c:
+        if timeout is not None:
+            deadline=time.monotonic()+timeout
+            c.set_progress_handler(lambda: int(time.monotonic()>deadline),2000)
+        return [document(row) for row in c.execute('SELECT * FROM telemetry_records WHERE '+' AND '.join(clauses)+' ORDER BY at DESC,id DESC LIMIT ?',args)]
 
 
 def validate_document(item):
