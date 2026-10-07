@@ -149,3 +149,6 @@ body{background:var(--page)}header,section,.cards article,.table,.metric,.host-c
 :root[data-theme="dark"] .attention-agents,:root[data-theme="dark"] .attention-ai{color:#ffa5ae}:root[data-theme="dark"] .attention-updates{color:#c5a6ff}:root[data-theme="dark"] .attention-connections{color:#92c5ff}:root[data-theme="dark"] .attention-notifications{color:#efc570}:root[data-theme="dark"] .attention-monitoring{color:#8adbd0}
 
 .location-title{min-width:0}.location-title small{display:block;margin-top:5px;font-weight:400;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:38vw}@media(max-width:800px){.location-title small{max-width:65vw}}
+
+/* Keep access evidence compact, and avoid stretching shorter path cards. */
+.access-grid{align-items:start}.access-grid .health-card{min-width:0;overflow-wrap:anywhere}.access-reading{border-top:1px solid var(--line);padding:12px 0}.access-reading p{margin:6px 0}.access-reading .row{flex-wrap:wrap;justify-content:flex-start;gap:8px 16px;font-size:13px}.access-section>details>form{max-width:720px;border-top:1px solid var(--line);padding:12px 0}.access-grid .health-card>.row{flex-wrap:wrap}.access-grid h3{margin:0}

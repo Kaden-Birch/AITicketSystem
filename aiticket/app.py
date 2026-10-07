@@ -9,6 +9,7 @@ import os
 import secrets
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 from flask import Flask, abort, flash, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
 from .db import Store, uid
@@ -242,6 +243,7 @@ def create_app(data_dir=None, testing=False):
     @login_required
     def applications():
         from .applications import view,save
+        from .access_paths import views as access_views,suggestions as access_suggestions
         if request.method=='POST':
             identifier=request.form.get('id') or None
             if request.form.get('operation')=='delete':
@@ -252,7 +254,7 @@ def create_app(data_dir=None, testing=False):
                 if len(children)!=len(parents):raise ValueError('Choose both sides of each dependency.')
                 save(store,request.form.get('name',''),request.form.getlist('checks'),[(x,y) for x,y in zip(children,parents) if x or y],identifier)
             flash('Application settings saved.');return redirect('/applications')
-        return render_template('applications.html',applications=view(store),services=__import__('aiticket.integrations',fromlist=['views']).views(store),checks=store.rows("SELECT c.id,c.name,m.name AS host FROM checks c JOIN machines m ON m.id=c.machine_id WHERE c.kind NOT IN ('manual','workflow_test') ORDER BY m.name,c.name"))
+        return render_template('applications.html',applications=view(store),services=__import__('aiticket.integrations',fromlist=['views']).views(store),access_paths=access_views(store),access_suggestions=access_suggestions(store),machines=store.rows('SELECT id,name FROM machines ORDER BY name'),checks=store.rows("SELECT c.id,c.name,m.name AS host FROM checks c JOIN machines m ON m.id=c.machine_id WHERE c.kind NOT IN ('manual','workflow_test') ORDER BY m.name,c.name"))
 
     @app.get('/hosts/new')
     @login_required
@@ -392,6 +394,8 @@ def create_app(data_dir=None, testing=False):
         data['proxmox_ui']=proxmox_overview(store,data['host'])
         from .host_storage import build as host_storage
         data['host_storage']=host_storage(store,data['host'])
+        from .access_paths import views as access_views
+        data['access_paths']=access_views(store,machine_id)
         return render_template('host-detail.html',**data)
 
     @app.get('/hosts/<machine_id>/checks/new')
@@ -836,8 +840,14 @@ def create_app(data_dir=None, testing=False):
             raise ValueError('Select an existing machine.')
         if existing and kind in ('agent','agent_metric','proxmox_linked','truenas','plex'):
             cfg=json.loads(existing['config'])
+        elif kind in ('access_path','certificate','dns'):
+            from .access_paths import configuration
+            cfg=configuration(f,kind)
         elif kind == 'http':
             cfg = {'url': validate_url(f.get('url', '')), 'status': int(f.get('expected_status', 200))}
+            if not urlsplit(cfg['url']).query:
+                from .access_paths import configuration
+                cfg=configuration(f)
             if not 100 <= cfg['status'] <= 599:
                 raise ValueError('Invalid HTTP status.')
         elif kind in ('process','smb','docker'):

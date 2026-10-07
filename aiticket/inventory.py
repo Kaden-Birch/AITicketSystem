@@ -22,7 +22,9 @@ FIELDS={
 }
 CONFIG={
  'ping':{'host'}, 'process':{'target'}, 'smb':{'target'}, 'docker':{'target','require_health'},
- 'http':{'url','status'},'tcp':{'host','port'},
+ 'access_path':{'url','status','public_url','public_status','expiry_days','expected_ips','ca'},
+ 'certificate':{'url','status','expiry_days','expected_ips','ca'}, 'dns':{'url','status','expiry_days','expected_ips','ca'},
+ 'http':{'url','status','public_url','public_status','expiry_days','expected_ips','ca'},'tcp':{'host','port'},
  'proxmox':{'url','token_id','resource','expected'},
  'proxmox_linked':{'object_id','cluster_id','resource','expected'},
  'agent':{'agent_id','max_age'},
@@ -56,9 +58,15 @@ def text(value,maximum=2048):
 def config(kind,cfg):
     if kind not in CONFIG or not isinstance(cfg,dict) or set(cfg)-CONFIG[kind]:
         raise ValueError('Unsupported check configuration or credential field.')
-    if kind=='http':
+    if kind in ('access_path','certificate','dns'):
+        from .access_paths import configuration
+        configuration(cfg,kind)
+    elif kind=='http':
         validate_url(cfg.get('url',''))
         integer(cfg.get('status',200),100,599)
+        if any(key in cfg for key in ('public_url','public_status','expiry_days','expected_ips','ca')):
+            from .access_paths import configuration
+            configuration(cfg)
     elif kind=='ping':
         import re
         if not isinstance(cfg.get('host'),str) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,253}',cfg['host']) or cfg['host'].startswith('-'):

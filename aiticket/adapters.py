@@ -6,6 +6,9 @@ from .security import validate_url
 
 
 def probe(kind, config, vault, store=None):
+    if kind in ('access_path','certificate','dns'):
+        from .access_paths import probe as access_probe
+        return access_probe(kind,config)
     if kind in ('truenas','plex'):
         from .integrations import probe as integration_probe
         return integration_probe(store,kind,config)
@@ -33,11 +36,11 @@ def probe(kind, config, vault, store=None):
             return True, {'reason': 'TCP connection established'}
     if kind == 'http':
         validate_url(config['url'])
-        r = requests.get(config['url'], timeout=(3, 5), allow_redirects=False, stream=True)
-        try:
-            return r.status_code == config.get('status', 200), {'status_code': r.status_code, 'expected_status': config.get('status', 200)}
-        finally:
-            r.close()
+        from .access_paths import probe as access_probe
+        healthy,evidence=access_probe('access_path',config)
+        response=evidence.get('internal',{}).get('http',{})
+        evidence.update(status_code=response.get('status_code'),expected_status=config.get('status',200))
+        return healthy,evidence
     if kind == 'proxmox':
         base = validate_url(config['url'].rstrip('/'), ('https',))
         headers = {'Authorization': 'PVEAPIToken=' + config['token_id'] + '=' + vault.decrypt(config['token_secret'])}

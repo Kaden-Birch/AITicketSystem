@@ -1,0 +1,36 @@
+<section class="access-section"><div class="row"><h2>Application access paths</h2><span class="hint">DNS · TLS · HTTP</span></div><p class="hint">Existing HTTP checks collect DNS and certificate evidence automatically. Add a public URL to compare both paths.</p><div class="health-grid access-grid">
+{% for path in access_paths %}
+<article class="health-card" data-live-key="access-{{ path.id }}"><div class="row"><h3><a href="/hosts/{{ path.machine_id }}#check-{{ path.id }}">{{ path.name }}</a></h3><span class="badge {{ path.health if path.fresh else 'unknown' }}">{{ path.health|capitalize if path.fresh else 'Awaiting current result' }}</span></div><p class="hint">{{ path.host }} · {{ path.at|timestamp if path.at else 'Not checked yet' }}</p>
+{% if path.fresh %}{% for key,label in [('internal','Primary / internal'),('public','Public')] %}{% set reading=path.data.get(key) %}{% if reading %}
+<div class="access-reading"><strong>{{ label }}</strong><p class="hint">{{ reading.get('host','') }}{{ ':'~reading.port if reading.port else '' }} · {{ reading.reason }}</p><div class="row">
+{% if reading.dns %}
+<span>DNS: {{ reading.dns.state|replace('_',' ') }}</span>
+{% endif %}{% if reading.certificate %}
+<span>TLS: {{ reading.certificate.state|replace('_',' ') }}{% if reading.certificate.days_remaining is defined %} · {{ reading.certificate.days_remaining }} days remaining{% endif %}
+</span>
+{% endif %}{% if reading.http %}
+<span>HTTP {{ reading.http.status_code }} / expected {{ reading.http.expected_status }}</span>
+{% endif %}
+</div>
+{% if reading.certificate and reading.certificate.expires_at is defined %}
+<p class="hint">Expires {{ reading.certificate.expires_at|timestamp }}</p>
+{% endif %}{% if reading.dns and reading.dns.addresses is defined %}
+<p class="hint">{{ reading.dns.addresses|join(', ') }}</p>
+{% endif %}
+</div>
+{% endif %}{% endfor %}{% if path.data.assessment %}
+<p>{{ path.data.assessment }}</p>
+{% endif %}{% endif %}
+<a class="button secondary" href="/checks/{{ path.id }}/edit">Configure paths</a></article>
+{% else %}
+<p class="hint">No access checks yet. Add an HTTP or application access-path check on a host.</p>
+{% endfor %}
+</div><p class="hint">Observed from the AITicketSystem server, including public URLs. Different failures narrow the investigation; they do not prove a root cause or external reachability. Existing maintenance, ticket thresholds and host action permissions apply.</p>
+{% if access_suggestions is defined %}
+<details><summary>Add access monitoring</summary>{% for machine in machines %}<a class="button secondary" href="/hosts/{{ machine.id }}/checks/new">Add a check · {{ machine.name }}</a>{% endfor %}<p class="hint">Addresses are prefilled. Choose a credential-free page or health endpoint and the response it should return. No API credentials are sent.</p>
+{% for suggestion in access_suggestions %}<h3>{{ suggestion.name }}</h3>
+<form method="post" action="/checks"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="machine_id" value="{{ suggestion.machine_id }}"><input type="hidden" name="kind" value="access_path"><input type="hidden" name="interval" value="300"><input type="hidden" name="ca" value="{{ suggestion.ca }}"><label>Name<input name="name" value="{{ (suggestion.name~' access')[:100] }}" required maxlength="100"></label><label>Internal URL<input name="url" value="{{ suggestion.url }}" required></label><label>Public URL (optional)<input name="public_url" placeholder="https://app.example.com/health"></label><div class="fields"><label>Expected internal status<input type="number" name="expected_status" value="200" min="100" max="599"></label><label>Expected public status<input type="number" name="public_status" value="200" min="100" max="599"></label></div><button class="primary">Enable access monitoring</button></form>
+{% endfor %}
+</details>
+{% endif %}
+</section>
