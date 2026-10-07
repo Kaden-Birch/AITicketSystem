@@ -67,6 +67,8 @@ def build(store,host,connection,window='1h',now=None):
                     drive['state']='warning';drive['indicator']='I/O errors'
                 drive.update(pool=e['key'],pool_name=e['title'],color=index%5,media=disk.get('type') if disk.get('type') in ('HDD','SSD') else '?',capacity=size(disk.get('size')))
                 disks.append(drive);e['count']+=1
+        from .capacity_forecasts import forecast,pool_entity
+        e['forecast']=forecast(store,pool_entity('truenas',connection,p),now,max_age=max(180,connection['config']['interval']*3),fresh=fresh and used is not None and free is not None and used>=0 and free>=0)
         pools.append(e)
     for name,disk in inventory.items():
         if name in matched:continue

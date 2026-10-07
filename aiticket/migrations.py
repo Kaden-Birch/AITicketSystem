@@ -1,8 +1,13 @@
 """Ordered schema upgrades; each upgrade and its version marker commit together."""
 from .telemetry_archive import migration as telemetry_migration
 
-CURRENT_VERSION = 44
+CURRENT_VERSION = 45
 MIGRATIONS = {
+    45: (
+        "CREATE TABLE capacity_samples(entity TEXT NOT NULL,bucket INTEGER NOT NULL,machine_id TEXT,kind TEXT NOT NULL,label TEXT NOT NULL,at REAL NOT NULL,used REAL NOT NULL,total REAL NOT NULL,headroom REAL,PRIMARY KEY(entity,bucket))",
+        "CREATE INDEX capacity_sample_age ON capacity_samples(at)",
+        "CREATE INDEX capacity_sample_host ON capacity_samples(machine_id,entity)",
+    ),
     44: telemetry_migration(),
     43: (
         "CREATE TABLE IF NOT EXISTS log_problem_rules(id TEXT PRIMARY KEY,name TEXT NOT NULL,kind TEXT NOT NULL,source_id TEXT REFERENCES log_sources(id),config TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 0,created REAL NOT NULL,updated REAL NOT NULL)",

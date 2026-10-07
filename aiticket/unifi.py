@@ -204,6 +204,9 @@ def numeric_metrics(readings):
 
 def retain(c,connection,snapshot):
     at=snapshot['sampled_at']
+    if connection['kind']=='drive':
+        from .capacity_forecasts import pools
+        pools(c,'unifi',dict(connection),snapshot,at)
     def record(entity,readings):
         metrics=numeric_metrics(readings)
         if metrics:c.execute('INSERT OR IGNORE INTO metric_samples VALUES(?,?,?,?)',(entity,'unifi',at,json.dumps(metrics)))

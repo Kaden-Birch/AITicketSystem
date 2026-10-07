@@ -31,6 +31,7 @@ def signed_in(environment):
 
 
 def remove_schema44(c):
+    c.execute('DROP TABLE IF EXISTS capacity_samples')
     for row in c.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'telemetry_%'").fetchall():c.execute('DROP TRIGGER '+row[0])
     for table in ('telemetry_records','telemetry_archive_meta'):c.execute('DROP TABLE IF EXISTS '+table)
 

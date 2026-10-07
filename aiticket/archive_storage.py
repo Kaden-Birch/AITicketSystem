@@ -54,6 +54,9 @@ def comparison(store,cfg):
         data['percent']=percent
         data['bar_percent']=min(percent,100) if percent is not None else None
         data['color']='high' if percent is not None and percent>=90 else 'moderate' if percent is not None and percent>=75 else 'good'
+    from .capacity_forecasts import forecast
+    local_data['forecast']=forecast(store,'logs:local',fresh=local_data['record_bytes'] is not None,expected_total=local_data['total'])
+    remote_data['forecast']=forecast(store,'logs:smb:'+identity(cfg),fresh=bool(remote_data.get('at') and not remote_data.get('stale') and not remote_data.get('archive_partial') and remote_data.get('available') is not None))
     return {'local_storage':local_data,'smb_storage':remote_data}
 
 

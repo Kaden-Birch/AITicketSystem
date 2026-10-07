@@ -9,6 +9,8 @@
     <article class="archive-capacity"><h4>Local records</h4><p class="hint">Uncompressed records / Event storage budget</p>
       {% if local_storage.record_bytes is not none %}{{ record_bar(local_storage,'Local',local_storage.record_bytes) }}{% else %}<p>Total unavailable</p><div class="archive-capacity-track unavailable"></div>{% endif %}
       <p class="hint">SIEM logs: {{ local_storage.network_bytes|storage_size }}<br>Telemetry: {{ local_storage.telemetry_bytes|storage_size }}</p>
+      {% set capacity_forecast=local_storage.forecast %}{% include 'capacity-forecast.html' %}
+      <small>Forecast target is the configured evidence budget, not the whole local disk.</small>
       <small>Counts retained records and pending copies that no longer exist in local history. A record awaiting SMB upload is counted once. Total follows the {{ local_storage.budget_mb }} MB Event storage budget in Network log settings. Retention and pending-upload limits remain separate.</small>
       {% if local_storage.error %}<p class="notice">{{ local_storage.error }}</p>{% endif %}
     </article>
@@ -16,9 +18,13 @@
       {% if smb_storage.archive_bytes is defined and smb_storage.archive_bytes is not none %}
         {% if smb_storage.archive_partial %}<small>At least</small>{% endif %}{{ record_bar(smb_storage,'SMB',smb_storage.archive_bytes) }}
         <p class="hint">SIEM logs: {{ smb_storage.network_bytes|default(none)|storage_size }}<br>Telemetry: {{ smb_storage.telemetry_bytes|default(none)|storage_size }}</p>
-        <small>Completed archive files for this installation only. Total is the storage capacity reported by the SMB server. Compression makes archive files smaller than the equivalent local records. Measured {{ smb_storage.at|timestamp }}{{ ' · Last known reading — stale' if smb_storage.stale else '' }}.{% if smb_storage.archive_partial %} File scan incomplete; this is a lower bound.{% endif %}</small>
+
       {% elif smb_storage.configured %}<p>Archive usage unavailable</p><div class="archive-capacity-track unavailable" aria-label="SMB archive usage unavailable"></div><small>The archive service measures files in the background. A missing reading does not mean the archive is empty.</small>
       {% else %}<p>No SMB archive configured</p><a href="/settings/network-logs">Configure archive storage</a>{% endif %}
+      {% if smb_storage.configured %}{% set capacity_forecast=smb_storage.forecast %}{% include 'capacity-forecast.html' %}<small>Forecast uses archive growth and space available to this account. Other activity on the share can fill it sooner.</small>{% endif %}
+      {% if smb_storage.archive_bytes is defined and smb_storage.archive_bytes is not none %}
+        <small>Completed archive files for this installation only. Total is the storage capacity reported by the SMB server. Compression makes archive files smaller than the equivalent local records. Measured {{ smb_storage.at|timestamp }}{{ ' · Last known reading — stale' if smb_storage.stale else '' }}.{% if smb_storage.archive_partial %} File scan incomplete; this is a lower bound.{% endif %}</small>
+      {% endif %}
       {% if smb_storage.capacity_error %}<p class="hint">{{ smb_storage.capacity_error }}</p>{% endif %}
       {% if smb_storage.available is defined %}<p class="hint">Available to archive account: {{ smb_storage.available|storage_size }}</p>{% endif %}
       {% if smb_storage.error %}<p class="notice" role="status">{{ smb_storage.error }}</p>{% endif %}

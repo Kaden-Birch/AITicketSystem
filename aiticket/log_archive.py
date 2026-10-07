@@ -148,7 +148,7 @@ class Archiver:
         self.state = store.setting('network_log_archive_status', {})
         from .telemetry_archive import Exporter
         self.telemetry=Exporter(store,io,self.directory)
-        self.next_upload = self.next_cleanup = self.next_storage = 0
+        self.next_upload = self.next_cleanup = self.next_storage = self.next_capacity = 0
         self.failures = 0
         self.configuration = hashlib.sha256(json.dumps(connection(store,vault),sort_keys=True).encode()).hexdigest()
 
@@ -279,12 +279,21 @@ class Archiver:
         try:
             result=self.io(cfg,'usage',timeout=15)
             self.store.save('archive_storage',{'target':target,'at':time.time(),**result})
+            from .capacity_forecasts import record as capacity_record
+            with self.store.connect() as c:
+                if not result.get('archive_partial') and all(k in result for k in ('archive_bytes','total','available')):
+                    capacity_record(c,'logs:smb:'+target,None,'smb_logs','SMB archive',time.time(),result['archive_bytes'],result['total'],result['available'])
             self.next_storage=time.monotonic()+300
         except OSError:
             self.store.save('archive_storage',{**(prior if prior.get('target')==target else {}),'target':target,'error':'SMB archive file usage could not be read. Check connectivity and share permissions.','attempted':time.time()})
             self.next_storage=time.monotonic()+60
 
     def step(self):
+        from .capacity_forecasts import backfill,sample_local
+        backfill(self.store)
+        if time.monotonic()>=self.next_capacity:
+            sample_local(self.store)
+            self.next_capacity=time.monotonic()+300
         self.refresh_storage(connection(self.store,self.vault))
         self.publish()
         if config(self.store)['enabled']:self.telemetry.capture_dashboard()

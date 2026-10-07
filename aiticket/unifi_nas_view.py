@@ -27,7 +27,7 @@ def health(state):
     return 'unknown'
 
 
-def build(store,machine,readings,fresh,errors,window='1h',interval=60):
+def build(store,machine,readings,fresh,errors,window='1h',interval=60,connection=None):
     device=readings.get('device',{});device=device if isinstance(device,dict) else {}
     storage=readings.get('storage',{});storage=storage if isinstance(storage,dict) else {}
     cpu=device.get('cpu',{});cpu=cpu if isinstance(cpu,dict) else {}
@@ -61,6 +61,8 @@ def build(store,machine,readings,fresh,errors,window='1h',interval=60):
         capacity=number(pool.get('capacity'));used=number(pool.get('usage'));valid=capacity and used is not None and 0<=used<=capacity
         raid=[str(g.get('currentLevel')) for g in pool.get('raidGroups',[]) if isinstance(g,dict) and g.get('currentLevel') is not None]
         pools.append({'name':'Pool '+str(pool.get('number',i+1)),'state':health(pool.get('status')) if fresh else 'unknown','status':str(pool.get('status') or 'Not reported'),'raid':', '.join(raid) or 'RAID type not reported','used':size(used),'capacity':size(capacity),'free':size(capacity-used) if valid else 'Not reported','percent':round(used/capacity*100,1) if valid else None})
+        from .capacity_forecasts import forecast,pool_entity
+        pools[-1]['forecast']=forecast(store,pool_entity('unifi',dict(connection),pool) if connection else None,max_age=max(180,interval*3),fresh=fresh and bool(valid))
     states=[d['state'] for d in disks if d['state']!='empty']+[p['state'] for p in pools]
     state='unknown' if not fresh else 'failed' if 'failed' in states else 'warning' if 'warning' in states else 'unknown' if errors or not states or 'unknown' in states else 'healthy'
     titles={'unknown':'Visibility is incomplete','failed':'Storage needs attention','warning':'Review storage health','healthy':'Everything looks good'}

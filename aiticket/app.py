@@ -1491,7 +1491,7 @@ def create_app(data_dir=None, testing=False):
         if connection['kind']=='drive' and not device_id:
             from .unifi_nas_view import build
             fresh=bool(observed and 0<=time.time()-observed<=max(180,3*max([c['interval'] for c in checks] or [60])))
-            nas=build(store,machine,readings,fresh,snapshot.get('errors',{}),request.args.get('window','1h'),max([c['interval'] for c in checks] or [60]))
+            nas=build(store,machine,readings,fresh,snapshot.get('errors',{}),request.args.get('window','1h'),max([c['interval'] for c in checks] or [60]),connection=connection)
             return render_template('unifi-nas.html',connection=connection,name=name,machine=machine,observed=observed,fresh=fresh,nas=nas,history=history(store,machine,request.args.get('window','1h')),checks=checks,tickets=tickets,facts=facts(readings),errors=snapshot.get('errors',{}))
         from .unifi_network_view import build
         fresh=bool(observed and 0<=time.time()-observed<=max(180,3*max([c['interval'] for c in checks] or [60])))

@@ -79,6 +79,8 @@ def refresh(store,vault,row):
             record_changes(c,row,snapshot,now)
             from .metric_history import record
             if row['kind']=='truenas':
+                from .capacity_forecasts import pools
+                pools(c,'truenas',{**row,'config':cfg},snapshot,now)
                 record(c,row['machine_id'],'truenas',now,snapshot.get('metrics',{}))
                 for pool in snapshot.get('pools',[]):metric(c,row['id']+':pool:'+str(pool['id']),'storage',now,{'used_percent':pool.get('used_percent')})
                 for app in snapshot.get('apps',[]):metric(c,row['id']+':app:'+app['name'],'application',now,app.get('metrics',{}))
