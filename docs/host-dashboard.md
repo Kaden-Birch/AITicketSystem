@@ -27,3 +27,5 @@ System details are in a compact sidebar. Checks expand to show evidence; open ti
 Only update/rebuild the main application for this workspace (schema 25). No agent or Hermes update is required. Existing data and check settings are retained. Graphs refresh using the existing five-second live page updates; collection speed still depends on the agent reporting and Proxmox discovery intervals.
 
 Update/rebuild the main application for automatic Proxmox controls. Agents update independently to 0.10.1 or newer for automatic standalone power capability. Existing identities and permissions are preserved.
+
+For the approved four-graph workspace, automatic agent I/O collection, synchronized event markers and evidence panels, see [Host I/O history and event correlation](host-performance.md).

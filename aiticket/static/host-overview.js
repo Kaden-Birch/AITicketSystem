@@ -3,6 +3,26 @@
   const drawer=document.getElementById('host-inventory-drawer'),content=document.getElementById('host-drawer-content'),search=document.getElementById('host-drawer-search'),sort=document.getElementById('host-drawer-sort'),back=document.getElementById('host-drawer-back'),tools=document.getElementById('host-drawer-search-label');
   let list='',trigger=null,cursor=119,inspecting=false;
   const titles={processes:'All running processes',checks:'All monitoring checks'};
+  const clock=at=>new Date(at*1000).toLocaleString('en-CA',{timeZone:page.dataset.timezone||'America/Edmonton',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit',timeZoneName:'short'});
+  function eventData(){return JSON.parse(document.getElementById('host-event-data').textContent);}
+  function events(button,bucket){
+    const data=eventData(),group=data.groups.find(item=>item.bucket===bucket),items=bucket==null?data.items:group?.items||[];
+    if(bucket!=null)inspect(bucket);
+    list='';tools.hidden=true;back.hidden=true;document.getElementById('host-drawer-empty').hidden=true;
+    document.getElementById('host-drawer-title').textContent=bucket==null?'Performance events':'Events at this point';
+    document.getElementById('host-drawer-kicker').textContent='OBSERVED EVIDENCE';content.replaceChildren();
+    const note=document.createElement('p');note.className='caption';note.textContent='Event times and interval averages can be compared; temporal correlation does not prove causation. Changes are first observed at collection time.';content.append(note);
+    for(const item of items){
+      const article=document.createElement('article');article.className='card event-evidence';
+      const title=document.createElement('h3');title.textContent=item.title;
+      const meta=document.createElement('p');meta.className='caption';meta.textContent=clock(item.at)+' · '+item.host+' · '+item.kind;
+      const summary=document.createElement('p');summary.textContent=item.summary;
+      const details=document.createElement('details'),label=document.createElement('summary'),pre=document.createElement('pre');label.textContent='Recorded evidence';pre.textContent=JSON.stringify(item.details,null,2);details.append(label,pre);
+      const link=document.createElement('a');link.className='quiet';link.href=item.url;link.textContent='Open source record →';
+      article.append(title,meta,summary,details,link);content.append(article);
+    }
+    const history=document.createElement('a');history.className='quiet';history.href=location.pathname+'/troubleshooting';history.textContent='Full troubleshooting history →';content.append(history);open(button);
+  }
   function fills(){page.querySelectorAll('[data-host-fill]').forEach(el=>{el.style.width=Math.min(100,Math.max(0,Number(el.dataset.hostFill)))+'%';});}
   function containers(){
     const q=document.getElementById('container-search').value.toLowerCase(),state=document.getElementById('container-filter').value;
@@ -28,6 +48,9 @@
   }
   function open(button){if(!drawer.open){trigger=button;drawer.showModal();}document.querySelector('.drawer-body').scrollTop=0;}
   page.addEventListener('click',event=>{
+    const marker=event.target.closest('[data-host-event]');
+    if(marker){events(marker,Number(marker.dataset.hostEvent));return;}
+    const all=event.target.closest('[data-performance-all]');if(all){events(all,null);return;}
     const button=event.target.closest('[data-host-list]');
     if(button){list=button.dataset.hostList;populate();open(button);search.focus();}
     const detail=event.target.closest('[data-host-details]');
@@ -85,14 +108,20 @@
       const chart=JSON.parse(card.dataset.chartRecord),sample=chart.samples[cursor],at=sample?.at??reference?.samples[cursor]?.at;
       const x=38+(cursor+.5)/120*554,line=card.querySelector('[data-chart-cursor]');
       line.hidden=false;line.removeAttribute('hidden');line.setAttribute('x1',x);line.setAttribute('x2',x);
-      const marker=card.querySelector('[data-chart-point]');marker.setAttribute('visibility',sample?.value==null?'hidden':'visible');if(sample?.value!=null){marker.setAttribute('cx',x);marker.setAttribute('cy',126-Math.min(1,Math.max(0,sample.value/chart.ceiling))*112);}
-      card.querySelector('[data-chart-value]').textContent=sample?.value==null?'—':Number(sample.value.toFixed(2))+chart.unit;
-      card.querySelector('[data-chart-time]').textContent=(at?new Date(at*1000).toLocaleString()+' · ':'')+(sample?.value==null?'No reading collected':Number(sample.value.toFixed(2))+chart.unit+' · interval average');
+      const traces=chart.traces?.length?chart.traces:[{samples:chart.samples}],labels=[];
+      traces.forEach((trace,i)=>{
+        const value=trace.samples[cursor]?.value,marker=card.querySelector(i?'[data-chart-point-second]':'[data-chart-point]');
+        marker.setAttribute('visibility',value==null?'hidden':'visible');if(value!=null){marker.setAttribute('cx',x);marker.setAttribute('cy',126-Math.min(1,Math.max(0,value/chart.ceiling))*112);}
+        labels.push((trace.label?trace.label+' ':'')+(value==null?'—':Number(value.toFixed(3))+chart.unit));
+      });
+      card.querySelector('[data-chart-value]').textContent=labels.join(' · ');
+      card.querySelector('[data-chart-time]').textContent=(at?clock(at)+' · ':'')+labels.join(' · ')+' · interval average';
     });
   }
   function point(event){const svg=event.target.closest('[data-host-chart] svg');if(!svg)return;const box=svg.getBoundingClientRect();inspect(Math.floor(((event.clientX-box.left)/box.width*600-38)/554*120),svg.closest('.charts'));}
   page.addEventListener('pointermove',point);page.addEventListener('click',point);
   page.addEventListener('keydown',event=>{
+    if(event.target.matches('[data-host-event]')&&['Enter',' '].includes(event.key)){event.preventDefault();events(event.target,Number(event.target.dataset.hostEvent));return;}
     if(event.target.matches('[data-host-check]')&&['Enter',' '].includes(event.key)){event.preventDefault();event.target.click();return;}
     if(!event.target.matches('[data-host-chart] svg'))return;
     if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();inspect(event.key==='Home'?0:event.key==='End'?119:cursor+(event.key==='ArrowLeft'?-1:1),event.target.closest('.charts'));}

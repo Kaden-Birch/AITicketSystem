@@ -63,4 +63,4 @@ def compatibility(payload):
         raise ValueError('Invalid release version.')
     if type(payload['protocol']) is not int or not isinstance(operations,list) or len(operations)>16 or any(not isinstance(op,str) or len(op)>80 for op in operations):
         raise ValueError('Invalid release requirements.')
-    return {'version':version,'compatible':payload['protocol']==1 and set(operations)<=HEARTBEAT_OPERATIONS}
+    return {'version':version,'compatible':payload['protocol'] in (1,2) and set(operations)<=HEARTBEAT_OPERATIONS}

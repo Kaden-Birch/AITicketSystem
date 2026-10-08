@@ -1,6 +1,7 @@
 """Credential-free network paths. Observed reachability is not physical adjacency."""
 import ipaddress
 import json
+import math
 import re
 import time
 from .db import uid
@@ -23,12 +24,14 @@ def validate(data):
     if not isinstance(interfaces,list) or len(interfaces)>64 or not isinstance(neighbors,list) or len(neighbors)>64:raise ValueError('Network inventory exceeds limits.')
     seen=set()
     for item in interfaces:
-        if not isinstance(item,dict) or set(item)-{'name','mac','kind','state','carrier','master','addresses','members','bond_mode','active_slave'}:raise ValueError('Invalid interface inventory.')
+        numbers={'speed_mbps','rx_bytes','tx_bytes','rx_errors','tx_errors','rx_dropped','tx_dropped'}
+        if not isinstance(item,dict) or set(item)-({'name','mac','kind','state','carrier','master','addresses','members','bond_mode','active_slave'}|numbers):raise ValueError('Invalid interface inventory.')
         name=item.get('name','')
         if not isinstance(name,str) or not NAME.fullmatch(name) or name in seen:raise ValueError('Invalid interface identity.')
         seen.add(name)
         if item.get('kind') not in ('physical','virtual','bridge','bond') or (item.get('carrier') is not None and type(item.get('carrier')) is not bool):raise ValueError('Invalid interface state.')
-        if any(not isinstance(v,str) or len(v)>200 for k,v in item.items() if k not in ('carrier','addresses','members')):raise ValueError('Invalid interface field.')
+        if any(not isinstance(v,str) or len(v)>200 for k,v in item.items() if k not in numbers|{'carrier','addresses','members'}):raise ValueError('Invalid interface field.')
+        if any(type(item[k]) not in (int,float) or not math.isfinite(item[k]) or not 0<=item[k]<=1e18 for k in numbers&item.keys()):raise ValueError('Invalid interface counter.')
         if item.get('mac') and not mac(item['mac']):raise ValueError('Invalid interface MAC.')
         addresses=item.get('addresses',[]);members=item.get('members',[])
         if not isinstance(addresses,list) or len(addresses)>16 or not isinstance(members,list) or len(members)>32:raise ValueError('Invalid interface members or addresses.')

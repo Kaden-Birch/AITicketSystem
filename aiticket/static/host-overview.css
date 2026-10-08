@@ -249,3 +249,14 @@ main:has(>.host-design){max-width:1440px;margin:auto;padding:26px}
 body:has(.host-design){background:#15191d}
 html[data-theme=light] body:has(.host-design){background:#f3f6f6}
 .host-design .check:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.host-design .event-marker{cursor:pointer;outline:none}
+.host-design .event-hit{fill:transparent;stroke:none}
+.host-design .event-pin{fill:var(--blue);stroke:var(--inset);stroke-width:1}
+.host-design .event-marker.warn .event-pin{fill:var(--warn)}
+.host-design .event-marker.bad .event-pin{fill:var(--bad)}
+.host-design .event-marker:focus-visible .event-pin,.host-design .event-marker:hover .event-pin{stroke:var(--ink);stroke-width:2}
+.host-design .event-summary{gap:12px;align-items:center;margin-top:8px}
+.host-design .event-summary .caption{margin:0}
+.host-design .event-evidence{margin:12px 0}
+.host-design .event-evidence details{margin:10px 0}
+.host-design [data-host-chart="network_activity"] .plot-heading strong,.host-design [data-host-chart="disk_activity"] .plot-heading strong{font-size:11px;overflow-wrap:anywhere;text-align:right}

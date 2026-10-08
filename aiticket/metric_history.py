@@ -4,6 +4,9 @@ from .hostview import percent
 
 WINDOWS={'10m':600,'30m':1800,'1h':3600,'6h':21600,'24h':86400,'7d':604800}
 METRICS=[('cpu_percent','CPU','%',100),('ram_percent','Memory','%',100),('disk_percent','Storage','%',100),('load_1','Load · 1 minute','',None),('load_5','Load · 5 minutes','',None),('load_15','Load · 15 minutes','',None),('swap_percent','Swap','%',100),('inode_percent','Inodes','%',100),('memory_pressure_percent','Memory pressure','%',100),('uptime_hours','Uptime','h',None)]
+IO_METRICS=[('network_rx_bytes_per_second','Network received',' B/s',None),('network_tx_bytes_per_second','Network sent',' B/s',None),('disk_read_bytes_per_second','Disk read',' B/s',None),('disk_write_bytes_per_second','Disk write',' B/s',None),('disk_busy_percent','Busiest disk utilization','%',100),('disk_latency_ms','Average disk I/O latency',' ms',None)]
+IO_COUNTERS={f'network_{key}{suffix}' for key in ('rx_errors','tx_errors','rx_dropped','tx_dropped') for suffix in ('','_per_second')}|{'network_interfaces_sampled','disk_devices_sampled'}
+TELEMETRY_KEYS={key for key,_,_,_ in METRICS+IO_METRICS}|IO_COUNTERS
 
 
 def normalized(raw,source):
@@ -15,7 +18,7 @@ def normalized(raw,source):
         values[out]=percent(total-free,total) if total is not None and free is not None else None
     values['inode_percent']=percent(raw['inode_total']-raw['inode_free'],raw['inode_total']) if 'inode_total' in raw and 'inode_free' in raw else None
     values['uptime_hours']=raw['uptime_seconds']/3600 if raw.get('uptime_seconds') is not None else None
-    return {k:v for k,_,_,_ in METRICS if type(v:=values.get(k)) in (int,float) and math.isfinite(v)}
+    return {k:v for k in TELEMETRY_KEYS if type(v:=values.get(k)) in (int,float) and math.isfinite(v)}
 
 
 def record(c,entity,source,at,metrics):
@@ -29,7 +32,7 @@ def charts(store,host,window='6h',now=None):
     source='truenas' if host.get('truenas') else 'agent' if host.get('agent') else 'proxmox'
     entity=host['id'] if source in ('agent','truenas') else host['object']['id'] if host.get('object') else None
     extra=[('cpu_temperature','CPU temperature',' °C',None),('disk_busy','Disk busy','%',100),('disk_read_bytes','Disk read',' B/s',None),('disk_write_bytes','Disk write',' B/s',None),('arc_gib','ZFS cache',' GiB',None),('receive_kib_s','Network received',' KiB/s',None),('transmit_kib_s','Network sent',' KiB/s',None)]
-    return series(store,entity,source,window,now,definitions=METRICS+extra if source=='truenas' else None)
+    return series(store,entity,source,window,now,definitions=METRICS+extra if source=='truenas' else METRICS+IO_METRICS)
 
 
 def series(store,entity,source,window='6h',now=None,definitions=None):

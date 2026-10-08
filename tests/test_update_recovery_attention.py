@@ -23,7 +23,8 @@ def test_real_agent_capabilities_and_release_contract_match_server(environment,s
     assert store.rows("SELECT last_seen FROM agents WHERE id='shell-agent'")[0]['last_seen']==0
     reply=client.post('/api/agent/heartbeat',json={'event_id':'real-platform-'+os_name,'host_info':{'os':os_name},'telemetry':{'cpu_percent':4,'memory_total_bytes':1000,'memory_available_bytes':500},'capabilities':caps,'network':{'machine_type':'physical','interfaces':[],'neighbors':[]},'discovery':{'docker_installed':True,'containers':[{'name':'plex','target':'plex','state':'running','health':'healthy','restart_count':2,'exit_code':0,'oom_killed':False,'cpu_percent':1.5,'memory_percent':2.5}],'processes':[{'name':'python','target':'python','pid':42,'memory_bytes':1024,'cpu_percent':3}],'warnings':[]}},headers=headers)
     assert reply.status_code==200
-    assert client.post('/api/agent/update-compatibility',json={**contract,'protocol':2},headers=headers).json['compatible'] is False
+    assert client.post('/api/agent/update-compatibility',json={**contract,'protocol':1},headers=headers).json['compatible'] is True
+    assert client.post('/api/agent/update-compatibility',json={**contract,'protocol':3},headers=headers).json['compatible'] is False
     assert client.post('/api/agent/update-compatibility',json={**contract,'operations':['unsupported']},headers=headers).json['compatible'] is False
     assert client.post('/api/agent/update-compatibility',json=contract).status_code==401
     with store.connect() as c:c.execute("UPDATE agents SET revoked=1 WHERE id='shell-agent'")

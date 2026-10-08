@@ -3,6 +3,27 @@ import copy
 import json
 
 
+def activity(charts,key,label,definitions):
+    traces=[]
+    reference=next((chart for metric,_ in definitions for chart in charts if chart['key']==metric),None)
+    for metric,name in definitions:
+        source=next((chart for chart in charts if chart['key']==metric),None)
+        if not reference:continue
+        samples=[{'at':sample['at'],'value':sample['value']/1e6 if source and sample['value'] is not None else None} for sample in (source or reference)['samples']]
+        traces.append({'label':name,'samples':samples,'latest':source['latest']/1e6 if source else None})
+    values=[sample['value'] for trace in traces for sample in trace['samples'] if sample['value'] is not None]
+    ceiling=max(values)*1.1 if values and max(values)>0 else 1
+    for trace in traces:
+        segments=[];points=[]
+        for i,sample in enumerate(trace['samples']):
+            if sample['value'] is None:
+                if points:segments.append(' '.join(points));points=[]
+            else:points.append(f"{35+(i+.5)/120*530:.1f},{140-min(ceiling,max(0,sample['value']))/ceiling*115:.1f}")
+        if points:segments.append(' '.join(points))
+        trace['segments']=segments
+    return {'key':key,'label':label,'unit':' MB/s','latest':traces[0]['latest'] if traces else None,'ceiling':max(.000001,round(ceiling,6)),'segments':[],'samples':traces[0]['samples'] if traces else [],'traces':traces,'unavailable':not traces}
+
+
 def prepare(data):
     inventory = data.get('discovery')
     processes = inventory['data']['processes'] if inventory else []
@@ -33,9 +54,11 @@ def prepare(data):
     primary=[]
     for key,label,unit in [('cpu_percent','CPU','%'),('ram_percent','RAM',' GB'),('network_activity','Network activity',' MB/s'),('disk_activity','Disk activity',' MB/s')]:
         primary.append(next((c for c in charts if c['key']==key),{'key':key,'label':label,'unit':unit,'latest':None,'min':None,'max':None,'ceiling':1,'segments':[],'samples':[],'unavailable':True}))
+    primary[2]=activity(charts,'network_activity','Network activity',[('network_rx_bytes_per_second','Received'),('network_tx_bytes_per_second','Sent')])
+    primary[3]=activity(charts,'disk_activity','Disk activity',[('disk_read_bytes_per_second','Read'),('disk_write_bytes_per_second','Write')])
     data['overview_charts']=primary
     data['display_charts']=charts
-    data['additional_charts']=[c for c in charts if c['key'] not in ('cpu_percent','ram_percent')]
+    data['additional_charts']=[c for c in charts if c['key'] not in ('cpu_percent','ram_percent','network_rx_bytes_per_second','network_tx_bytes_per_second','disk_read_bytes_per_second','disk_write_bytes_per_second')]
     at=data.get('host',{}).get('sample',{}).get('at')
     uptime=raw.get('uptime_seconds',raw.get('uptime'))
     data['overview_boot']=at-uptime if isinstance(at,(int,float)) and isinstance(uptime,(int,float)) else None
@@ -54,6 +77,9 @@ def prepare(data):
     data['overview_load']=' / '.join(f'{raw[key]:.2f}' if isinstance(raw.get(key),(int,float)) else '—' for key in ('load_1','load_5','load_15'))
     links=data.get('host',{}).get('topology',{}).get('links',[])
     data['overview_link']=next((link for link in links if link.get('fresh') and link.get('confidence') in ('confirmed','corroborated')),None)
+    interfaces=data.get('host',{}).get('topology',{}).get('interfaces',[])
+    data['overview_interface']=next((item for item in interfaces if item.get('name')==(data['overview_link'] or {}).get('interface')),None) or next((item for item in interfaces if item.get('carrier') is True and not item.get('master')),None)
+    data['overview_io']={key:raw.get(key) for key in ('disk_busy_percent','disk_latency_ms','disk_devices_sampled','network_interfaces_sampled','network_rx_errors_per_second','network_tx_errors_per_second','network_rx_dropped_per_second','network_tx_dropped_per_second')}
     access=next((p for p in data.get('access_paths',[]) if p['fresh']),None)
     reading=access['data'].get('internal',{}) if access else {}
     certificate=reading.get('certificate',{})

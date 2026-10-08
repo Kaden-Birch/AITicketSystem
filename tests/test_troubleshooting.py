@@ -52,7 +52,8 @@ def test_timeline_merges_sources_transitions_resource_deltas_and_redacts(environ
         c.execute('INSERT INTO incidents(id,machine_id,check_id,severity,status,first_seen,last_seen,report,closed) VALUES(?,?,?,?,?,?,?,?,?)',('ticket','m','check-m','medium','Resolved',now-105,now-50,json.dumps({'check':'Example','observed':'healthy'}),now-45))
         result=troubleshooting.build(c,['m'],now-300,now)
         assert [x['at'] for x in result['items']]==sorted([x['at'] for x in result['items']],reverse=True)
-        assert set(result['counts'])=={'checks','network','resources','changes','tickets'}
+        assert set(result['counts'])=={'checks','network','resources','changes','tickets','actions'}
+        assert result['counts']['actions']==0
         checks=[x for x in result['items'] if x['kind']=='checks']
         assert len(checks)==2 and checks[0]['title'].endswith('Monitoring recovered')
         cpu=[x for x in result['items'] if x['kind']=='resources' and x['details']['metric']=='cpu_percent']

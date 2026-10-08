@@ -19,7 +19,36 @@ def telemetry(state=None):
         if previous and total>previous[0]:result['cpu_percent']=max(0,min(100,100*(1-(idle.value-previous[1])/(total-previous[0]))))
         state['windows_cpu']=[total,idle.value]
     # Linux PSI, inodes and load averages have no equivalent. Do not fabricate zeroes.
+    if state is not None:
+        try:result.update(performance(state))
+        except (OSError,ValueError,TypeError,KeyError):pass
     return result
+
+
+def performance(state):
+    """Fixed, bounded native counter queries; optional providers may be absent."""
+    from network import performance_rates
+    data=query("""$n=@();$d=@();
+try { $a=@(Get-NetAdapter -IncludeHidden -ErrorAction Stop | Where-Object HardwareInterface | Select-Object -First 64);
+ if(!$a.Count){$a=@(Get-NetAdapter -ErrorAction Stop | Where-Object {$_.Name -notmatch 'Loopback|Tunnel|vEthernet'} | Select-Object -First 64)};
+ $n=@($a | ForEach-Object {$i=$_;$s=$i | Get-NetAdapterStatistics -ErrorAction Stop;
+ [pscustomobject]@{id=[string]$i.InterfaceGuid;rx_bytes=$s.ReceivedBytes;tx_bytes=$s.SentBytes;rx_errors=$s.ReceivedPacketErrors;tx_errors=$s.OutboundPacketErrors;rx_dropped=$s.ReceivedDiscardedPackets;tx_dropped=$s.OutboundDiscardedPackets}}) } catch {}
+try { $d=@(Get-CimInstance Win32_PerfRawData_PerfDisk_PhysicalDisk -ErrorAction Stop | Where-Object {$_.Name -ne '_Total'} | Select-Object -First 64 Name,DiskReadBytesPersec,DiskWriteBytesPersec,AvgDisksecPerTransfer,AvgDisksecPerTransfer_Base,Frequency_PerfTime,PercentIdleTime,Timestamp_Sys100NS) } catch {}
+[pscustomobject]@{network=$n;disks=$d}""",timeout=4,limit=60000) or {}
+    network={};disks={}
+    for item in data.get('network',[])[:64]:
+        row={key:float(item[key]) for key in ('rx_bytes','tx_bytes','rx_errors','tx_errors','rx_dropped','tx_dropped') if item.get(key) is not None}
+        if 'rx_bytes' in row and 'tx_bytes' in row:network[str(item['id'])]=row
+    for item in data.get('disks',[])[:64]:
+        if item.get('DiskReadBytesPersec') is None or item.get('DiskWriteBytesPersec') is None:continue
+        row={'read_bytes':float(item['DiskReadBytesPersec']),'write_bytes':float(item['DiskWriteBytesPersec'])}
+        frequency=float(item.get('Frequency_PerfTime') or 0)
+        if frequency and item.get('AvgDisksecPerTransfer') is not None and item.get('AvgDisksecPerTransfer_Base') is not None:
+            row.update(io_ms=float(item['AvgDisksecPerTransfer'])/frequency*1000,io_ops=float(item['AvgDisksecPerTransfer_Base']))
+        if item.get('PercentIdleTime') is not None and item.get('Timestamp_Sys100NS') is not None:
+            row['busy_ms']=(float(item['Timestamp_Sys100NS'])-float(item['PercentIdleTime']))/10000
+        disks[str(item['Name'])]=row
+    return performance_rates(state,network,disks)
 
 
 
@@ -49,7 +78,7 @@ def host_info():
 
 
 def inventory():
-    try:rows=query("@(Get-NetAdapter -IncludeHidden | Select-Object -First 64 | ForEach-Object { $a=$_; [pscustomobject]@{name=$a.Name;mac=([string]$a.MacAddress).ToLower().Replace('-',':');kind=$(if($a.HardwareInterface){'physical'}else{'virtual'});state=$(if($a.Status -eq 'Up'){'up'}else{'down'});carrier=($a.Status -eq 'Up');master='';addresses=@(Get-NetIPAddress -InterfaceIndex $a.ifIndex -ErrorAction SilentlyContinue | Select-Object -First 16 -ExpandProperty IPAddress);members=@()} })",limit=60000)
+    try:rows=query("@(Get-NetAdapter -IncludeHidden | Select-Object -First 64 | ForEach-Object { $a=$_; $s=$a | Get-NetAdapterStatistics -ErrorAction SilentlyContinue; $r=@{name=$a.Name;mac=([string]$a.MacAddress).ToLower().Replace('-',':');kind=$(if($a.HardwareInterface){'physical'}else{'virtual'});state=$(if($a.Status -eq 'Up'){'up'}else{'down'});carrier=($a.Status -eq 'Up');master='';addresses=@(Get-NetIPAddress -InterfaceIndex $a.ifIndex -ErrorAction SilentlyContinue | Select-Object -First 16 -ExpandProperty IPAddress);members=@()}; if($a.ReceiveLinkSpeed -gt 0){$r.speed_mbps=[double]$a.ReceiveLinkSpeed/1000000}; if($s){$r.rx_bytes=$s.ReceivedBytes;$r.tx_bytes=$s.SentBytes;$r.rx_errors=$s.ReceivedPacketErrors;$r.tx_errors=$s.OutboundPacketErrors;$r.rx_dropped=$s.ReceivedDiscardedPackets;$r.tx_dropped=$s.OutboundDiscardedPackets}; [pscustomobject]$r })",limit=60000)
     except Exception:rows=[]
     try:machine=query('Get-CimInstance Win32_ComputerSystem | Select-Object Manufacturer,Model') or {}
     except Exception:machine={}

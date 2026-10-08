@@ -376,6 +376,9 @@ def create_app(data_dir=None, testing=False):
         data['proxmox_api_jobs']=[px_view(store,vault,r['id']) for r in store.rows('SELECT id FROM proxmox_api_jobs WHERE machine_id=? ORDER BY created DESC LIMIT 20',(machine_id,))]
         from .metric_history import charts
         data['history']=charts(store,data['host'],request.args.get('window','6h'))
+        from .performance_events import build as performance_events
+        data['performance_events']=performance_events(store,machine_id,data['history'])
+        data['overview_timezone']=store.setting('display_timezone','America/Edmonton')
         from .power import availability
         data['power_available']=availability(store,vault,machine_id)
         from .integrations import views
@@ -1381,9 +1384,11 @@ def create_app(data_dir=None, testing=False):
         # Only numeric, bounded telemetry is accepted; no logs or arbitrary text.
         telemetry = payload.get('telemetry', {})
         allowed = {'uptime_seconds', 'load_1', 'memory_available_bytes', 'memory_total_bytes', 'disk_free_bytes', 'disk_total_bytes', 'inode_free', 'inode_total', 'cpu_percent', 'memory_pressure_percent','load_5','load_15','cpu_cores','swap_total_bytes','swap_free_bytes'}
+        from .metric_history import IO_METRICS,IO_COUNTERS
+        allowed|={key for key,_,_,_ in IO_METRICS}|IO_COUNTERS
         if not isinstance(telemetry, dict) or set(telemetry) - allowed or any(type(v) not in (float, int) or (not math.isfinite(v) or not 0 <= v <= 1e18) for v in telemetry.values()):
             abort(400)
-        if any(telemetry.get(key,0)>100 for key in ('cpu_percent','memory_pressure_percent')):
+        if any(telemetry.get(key,0)>100 for key in ('cpu_percent','memory_pressure_percent','disk_busy_percent')):
             abort(400)
         for free,total in (('memory_available_bytes','memory_total_bytes'),('disk_free_bytes','disk_total_bytes'),('inode_free','inode_total'),('swap_free_bytes','swap_total_bytes')):
             if free in telemetry and total in telemetry and telemetry[free]>telemetry[total]:
@@ -1438,6 +1443,8 @@ def create_app(data_dir=None, testing=False):
             c.execute('DELETE FROM agent_events WHERE at<?', (now - 604800,))
             from .changes import agent as record_agent_changes
             record_agent_changes(c,row['machine_id'],str(payload.get('version',''))[:32],discovery,now)
+            from .changes import reboot as record_reboot
+            record_reboot(c,row['machine_id'],json.loads(row['telemetry'] or '{}'),row['sampled_at'] or row['last_seen'],telemetry,sampled_at if sampled_at is not None else now,now)
             c.execute('UPDATE agents SET last_seen=?,address=?,version=?,telemetry=?,capabilities=?,sampled_at=? WHERE id=?', (now, request.remote_addr, str(payload.get('version', ''))[:32], json.dumps(telemetry), json.dumps(capabilities),sampled_at,row['id']))
             from .metric_history import record
             record(c,row['machine_id'],'agent',sampled_at or now,telemetry)
@@ -1447,6 +1454,8 @@ def create_app(data_dir=None, testing=False):
                 for container in discovery['containers']:record(c,row['machine_id']+':container:'+container['target'],'container',sampled_at or now,container)
             if discovery is not None:c.execute('INSERT INTO agent_discovery VALUES(?,?,?) ON CONFLICT(machine_id) DO UPDATE SET at=excluded.at,data=excluded.data',(row['machine_id'],sampled_at if sampled_at is not None else now,json.dumps(discovery)))
             from .topology import retain as retain_network
+            from .changes import network as record_network_changes
+            record_network_changes(c,row['machine_id'],network,now)
             c.execute('INSERT INTO network_inventory VALUES(?,?,?) ON CONFLICT(machine_id) DO UPDATE SET at=excluded.at,data=excluded.data',(row['machine_id'],sampled_at if sampled_at is not None else now,json.dumps(network)))
             for interface in network.get('interfaces',[]):
                 retain_network(c,'interface:'+row['machine_id']+':'+interface['name'],sampled_at if sampled_at is not None else now,{'state':interface.get('state','unknown'),'carrier':interface['carrier']})

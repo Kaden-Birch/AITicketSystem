@@ -6,7 +6,7 @@ from urllib.parse import quote
 from . import network_logs as logs
 
 KINDS = {'all':'All evidence', 'network':'Network events', 'checks':'Monitoring results',
-         'resources':'Resource changes', 'changes':'Observed changes', 'tickets':'Ticket activity'}
+         'resources':'Resource changes', 'changes':'Observed changes', 'tickets':'Ticket activity','actions':'Commands & power actions'}
 
 
 def clean(value, depth=0):
@@ -54,6 +54,23 @@ def build(c, machines, start, end, kind='all', limit=80):
                         'title':logs.safe(title,200),'summary':logs.safe(summary,500),'details':clean(details or {}),
                         'url':url or '/hosts/'+quote(machine,safe=''),'state':state})
     for machine in targets:
+        if kind in ('all','actions'):
+            for table,label in [('command_jobs','Shell command'),('power_jobs','Host power action')]:
+                rows=c.execute('SELECT * FROM '+table+' WHERE machine_id=? AND (dispatched BETWEEN ? AND ? OR completed BETWEEN ? AND ?) ORDER BY coalesce(completed,dispatched) DESC,id LIMIT 101',(machine,start,end,start,end)).fetchall()
+                if len(rows)>100:partial.append(label+' events')
+                for row in rows[:100]:
+                    detail={'job_id':row['id'],'state':row['state'],'note':'Command delivery or completion is not proof of recovery.'}
+                    if table=='power_jobs':detail['operation']=json.loads(row['payload']).get('operation','Host power action')
+                    url='/incidents/'+quote(row['incident_id'],safe='') if table=='command_jobs' and row['incident_id'] else '/hosts/'+quote(machine,safe='')+'/troubleshooting?kind=actions'
+                    for field,phase in [('dispatched','dispatched'),('completed','result received')]:
+                        if row[field] is not None and start<=row[field]<=end:
+                            add(table+':'+row['id']+':'+field,'actions',row[field],machine,label+' · '+phase,row['state'],detail,url)
+            rows=c.execute('SELECT a.* FROM action_proposals a JOIN agents ag ON ag.id=a.agent_id WHERE ag.machine_id=? AND (a.dispatched BETWEEN ? AND ? OR a.completed BETWEEN ? AND ?) ORDER BY coalesce(a.completed,a.dispatched) DESC,a.id LIMIT 101',(machine,start,end,start,end)).fetchall()
+            if len(rows)>100:partial.append('Remediation actions')
+            for row in rows[:100]:
+                for field,phase in [('dispatched','dispatched'),('completed','result received')]:
+                    if row[field] is not None and start<=row[field]<=end:
+                        add('action:'+row['id']+':'+field,'actions',row[field],machine,'Service remediation · '+phase,row['state'],{'proposal_id':row['id'],'state':row['state'],'note':'Execution result does not establish recovery.'},'/incidents/'+quote(row['incident_id'],safe=''))
         if kind in ('all','network'):
             result=logs.query(c,machine=machine,start=start,end=end,limit=50)
             network_available=network_available and result['available']

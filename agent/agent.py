@@ -13,8 +13,8 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-VERSION = '0.13.0'
-UPDATE_REQUIREMENTS = {'protocol':1,'operations':['process_summary','service_status','service_logs','container_logs']}
+VERSION = '0.14.0'
+UPDATE_REQUIREMENTS = {'protocol':2,'operations':['process_summary','service_status','service_logs','container_logs']}
 
 
 def endpoint(value,allow_http=False):
@@ -80,6 +80,11 @@ def telemetry(state=None):
         for line in pressure.read_text().splitlines():
             if line.startswith('full '):
                 result['memory_pressure_percent']=float(dict(field.split('=') for field in line.split()[1:])['avg10'])
+    if state is not None:
+        try:
+            from network import performance
+            result.update(performance(state))
+        except (OSError,ValueError,ImportError):pass
     return result
 
 
