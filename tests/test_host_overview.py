@@ -34,7 +34,7 @@ class Lists(HTMLParser):
         attrs=dict(attrs)
         if tag=='template':self.in_template=True;self.templates+=1
         if not self.in_template and 'check-item' in attrs.get('class',''):self.main_checks+=1
-        if not self.in_template and 'data-host-entry' in attrs:self.inventory+=1
+        if not self.in_template and 'inventory-row' in attrs.get('class',''):self.inventory+=1
     def handle_endtag(self,tag):
         if tag=='template':self.in_template=False
 
@@ -50,7 +50,7 @@ def test_host_overview_limits_complete_drawers_and_escaped_inventory(signed_in):
     page=client.get('/hosts/'+machine)
     assert page.status_code==200
     parser=Lists();parser.feed(page.text)
-    assert parser.main_checks==6 and parser.inventory==4 and parser.templates==3
+    assert parser.main_checks==6 and parser.inventory==4 and parser.templates==5
     assert 'Process 0' in page.text and 'Check 9' in page.text
     assert '<script>bad</script>' not in page.text and '&lt;script&gt;bad&lt;/script&gt;' in page.text
     assert f'action="/hosts/{machine}/container-logs"' in page.text
@@ -61,5 +61,18 @@ def test_primary_history_is_bounded_and_secondary_metrics_are_retained():
     keys=['cpu_percent','ram_percent','disk_percent','load_1','load_5','load_15','swap_percent','inode_percent','memory_pressure_percent','uptime_hours']
     data={'checks':[],'history':{'charts':[{'key':key} for key in keys]}}
     prepare(data)
-    assert [r['key'] for r in data['overview_charts']]==keys[:4]
-    assert [r['key'] for r in data['additional_charts']]==keys[4:]
+    assert [r['key'] for r in data['overview_charts']]==['cpu_percent','ram_percent','network_activity','disk_activity']
+    assert all(c['unavailable'] for c in data['overview_charts'][2:])
+    assert [r['key'] for r in data['additional_charts']]==keys[2:]
+
+
+def test_ram_graph_uses_reported_host_capacity_and_activity_stays_unavailable():
+    data={'checks':[],'host':{'sample':{'at':10000,'raw':{'memory_total_bytes':32000000000,'memory_available_bytes':16000000000,'uptime_seconds':3600}}},'history':{'charts':[{'key':'ram_percent','label':'Memory','unit':'%','latest':50,'min':40,'max':60,'ceiling':100,'samples':[{'at':9000,'value':50}],'segments':['35,25']} ]}}
+    prepare(data)
+    ram=data['overview_charts'][1]
+    assert ram['latest']==16 and ram['unit']==' GB' and ram['samples'][0]['value']==16
+    assert data['history']['charts'][0]['latest']==50  # never mutate retained metric semantics
+    assert data['overview_sizes']['memory_total']=='32.0 GB'
+    assert data['overview_boot']==6400
+    assert [c['label'] for c in data['overview_charts']]==['CPU','RAM','Network activity','Disk activity']
+    assert all(c['unavailable'] for c in data['overview_charts'][2:])

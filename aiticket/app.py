@@ -65,6 +65,10 @@ def create_app(data_dir=None, testing=False):
     def timestamp(value):
         return datetime.fromtimestamp(value, ZoneInfo(store.setting('display_timezone','America/Edmonton'))).strftime('%Y-%m-%d %H:%M:%S %Z') if value else 'Never'
 
+    @app.template_filter('host_clock')
+    def host_clock(value):
+        return datetime.fromtimestamp(value, ZoneInfo(store.setting('display_timezone','America/Edmonton'))).strftime('%b %d, %I:%M %p %Z').replace(', 0', ', ') if value else 'Unavailable'
+
     @app.context_processor
     def context():
         session.setdefault('csrf', secrets.token_urlsafe(32))
