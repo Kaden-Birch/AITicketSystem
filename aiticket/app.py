@@ -402,6 +402,10 @@ def create_app(data_dir=None, testing=False):
         prepare_host_overview(data)
         service_updates={r['target']:r['at'] for r in store.rows("SELECT target,MAX(at) at FROM audit WHERE action='integration.saved' AND target IN (SELECT id FROM integrations WHERE machine_id=?) GROUP BY target",(machine_id,))}
         data['overview_services']=sorted((r for r in data['connections'] if r['kind']=='plex'),key=lambda r:service_updates.get(r['id'],0),reverse=True)[:3]
+        data['overview_knowledge']=sorted(
+            [{'title':r['title'],'updated':r['updated'],'kind':'Article','url':'/knowledge/articles/'+r['id']} for r in data['host_articles']]+
+            [{'title':r['name'],'updated':service_updates.get(r['id'],0),'kind':'Application','url':'/services/'+r['id']} for r in data['overview_services']],
+            key=lambda r:r['updated'],reverse=True)[:3]
         return render_template('host-detail.html',**data)
 
     @app.get('/hosts/<machine_id>/checks/new')

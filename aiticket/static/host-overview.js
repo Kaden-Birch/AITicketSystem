@@ -1,6 +1,7 @@
 (() => {
   function fills() {document.querySelectorAll('[data-host-fill]').forEach(el => {el.style.width=Math.min(100,Math.max(0,Number(el.dataset.hostFill)))+'%';});}
   fills();
+  document.addEventListener('change',event => {if(event.target.id==='host-history-window'){const url=new URL(location.href);url.searchParams.set('window',event.target.value);location.assign(url);}});
   const drawer = document.getElementById('host-inventory-drawer');
   if (!drawer) return;
   const content = document.getElementById('host-drawer-content'), search = document.getElementById('host-drawer-search');

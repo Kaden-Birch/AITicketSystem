@@ -55,3 +55,11 @@ def test_host_overview_limits_complete_drawers_and_escaped_inventory(signed_in):
     assert '<script>bad</script>' not in page.text and '&lt;script&gt;bad&lt;/script&gt;' in page.text
     assert f'action="/hosts/{machine}/container-logs"' in page.text
     assert 'host-inventory-drawer' in page.text and 'data-live-preserve' in page.text
+
+
+def test_primary_history_is_bounded_and_secondary_metrics_are_retained():
+    keys=['cpu_percent','ram_percent','disk_percent','load_1','load_5','load_15','swap_percent','inode_percent','memory_pressure_percent','uptime_hours']
+    data={'checks':[],'history':{'charts':[{'key':key} for key in keys]}}
+    prepare(data)
+    assert [r['key'] for r in data['overview_charts']]==keys[:4]
+    assert [r['key'] for r in data['additional_charts']]==keys[4:]
