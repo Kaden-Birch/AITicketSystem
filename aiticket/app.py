@@ -396,6 +396,12 @@ def create_app(data_dir=None, testing=False):
         data['host_storage']=host_storage(store,data['host'])
         from .access_paths import views as access_views
         data['access_paths']=access_views(store,machine_id)
+        from .knowledge import search as knowledge_search
+        with store.connect() as c:data['host_articles']=knowledge_search(c,{machine_id},limit=3)
+        from .host_overview import prepare as prepare_host_overview
+        prepare_host_overview(data)
+        service_updates={r['target']:r['at'] for r in store.rows("SELECT target,MAX(at) at FROM audit WHERE action='integration.saved' AND target IN (SELECT id FROM integrations WHERE machine_id=?) GROUP BY target",(machine_id,))}
+        data['overview_services']=sorted((r for r in data['connections'] if r['kind']=='plex'),key=lambda r:service_updates.get(r['id'],0),reverse=True)[:3]
         return render_template('host-detail.html',**data)
 
     @app.get('/hosts/<machine_id>/checks/new')

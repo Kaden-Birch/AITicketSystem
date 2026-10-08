@@ -2,7 +2,7 @@
 import json,math,time
 from .hostview import percent
 
-WINDOWS={'1h':3600,'6h':21600,'24h':86400,'7d':604800}
+WINDOWS={'10m':600,'30m':1800,'1h':3600,'6h':21600,'24h':86400,'7d':604800}
 METRICS=[('cpu_percent','CPU','%',100),('ram_percent','Memory','%',100),('disk_percent','Storage','%',100),('load_1','Load · 1 minute','',None),('load_5','Load · 5 minutes','',None),('load_15','Load · 15 minutes','',None),('swap_percent','Swap','%',100),('inode_percent','Inodes','%',100),('memory_pressure_percent','Memory pressure','%',100),('uptime_hours','Uptime','h',None)]
 
 
@@ -43,14 +43,15 @@ def series(store,entity,source,window='6h',now=None,definitions=None):
         available=[r[key] for b in buckets for r in b if key in r]
         if not available:continue
         ceiling=fixed or max(1,max(available)*1.1)
-        segments=[];points=[]
+        segments=[];points=[];samples=[]
         for i,b in enumerate(buckets):
             vals=[r[key] for r in b if key in r]
+            samples.append({'at':start+(i+.5)/120*WINDOWS[window],'value':sum(vals)/len(vals) if vals else None})
             if not vals:
                 if points:segments.append(' '.join(points));points=[]
                 continue
             mean=sum(vals)/len(vals)
             points.append(f'{35+(i+.5)/120*530:.1f},{140-min(ceiling,max(0,mean))/ceiling*115:.1f}')
         if points:segments.append(' '.join(points))
-        result.append({'key':key,'label':label,'unit':unit,'max':round(max(available),2),'min':round(min(available),2),'latest':round(available[-1],2),'ceiling':round(ceiling,1),'segments':segments})
+        result.append({'key':key,'label':label,'unit':unit,'max':round(max(available),2),'min':round(min(available),2),'latest':round(available[-1],2),'ceiling':round(ceiling,1),'segments':segments,'samples':samples})
     return {'charts':result,'window':window,'start':start,'end':now,'count':len(rows),'source':source,'windows':WINDOWS}
