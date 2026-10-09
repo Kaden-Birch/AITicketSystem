@@ -526,6 +526,15 @@ def test_refresh_archives_inference_and_renders_networks_and_cameras(signed_in,m
     archived=store.rows("SELECT payload FROM telemetry_records WHERE machine_id='host' AND kind='network'")
     assert any('unifi_ip_network_inference' in r['payload'] and 'vlan_id' in r['payload'] for r in archived)
     assert build(store,dashboard_data(store))['cameras'][0]['model']=='G5 Bullet'
+    response=client.get('/')
+    assert response.status_code==200
+    import re
+    section=re.search(rb'<section[^>]*id="camera-section"[^>]*>(.*?)</section>',response.data,re.S)
+    assert section and b'hidden' not in section.group(0).split(b'>',1)[0]
+    assert b'Front' in section.group(1) and b'G5 Bullet' in section.group(1) and b'CONNECTED' in section.group(1)
+    with store.connect() as c:c.execute("UPDATE unifi_connections SET snapshot=json_set(snapshot,'$.sampled_at',?) WHERE id=?",(at-10000,row['id']))
+    assert b'Stale' in client.get('/').data
+    with store.connect() as c:c.execute("UPDATE unifi_connections SET snapshot=json_set(snapshot,'$.sampled_at',?) WHERE id=?",(at,row['id']))
     response=client.get('/network-devices/'+row['id'])
     assert response.status_code==200
     assert b'Front' in response.data and b'10.128.2.0/23' in response.data
