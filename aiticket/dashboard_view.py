@@ -45,9 +45,11 @@ def build(store, summary, now=None):
         services.append({'name':item['name']+' · Docker','host':str(len(containers))+' discovered containers'+(' · limited inventory' if inventory.get('containers_truncated') else ''),'href':'/hosts/'+item['machine_id'],'state':'warning' if current and unhealthy else 'unknown','label':str(unhealthy)+' unhealthy' if current and unhealthy else str(sum(x.get('state')=='running' for x in containers))+' running' if current else 'Awaiting current inventory'})
     from .unifi_network_view import build as network_view
     from .unifi_nas_view import build as drive_view
-    network=[]
+    network=[];camera_inventory=[]
     for connection in store.rows('SELECT u.id,u.name,u.kind,u.machine_id,u.snapshot,c.interval FROM unifi_connections u LEFT JOIN checks c ON c.id=u.check_id WHERE u.deleted IS NULL ORDER BY u.name'):
         snapshot=json.loads(connection['snapshot'] or '{}');entries=[]
+        from .unifi_enrichment import cameras
+        camera_inventory.extend(cameras(snapshot,connection['id'],bool(snapshot.get('sampled_at') and 0<=now-snapshot['sampled_at']<=max(180,3*(connection['interval'] or 60)))))
         device_names={r['device_id']:json.loads(r['data']).get('device',{}).get('name',r['device_id']) for r in store.rows('SELECT device_id,data FROM unifi_devices WHERE connection_id=? AND deleted IS NULL',(connection['id'],))}
         if connection['kind']=='drive':entries.append((connection['name'],connection['machine_id'],snapshot.get('sampled_at'),snapshot.get('readings',{}),'/network-devices/'+connection['id'],True))
         else:
@@ -64,5 +66,5 @@ def build(store, summary, now=None):
                 media=str(raw.get('mediaType',raw.get('type',''))).upper()
                 drives.append({**disk,'media':media if media in ('HDD','SSD') else '?','title':'Drive '+disk['slot']})
             radios=view.get('radios',[])
-            network.append({'id':machine,'name':name,'href':href,'model':view['model'],'fresh':fresh,'state':view['state'],'metrics':view['metrics'],'ports':ports,'connected':view.get('connected') if fresh and any(p['state']!='unknown' for p in ports) else None,'uplink':view.get('uplink',{}),'uplink_name':device_names.get(view.get('uplink',{}).get('deviceId')),'drives':drives,'pools':view['pools'],'radios':radios,'kind':str(device.get('type','')).lower(),'clients':readings.get('statistics',{}).get('clientCount') if fresh else None})
-    return {'summary':summary,'tickets':compact[:5],'attention':sorted([r for r in compact if r['category']=='manual'],key=lambda r:-r['updated'])[:3],'nodes':nodes,'nas':nas,'network':network,'services':services,'monitoring_attention':0}
+            network.append({'id':machine,'name':name,'href':href,'model':view['model'],'fresh':fresh,'state':view['state'],'metrics':view['metrics'],'ports':ports,'connected':view.get('connected') if fresh and any(p['state']!='unknown' for p in ports) else None,'uplink':view.get('uplink',{}),'uplink_href':readings.get('device',{}).get('resolved_uplink',{}).get('href'),'uplink_name':device_names.get(view.get('uplink',{}).get('deviceId')),'drives':drives,'pools':view['pools'],'radios':radios,'kind':str(device.get('type','')).lower(),'clients':readings.get('statistics',{}).get('clientCount') if fresh else None})
+    return {'summary':summary,'tickets':compact[:5],'attention':sorted([r for r in compact if r['category']=='manual'],key=lambda r:-r['updated'])[:3],'nodes':nodes,'nas':nas,'network':network,'services':services,'cameras':camera_inventory,'monitoring_attention':0}

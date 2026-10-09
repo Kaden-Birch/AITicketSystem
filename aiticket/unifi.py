@@ -118,12 +118,28 @@ def refresh(store,vault,identifier):
     row['_excluded']={d['device_id'] for d in store.rows('SELECT device_id FROM unifi_devices WHERE connection_id=? AND deleted IS NOT NULL',(identifier,))}
     row['_store']=store;row['_cursor']=store.setting('unifi_collection_cursor:'+identifier,0)
     result=collect(row,vault)
+    if row['kind']=='network':
+        from .unifi_enrichment import enrich
+        previous=json.loads(row['snapshot'] or '{}').get('readings',{})
+        for item in result['readings'].get('networks',{}).get('items',[]):
+            key='network:'+str(item.get('id'))
+            if key in result['readings']:
+                result['readings'][key]['_observed_at']=result['sampled_at']
+            elif key in previous:
+                result['readings'][key]=previous[key]
+        enrich(row,result)
     store.save('unifi_collection_cursor:'+identifier,result.get('next_cursor',0))
     with store.connect() as c:
         changed=c.execute('UPDATE unifi_connections SET snapshot=? WHERE id=? AND url=? AND secret=? AND site=? AND kind=? AND deleted IS NULL',(json.dumps(result),identifier,row['url'],row['secret'],row['site'],row['kind']))
         if not changed.rowcount: return result
         retain(c,row,result)
         store.audit(c,'unifi.telemetry_read',identifier,{'readable':list(result['readings']),'unavailable':list(result['errors'])},actor='monitor')
+    if row['kind']=='network':
+        from .unifi_enrichment import host_memberships
+        from .telemetry_archive import record as archive_record
+        for host in store.rows("SELECT id FROM machines WHERE id NOT LIKE 'unifi:%' AND id NOT LIKE 'unifi-device:%'"):
+            matches=[m for m in host_memberships(store,host['id']) if m['connection_id']==identifier]
+            if matches:archive_record(store,'network',host['id'],host['id'],{'source':'unifi_ip_network_inference','memberships':matches},at=result['sampled_at'])
     return result
 
 

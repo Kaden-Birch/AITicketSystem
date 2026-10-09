@@ -144,3 +144,22 @@ There is no longer a first-eight-device or first-sixteen-client cutoff. Detail r
 Individual full-response archive records allow up to 4 MiB after redaction/serialization, avoiding the ordinary 1 MiB aggregate-snapshot limit. Archive budget/storage failures are reported in collection warnings. SMB outages use the existing local buffer and retry mechanism; finite storage cannot guarantee unlimited retention after an extended outage.
 
 AI receives compact evidence only. `archive_search` retrieves scoped local or SMB history explicitly. `archive_record` can then read a chosen record, select a JSON-pointer subtree (for example `/response/ipv4Configuration`), or page through its JSON text using `offset` and returned `next_offset`. Pages contain at most 3,000 characters. SMB record reads require the original search's run/host grant. Stored telemetry is observed, untrusted evidence, never authorization to change configuration.
+
+### Camera, uplink and VLAN presentation
+
+The dashboard reads Protect camera inventory and shows names, models and reported
+connection states. Stale inventory remains labelled stale; a camera connection
+state does not prove recording health. Device workspaces resolve upstream device
+IDs within the same connection, link to that device, and show reported receive/send
+rates. Network cards expose VLAN IDs, IPv4 subnets, gateways, DHCP ranges, lease
+settings, DNS overrides and domains when reported.
+
+IP membership uses the whole configured subnet, including static addresses outside
+the DHCP range. Matches retain connection/site IDs, network IDs, VLAN IDs, IP,
+subnet, observation time and inference basis. Multiple matching subnets are marked
+ambiguous. Host interfaces are scoped by known UniFi links; automatic inference
+without a link is enabled only when exactly one Network site is configured. No
+per-port native/tagged configuration is invented. These derived facts are retained
+with device snapshots and as host-scoped network telemetry records, using the
+existing local/SMB capture, retention and bounded AI archive access. Network details
+deferred by the collection budget retain their previous configuration timestamp.

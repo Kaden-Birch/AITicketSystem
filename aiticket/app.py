@@ -406,6 +406,8 @@ def create_app(data_dir=None, testing=False):
         from .knowledge import search as knowledge_search
         with store.connect() as c:data['host_articles']=knowledge_search(c,{machine_id},limit=3)
         from .host_overview import prepare as prepare_host_overview
+        from .unifi_enrichment import host_memberships
+        data['network_memberships']=host_memberships(store,machine_id)
         prepare_host_overview(data)
         service_updates={r['target']:r['at'] for r in store.rows("SELECT target,MAX(at) at FROM audit WHERE action='integration.saved' AND target IN (SELECT id FROM integrations WHERE machine_id=?) GROUP BY target",(machine_id,))}
         data['overview_services']=sorted((r for r in data['connections'] if r['kind']=='plex'),key=lambda r:service_updates.get(r['id'],0),reverse=True)[:3]
@@ -1543,6 +1545,9 @@ def create_app(data_dir=None, testing=False):
         fresh=bool(observed and 0<=time.time()-observed<=max(180,3*max([c['interval'] for c in checks] or [60])))
         network=build(store,machine,readings,fresh,snapshot.get('errors',{}),network_names,request.args.get('window','1h'),max([c['interval'] for c in checks] or [60]))
         from .network_observations import build as observation_view
+        from .unifi_enrichment import networks, cameras
+        network['network_definitions']=networks(snapshot.get('readings',{}))
+        network['cameras']=cameras(snapshot,identifier,fresh) if not device_id else []
         network['observations']=observation_view(store,identifier,device_id,device_info,snapshot,network['ports'],request.args.get('net_window','24h'),max([c['interval'] for c in checks] or [60]))
         return render_template('network-device.html',nas=network,network_names=network_names,device_names=device_names,connection=connection,device_id=device_id,name=name,machine=machine,observed=observed,readings=readings,device=device_info,children=children,checks=checks,tickets=tickets,history=history(store,machine,request.args.get('window','6h')),facts=facts(readings),errors=snapshot.get('errors',{}),fresh=bool(observed and 0<=time.time()-observed<=max(180,3*max([c['interval'] for c in checks] or [60]))))
 

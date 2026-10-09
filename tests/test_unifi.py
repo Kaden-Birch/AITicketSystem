@@ -493,3 +493,45 @@ def test_protect_permission_failure_is_optional(environment,monkeypatch):
     monkeypatch.setattr(unifi.Client,'get',get)
     health,evidence=unifi.probe(store,vault,{'connection_id':row['id']})
     assert health is True and evidence['optional_telemetry_errors']['protect:cameras']=='HTTP 403'
+
+
+def test_network_enrichment_matches_static_subnet_and_ambiguity():
+    from aiticket.unifi_enrichment import enrich,match,networks,cameras
+    snapshot={'sampled_at':100,'readings':{'networks':{'items':[{'id':'net','name':'Devices','vlanId':20}]},'network:net':{'ipv4Configuration':{'hostIpAddress':'10.128.2.1','prefixLength':23,'dhcpConfiguration':{'ipAddressRange':{'start':'10.128.2.11','stop':'10.128.3.254'}}}},'devices':{'items':[{'id':'router','name':'Router'},{'id':'switch','ipAddress':'10.128.3.123','uplink':{'deviceId':'router'}}]},'protect:cameras':[{'id':'cam','name':'Front','type':'G5 Bullet','state':'CONNECTED'}]}}
+    enrich({'id':'connection','site':'site'},snapshot)
+    row=snapshot['readings']['devices']['items'][1]
+    assert row['network_membership']['networks'][0]['subnet']=='10.128.2.0/23'
+    assert row['resolved_uplink']['name']=='Router'
+    rows=networks(snapshot['readings'])
+    assert match('10.128.2.5/23',rows,'connection','site',100)['state']=='inferred'
+    assert match('10.128.4.1',rows,'connection','site',100) is None
+    assert match('10.128.2.5',rows+rows,'connection','site',100)['state']=='ambiguous'
+    assert cameras(snapshot,'connection',True)[0]['state']=='healthy'
+    assert cameras(snapshot,'connection',False)[0]['state']=='unknown'
+
+
+def test_refresh_archives_inference_and_renders_networks_and_cameras(signed_in,monkeypatch):
+    from aiticket.dashboard_view import build
+    from aiticket.overview_ui import dashboard_data
+    from aiticket.unifi_enrichment import host_memberships
+    client,store,vault,_=signed_in
+    row=configured(store,vault,'network')
+    with store.connect() as c:c.execute('UPDATE unifi_connections SET site=? WHERE id=?',('site',row['id']))
+    store.save('telemetry_capture_enabled',True)
+    at=time.time()
+    with store.connect() as c:c.execute('INSERT INTO network_inventory(machine_id,at,data) VALUES(?,?,?)',('host',at,json.dumps({'interfaces':[{'name':'eth0','addresses':['10.128.3.123/23']}]})))
+    monkeypatch.setattr(unifi,'collect',lambda *args:{'sampled_at':at,'readings':{'networks':{'items':[{'id':'net','name':'Devices','vlanId':20}]},'network:net':{'ipv4Configuration':{'hostIpAddress':'10.128.2.1','prefixLength':23,'dhcpConfiguration':{'mode':'SERVER'}}},'devices':{'items':[{'id':'router','name':'Router','state':'ONLINE'},{'id':'switch','name':'Switch','state':'ONLINE','ipAddress':'10.128.3.123','uplink':{'deviceId':'router'}}]},'protect:cameras':[{'id':'cam','name':'Front','type':'G5 Bullet','state':'CONNECTED'}]},'errors':{},'warnings':[]})
+    unifi.refresh(store,vault,row['id'])
+    assert host_memberships(store,'host')[0]['networks'][0]['vlan_id']==20
+    archived=store.rows("SELECT payload FROM telemetry_records WHERE machine_id='host' AND kind='network'")
+    assert any('unifi_ip_network_inference' in r['payload'] and 'vlan_id' in r['payload'] for r in archived)
+    assert build(store,dashboard_data(store))['cameras'][0]['model']=='G5 Bullet'
+    response=client.get('/network-devices/'+row['id'])
+    assert response.status_code==200
+    assert b'Front' in response.data and b'10.128.2.0/23' in response.data
+    response=client.get('/network-devices/'+row['id']+'/devices/switch')
+    assert response.status_code==200
+    assert b'Inferred' in response.data and b'Uplink device' in response.data
+    assert ('href="/network-devices/'+row['id']+'/devices/router"').encode() in response.data
+    response=client.get('/hosts/host')
+    assert response.status_code==200 and b'Devices' in response.data and b'Inferred' in response.data
