@@ -11,57 +11,60 @@ from .security import validate_url
 NETWORK = '/proxy/network/integration/v1'
 DRIVE = {'storage':'/proxy/drive/api/v2/storage', 'device':'/proxy/drive/api/v2/systems/device-info', 'throughput':'/proxy/drive/api/v2/systems/network-io'}
 # Deliberately discard unknown fields, credentials, client names and raw error bodies.
-FIELDS = set('wlanStandard features switching accessPoint gateway adoptedAt provisionedAt configurationId frequencyGHz channelWidthMHz'.split()) | {'uplinkDeviceId','portId','chassisId','lldp','neighbors','portIdSubtype','ifname'} | set('idx index portIndex speedMbps maxSpeedMbps connector media poe standard txBytes rxBytes txPackets rxPackets txErrors rxErrors errors dropped nativeNetworkId taggedNetworkIds networkName ipv4Configuration subnet gateway dhcpConfiguration address clientId uplinkPortIndex lastHeartbeatAt nextHeartbeatAt radios frequency channel channelWidth txPower utilizationPct signalDbm traffic rxBytesPerSecond txBytesPerSecond'.split()) | set('id name model macAddress ipAddress state status firmwareVersion firmwareUpdatable uptime uptimeSec cpuUtilizationPct memoryUtilizationPct loadAverage interfaces ports uplink speed maxSpeed linkSpeed connected enabled vlanId networkId type connectionType deviceId portIdx management default data offset limit totalCount count pools disks cacheSlots number capacity usage raidGroups currentLevel configLevel currentProtection expectedProtection slotId poolId size temperature powerOnHours badSectorCount uncorrectableSectorCount readErrorRate healthScore cpu currentload memory free total available networkInterfaces interfaceName version receiveKBPS transmitKBPS timestamp txRateBps rxRateBps'.split())
-
-
 def clean(value, depth=0):
-    if depth > 8: return None
+    """Preserve operational fields verbatim; remove credential-valued fields only."""
     if isinstance(value,dict):
-        result={}
-        for k,v in value.items():
-            if re.search(r'(?i)(password|passwd|secret|token|api.?key|authorization|cookie|credential|private.?key|^key$)',k):continue
-            sanitized=clean(v,depth+1)
-            if k in FIELDS or type(v) in (int,float,bool) or (isinstance(v,(dict,list)) and sanitized):result[k]=sanitized
-        return result
-    if isinstance(value, list): return [clean(v,depth+1) for v in value[:100]]
-    if isinstance(value,str): return value[:200]
-    if value is None or type(value) is bool: return value
-    if type(value) in (int,float) and math.isfinite(value): return value
-    return None
+        return {k:clean(v,depth+1) for k,v in value.items() if not re.search(r'(?i)(password|passwd|secret|token|api.?key|authorization|cookie|credential|private.?key|^key$)',k)}
+    if isinstance(value,list):return [clean(v,depth+1) for v in value]
+    if type(value) is float and not math.isfinite(value):return None
+    return value
 
 
 class Client:
     def __init__(self, connection, vault):
         self.connection=connection
         self.key=vault.decrypt(connection['secret'])
+        self.store=connection.get('_store');self.archive_failures=0
     def get(self, path, params=None):
-        allowed = path in DRIVE.values() or path == NETWORK+'/sites' or re.fullmatch(re.escape(NETWORK)+r'/sites/[A-Za-z0-9-]+/(devices|clients|networks)(/[A-Za-z0-9-]+(/statistics/latest)?)?',path)
+        allowed = path in DRIVE.values() or path in (NETWORK+'/sites',NETWORK+'/info','/proxy/protect/integration/v1/meta/info','/proxy/protect/integration/v1/cameras') or re.fullmatch(r'/proxy/protect/integration/v1/cameras/[A-Za-z0-9-]+',path) or re.fullmatch(re.escape(NETWORK)+r'/sites/[A-Za-z0-9-]+/(devices|clients|networks)(/[A-Za-z0-9-]+(/statistics/latest)?)?',path)
         if not allowed: raise ValueError('UniFi endpoint is not an approved telemetry read.')
         with requests.get(self.connection['url']+path, headers={'X-API-KEY':self.key,'Accept':'application/json'},params=params,timeout=(3,5),verify=self.connection['ca'] or not self.connection['insecure_tls'],allow_redirects=False,stream=True) as r:
-            if r.status_code != 200: raise ValueError('HTTP '+str(r.status_code))
-            if 'json' not in r.headers.get('Content-Type','').lower(): raise ValueError('Non-JSON response')
+            if 'json' not in r.headers.get('Content-Type','').lower():raise ValueError('HTTP '+str(r.status_code) if r.status_code!=200 else 'Non-JSON response')
             body=bytearray(); deadline=time.monotonic()+8
             for chunk in r.iter_content(65536):
                 body.extend(chunk)
                 if len(body)>2_000_000 or time.monotonic()>deadline: raise ValueError('Response limit exceeded')
             data=json.loads(body)
+            if self.store:
+                from .telemetry_archive import record
+                machine=self.connection['machine_id']
+                match=re.search(r'/devices/([A-Za-z0-9-]+)',path)
+                if match:
+                    hosts=self.store.rows('SELECT machine_id FROM unifi_devices WHERE connection_id=? AND device_id=? AND deleted IS NULL',(self.connection['id'],match[1]))
+                    if hosts:machine=hosts[0]['machine_id']
+                try:
+                    archived=record(self.store,'unifi',self.connection['id'],machine,{'source':'unifi_api_response','connection_id':self.connection['id'],'endpoint':path,'params':params or {},'status':r.status_code,'response':clean(data)},max_record=4*1024*1024)
+                except Exception:archived=False # Storage failure must not discard the live reading.
+                if not archived:self.archive_failures+=1
+            if r.status_code != 200: raise ValueError('HTTP '+str(r.status_code))
             if not isinstance(data,(dict,list)): raise ValueError('Unexpected JSON shape')
             return clean(data)
 
 
 def listing(client,path):
     rows=[]
-    for offset in range(0,300,100):
+    for offset in range(0,1000000,100):
+        if time.monotonic()>getattr(client,'deadline',float('inf')):raise ValueError('Response limit exceeded: inventory deferred to next collection')
         result=client.get(path,{'offset':offset,'limit':100})
         page=result.get('data') if isinstance(result,dict) else result
         if not isinstance(page,list): raise ValueError('Missing collection data')
         rows.extend(page)
         if len(page)<100: return {'items':rows,'truncated':False}
-    return {'items':rows,'truncated':True}
+    raise ValueError('Response limit exceeded: inventory safety limit')
 
 
 def collect(connection,vault):
-    client=Client(connection,vault); readings={}; errors={}; warnings=[]; deadline=time.monotonic()+20
+    client=Client(connection,vault); readings={}; errors={}; warnings=[]; deadline=time.monotonic()+20;client.deadline=deadline;next_cursor=0
     def read(key,fn):
         try:
             if time.monotonic()>deadline: raise ValueError('Response limit exceeded: collection time budget')
@@ -76,24 +79,36 @@ def collect(connection,vault):
         if site:
             for kind in ('devices','clients','networks'):
                 read(kind,lambda kind=kind:listing(client,NETWORK+'/sites/'+site+'/'+kind))
-            # Bounded detail collection; coverage is explicit for larger sites.
-            devices=readings.get('devices',{}).get('items',[])
-            devices[:]=[d for d in devices if d.get('id') not in connection.get('_excluded',set())]
-            for d in devices[:8]:
-                identifier=d.get('id','')
-                if re.fullmatch(r'[A-Za-z0-9-]+',identifier):
-                    read('device:'+identifier,lambda identifier=identifier:client.get(NETWORK+'/sites/'+site+'/devices/'+identifier))
-                    read('statistics:'+identifier,lambda identifier=identifier:client.get(NETWORK+'/sites/'+site+'/devices/'+identifier+'/statistics/latest'))
-            if len(devices)>8: warnings.append('Only the first eight devices have detail/statistics coverage.')
-            clients=readings.get('clients',{}).get('items',[])
-            candidates=[item for item in clients if isinstance(item.get('id'),str) and re.fullmatch(r'[A-Za-z0-9-]{1,100}',item['id'])]
-            for item in candidates[:16]:
-                key='client:'+item['id']
-                read(key,lambda identifier=item['id']:client.get(NETWORK+'/sites/'+site+'/clients/'+identifier))
-                detail=readings.pop(key,None)
+            read('info',lambda:client.get(NETWORK+'/info'))
+            read('protect:info',lambda:client.get('/proxy/protect/integration/v1/meta/info'))
+            read('protect:cameras',lambda:client.get('/proxy/protect/integration/v1/cameras'))
+            jobs=[]
+            for kind in ('devices','clients','networks'):
+                for item in readings.get(kind,{}).get('items',[]):
+                    identifier=item.get('id','')
+                    if not isinstance(identifier,str) or not re.fullmatch(r'[A-Za-z0-9-]{1,100}',identifier):continue
+                    path=NETWORK+'/sites/'+site+'/'+kind+'/'+identifier
+                    key={'devices':'device:','clients':'client:','networks':'network:'}[kind]+identifier
+                    jobs.append((key,path))
+                    if kind=='devices':jobs.append(('statistics:'+identifier,path+'/statistics/latest'))
+            cameras=readings.get('protect:cameras',[])
+            if isinstance(cameras,dict):cameras=cameras.get('data',cameras.get('cameras',[]))
+            if isinstance(cameras,list):
+                for camera in cameras:
+                    identifier=camera.get('id','') if isinstance(camera,dict) else ''
+                    if isinstance(identifier,str) and re.fullmatch(r'[A-Za-z0-9-]{1,100}',identifier):jobs.append(('protect:camera:'+identifier,'/proxy/protect/integration/v1/cameras/'+identifier))
+            cursor=connection.get('_cursor',0)%len(jobs) if jobs else 0
+            ordered=jobs[cursor:]+jobs[:cursor];attempted=0
+            for key,path in ordered:
+                if time.monotonic()>deadline:break
+                read(key,lambda path=path:client.get(path));attempted+=1
+            next_cursor=(cursor+attempted)%len(jobs) if jobs else 0
+            if attempted<len(jobs):warnings.append(f'{len(jobs)-attempted} detail endpoints deferred; collection rotates automatically on the next cycle.')
+            for item in readings.get('clients',{}).get('items',[]):
+                detail=readings.get('client:'+str(item.get('id')))
                 if isinstance(detail,dict):item.update(detail)
-            if len(candidates)>16:warnings.append('Only the first 16 clients have attachment-detail coverage.')
-    return {'sampled_at':time.time(),'kind':connection['kind'],'read_only':True,'experimental':connection['kind']=='drive','readings':readings,'errors':errors,'warnings':warnings}
+    if client.archive_failures:warnings.append(f'{client.archive_failures} API responses could not enter the archive buffer; check telemetry capture and storage budget.')
+    return {'sampled_at':time.time(),'kind':connection['kind'],'read_only':True,'experimental':connection['kind']=='drive','readings':readings,'errors':errors,'warnings':warnings,'next_cursor':next_cursor}
 
 
 def refresh(store,vault,identifier):
@@ -101,7 +116,9 @@ def refresh(store,vault,identifier):
     if not rows: raise ValueError('Unknown UniFi connection.')
     row=rows[0]
     row['_excluded']={d['device_id'] for d in store.rows('SELECT device_id FROM unifi_devices WHERE connection_id=? AND deleted IS NOT NULL',(identifier,))}
+    row['_store']=store;row['_cursor']=store.setting('unifi_collection_cursor:'+identifier,0)
     result=collect(row,vault)
+    store.save('unifi_collection_cursor:'+identifier,result.get('next_cursor',0))
     with store.connect() as c:
         changed=c.execute('UPDATE unifi_connections SET snapshot=? WHERE id=? AND url=? AND secret=? AND site=? AND kind=? AND deleted IS NULL',(json.dumps(result),identifier,row['url'],row['secret'],row['site'],row['kind']))
         if not changed.rowcount: return result
@@ -112,7 +129,7 @@ def refresh(store,vault,identifier):
 
 def probe(store,vault,config):
     result=refresh(store,vault,config['connection_id'])
-    required_errors={k:v for k,v in result['errors'].items() if not k.startswith(('statistics:','client:'))}
+    required_errors={k:v for k,v in result['errors'].items() if not k.startswith(('statistics:','client:','network:','protect:','info'))}
     healthy=not bool(required_errors) and bool(result['readings'])
     alerts=[]
     for pool in result['readings'].get('storage',{}).get('pools',[]):
@@ -120,7 +137,7 @@ def probe(store,vault,config):
         if pool.get('capacity',0)>0 and pool.get('usage',0)/pool['capacity']>=.9: alerts.append('Storage pool at least 90% full')
     for disk in result['readings'].get('storage',{}).get('disks',[]):
         if disk.get('state') and disk['state']!='optimal': alerts.append('Disk '+str(disk.get('slotId',''))+': '+disk['state'])
-    return (False if alerts else True if healthy else None), {'monitoring_issue':bool(required_errors),'sampled_at':result['sampled_at'],'reason':'UniFi telemetry available' if healthy and not alerts else 'UniFi telemetry requires attention','alerts':alerts,'endpoint_errors':required_errors,'optional_telemetry_errors':{k:v for k,v in result['errors'].items() if k.startswith(('statistics:','client:'))}}
+    return (False if alerts else True if healthy else None), {'monitoring_issue':bool(required_errors),'sampled_at':result['sampled_at'],'reason':'UniFi telemetry available' if healthy and not alerts else 'UniFi telemetry requires attention','alerts':alerts,'endpoint_errors':required_errors,'optional_telemetry_errors':{k:v for k,v in result['errors'].items() if k.startswith(('statistics:','client:','network:','protect:','info'))}}
 
 
 def ai_context(c,machine):

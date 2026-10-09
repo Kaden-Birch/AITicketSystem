@@ -36,10 +36,10 @@ def sanitize(value,depth=0):
     return value
 
 
-def encode(value):
+def encode(value,max_record=MAX_RECORD):
     try:
-        result=json.dumps(sanitize(json.loads(value)),separators=(',',':'),allow_nan=False)
-        if len(result.encode())>MAX_RECORD:return json.dumps({'truncated':True,'reason':'Collected record exceeds the 1 MiB archive limit.'})
+        result=json.dumps(sanitize(json.loads(value)),separators=(',',':'),allow_nan=False,ensure_ascii=False)
+        if len(result.encode())>max_record:return json.dumps({'truncated':True,'reason':f'Collected record exceeds the {max_record//1048576} MiB archive limit.'})
         return result
     except (ValueError,TypeError,RecursionError):return json.dumps({'truncated':True,'reason':'Collected record could not be serialized.'})
 
@@ -100,12 +100,14 @@ def migration():
     return tuple(statements)
 
 
-def record(store,kind,entity,machine,payload,at=None,key=None):
+def record(store,kind,entity,machine,payload,at=None,key=None,max_record=MAX_RECORD):
     with store.connect() as c:
         c.execute('BEGIN IMMEDIATE')
         if not c.execute('SELECT '+ENABLED).fetchone()[0]:return False
         if key and c.execute('SELECT 1 FROM telemetry_records WHERE id=?',(key,)).fetchone():return True
-        body=encode(json.dumps(payload,default=str));size=len(body.encode())+128
+        body=encode(json.dumps(payload,default=str),max_record=max_record);size=len(body.encode())+128
+        if max_record>MAX_RECORD and json.loads(body).get('truncated') is True:
+            c.execute('UPDATE telemetry_archive_meta SET dropped=dropped+1');return False
         budget=c.execute('SELECT '+BUDGET).fetchone()[0]
         if c.execute('SELECT pending_bytes FROM telemetry_archive_meta WHERE id=1').fetchone()[0]+size>budget:
             c.execute('UPDATE telemetry_archive_meta SET dropped=dropped+1');return False

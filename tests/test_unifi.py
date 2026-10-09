@@ -61,7 +61,7 @@ def test_network_pagination_and_shared_ai(environment,monkeypatch):
         return {'uptimeSec':120}
     monkeypatch.setattr(unifi.Client,'get',get)
     unifi.refresh(store,vault,row['id'])
-    assert len(calls)==6
+    assert len(calls)==10
     with store.connect() as c:
         context=unifi.ai_context(c,'different-host')
         assert context[0]['snapshot']['readings']['networks']['items'][0]['vlanId']==20
@@ -98,8 +98,11 @@ def test_redirect_html_oversize_and_pagination_bound(environment,monkeypatch):
     with pytest.raises(ValueError,match='Non-JSON'): client.get(unifi.DRIVE['storage'])
     response.headers={'Content-Type':'application/json'}
     with pytest.raises(ValueError,match='limit'): client.get(unifi.DRIVE['storage'])
-    monkeypatch.setattr(client,'get',lambda *a,**k:{'data':[{'id':'x'}]*100})
-    assert unifi.listing(client,unifi.NETWORK+'/sites')['truncated'] is True
+    monkeypatch.setattr(client,'get',lambda path,params:{'data':[{'id':'x'}]*100 if params['offset']<400 else []})
+    result=unifi.listing(client,unifi.NETWORK+'/sites')
+    assert len(result['items'])==400 and result['truncated'] is False
+    client.deadline=0
+    with pytest.raises(ValueError,match='deferred'):unifi.listing(client,unifi.NETWORK+'/sites')
 
 
 def test_inventory_rotation_and_monitor_toggle(signed_in,tmp_path,monkeypatch):
@@ -235,7 +238,7 @@ def test_nas_readable_metrics_and_history(signed_in,monkeypatch):
 
 
 def test_extra_numeric_telemetry_retained_without_credentials():
-    assert unifi.clean({'newStatistics':{'packetLossPct':2.5,'numericSecret':123,'description':'unknown text'},'apiKey':'private'})=={'newStatistics':{'packetLossPct':2.5}}
+    assert unifi.clean({'newStatistics':{'packetLossPct':2.5,'numericSecret':123,'description':'unknown text'},'apiKey':'private'})=={'newStatistics':{'packetLossPct':2.5,'description':'unknown text'}}
 
 
 def test_delete_connection_csrf_and_history(signed_in,monkeypatch):
@@ -419,3 +422,74 @@ def test_large_port_inventory_does_not_crowd_out_live_statistics():
     assert values['statistics.cpuUtilizationPct']==12 and values['statistics.memoryUtilizationPct']==40
     assert values['statistics.uplink.rxRateBps']==125000 and values['radio.5.txRetriesPct']==15
     assert len(values)==200
+
+
+def test_full_operational_payload_and_endpoint_history(environment,monkeypatch):
+    _,store,vault=environment;row=configured(store,vault)
+    store.save('telemetry_capture_enabled',True)
+    original={'futureField':'x'*1200,'futureArray':[{'position':i,'unrecognizedText':'preserved'} for i in range(150)],'password':'must-not-archive','pools':[]}
+    class Response:
+        status_code=200;headers={'Content-Type':'application/json'}
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def iter_content(self,n):yield json.dumps(original).encode()
+    monkeypatch.setattr(unifi.requests,'get',lambda *a,**k:Response())
+    result=unifi.refresh(store,vault,row['id'])
+    assert result['readings']['storage']['futureField']==original['futureField']
+    assert len(result['readings']['storage']['futureArray'])==150
+    records=[json.loads(r['payload']) for r in store.rows("SELECT payload FROM telemetry_records WHERE kind='unifi'")]
+    responses=[r for r in records if r.get('source')=='unifi_api_response']
+    assert len(responses)==3
+    assert {r['endpoint'] for r in responses}==set(unifi.DRIVE.values())
+    assert all(len(r['response']['futureArray'])==150 for r in responses)
+    assert 'must-not-archive' not in json.dumps(records)
+    assert all(r['status']==200 for r in responses)
+
+
+def test_full_network_clients_vlans_and_protect_no_first_n_limit(environment,monkeypatch):
+    _,store,vault=environment;row=configured(store,vault,'network');row['site']='s'
+    calls=[]
+    def get(self,path,params=None):
+        calls.append(path)
+        if path.endswith('/sites'):return {'data':[{'id':'s'}]}
+        if path.endswith('/devices'):return {'data':[{'id':f'd{i}'} for i in range(10)]}
+        if path.endswith('/clients'):return {'data':[{'id':f'c{i}'} for i in range(20)]}
+        if path.endswith('/networks'):return {'data':[{'id':'vlan'}]}
+        if path.endswith('/cameras'):return [{'id':'cam','state':'CONNECTED'}]
+        return {'newField':'complete'}
+    monkeypatch.setattr(unifi.Client,'get',get)
+    result=unifi.collect(row,vault)
+    for expected in ('device:d9','statistics:d9','client:c19','network:vlan','protect:camera:cam'):
+        assert result['readings'][expected]['newField']=='complete'
+    assert not result['warnings'] and result['next_cursor']==0
+    assert len(calls)==49
+
+
+def test_detail_rotation_defers_without_starving_later_devices(environment,monkeypatch):
+    _,store,vault=environment;row=configured(store,vault,'network');row['site']='s'
+    clock=[0]
+    monkeypatch.setattr(unifi.time,'monotonic',lambda:clock[0])
+    def get(self,path,params=None):
+        if path.endswith('/sites'):return {'data':[{'id':'s'}]}
+        if path.endswith('/devices'):return {'data':[{'id':f'd{i}'} for i in range(12)]}
+        if path.endswith(('/clients','/networks')):return {'data':[]}
+        if path.endswith('/cameras'):return []
+        if '/devices/' in path:clock[0]+=6
+        return {'newField':'complete'}
+    monkeypatch.setattr(unifi.Client,'get',get)
+    first=unifi.collect(row,vault)
+    assert first['next_cursor']==4 and first['warnings']
+    clock[0]=0;row['_cursor']=first['next_cursor']
+    second=unifi.collect(row,vault)
+    assert 'device:d2' in second['readings'] and 'device:d0' not in second['readings']
+
+
+def test_protect_permission_failure_is_optional(environment,monkeypatch):
+    _,store,vault=environment;row=configured(store,vault,'network')
+    with store.connect() as c:c.execute("UPDATE unifi_connections SET site='s'")
+    def get(self,path,params=None):
+        if '/protect/' in path:raise ValueError('HTTP 403')
+        return {'data':[]} if path.endswith(('/sites','/devices','/clients','/networks')) else {}
+    monkeypatch.setattr(unifi.Client,'get',get)
+    health,evidence=unifi.probe(store,vault,{'connection_id':row['id']})
+    assert health is True and evidence['optional_telemetry_errors']['protect:cameras']=='HTTP 403'

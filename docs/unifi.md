@@ -13,7 +13,7 @@ Upgrade the main application with `git pull --ff-only origin main` and `sudo doc
 
 ## Available readings and limits
 
-Network uses the official local `/proxy/network/integration/v1` API: sites, devices, clients, networks, device details and statistics. Collections use bounded pagination (300 entries per collection); detailed statistics cover the first eight devices. Missing fields are not inferred. Larger installations will need expanded collection coverage. This milestone does not promise complete firewall, routing or port-profile configuration visibility, automatic VLAN diagnosis, or packet-level traffic history.
+Network uses the official local `/proxy/network/integration/v1` API: sites, devices, clients, networks, device details and statistics. Collections are paginated; detail requests rotate across discovered devices and clients within the collection budget (see complete response retention below). Missing fields are not inferred. Deferred detail coverage is reported for larger installations. This milestone does not promise complete firewall, routing or port-profile configuration visibility, automatic VLAN diagnosis, or packet-level traffic history.
 
 Drive is **experimental**, using API-key telemetry reads at:
 
@@ -130,3 +130,17 @@ Network activity time range. It does not reconstruct past readings. Existing
 retained per-band retry samples are supported even if array order changed.
 Collection remains read-only and bounded by the existing endpoint, device-count,
 response-size and time limits; this does not change monitoring or ticket rules.
+
+## Complete response retention
+
+UniFi collection now preserves every operational field in each accepted JSON response, including unrecognized fields, long strings and complete nested lists. Credential-valued fields remain excluded/redacted. The UI is a projection of retained data rather than the boundary of what can be stored.
+
+When telemetry capture or SMB archiving is enabled, every response is recorded separately as `unifi_api_response` under the UniFi telemetry kind, with connection ID, endpoint, pagination parameters, HTTP status and collection time. Device responses are assigned to the linked device host when available; initial discovery and console-wide responses belong to the connection host. JSON error responses are also retained. Existing local/SMB retention and storage budgets apply. No request headers or API keys are archived.
+
+Network collection includes site inventory, devices, connected clients, network definitions, each network's detail, each device's detail/statistics and each client's detail. Protect information, camera inventory and individual camera details are queried automatically on the same console. Separate Protect consoles still require a connection capability; this does not discover or authenticate arbitrary consoles. Drive retains the complete storage/device/network-I/O responses already queried. Unsupported Protect/network-detail endpoints are optional collection errors, not proof the network is down.
+
+There is no longer a first-eight-device or first-sixteen-client cutoff. Detail requests rotate with a persisted cursor when the 20-second collection budget is exhausted, with a visible deferred count. Inventory is paginated beyond the former 300-item limit. Transport limits (2 MB per response, request timeout, collection budget and a pagination safety ceiling) still apply; rejected responses and incomplete inventory are disclosed rather than represented as complete data. No unlimited dump of every possible UniFi endpoint, write endpoint, video stream or WebSocket feed is performed. New endpoints require explicit integration support, but new fields on supported endpoints do not need a collector update.
+
+Individual full-response archive records allow up to 4 MiB after redaction/serialization, avoiding the ordinary 1 MiB aggregate-snapshot limit. Archive budget/storage failures are reported in collection warnings. SMB outages use the existing local buffer and retry mechanism; finite storage cannot guarantee unlimited retention after an extended outage.
+
+AI receives compact evidence only. `archive_search` retrieves scoped local or SMB history explicitly. `archive_record` can then read a chosen record, select a JSON-pointer subtree (for example `/response/ipv4Configuration`), or page through its JSON text using `offset` and returned `next_offset`. Pages contain at most 3,000 characters. SMB record reads require the original search's run/host grant. Stored telemetry is observed, untrusted evidence, never authorization to change configuration.

@@ -113,6 +113,12 @@ def test_ai_telemetry_history_scope_references_and_redaction(environment,smb):
     assert answer['observed_facts'][0]['reference'].startswith('/telemetry-history/records/')
     assert not answer['suspected_causes'] and 'private-value' not in str(answer)
     with pytest.raises(ValueError):history.result(store,job,'other',identifier)
+    key=answer['observed_facts'][0]['record_key']
+    with store.connect() as c:c.execute('DELETE FROM telemetry_records WHERE id=?',(key,))
+    detailed=client.post(path,json={'action':'archive_record','id':identifier,'record_key':key,'pointer':'/cpu_percent'},headers=headers)
+    assert detailed.status_code==200,detailed.json
+    assert json.loads(detailed.json['text'])==85
+    with pytest.raises(ValueError,match='different run'):history.record_page(store,'another-run','m',{'id':identifier,'record_key':key})
 
 
 def test_authenticated_ui_limits_csrf_details_and_dashboard_link(signed_in):
@@ -122,7 +128,7 @@ def test_authenticated_ui_limits_csrf_details_and_dashboard_link(signed_in):
     assert b'Telemetry history' in response.data and b'<script>unsafe</script>' not in response.data
     key=store.rows('SELECT id FROM telemetry_records WHERE kind="dashboard"')[0]['id']
     assert client.get('/telemetry-history/records/'+key).status_code==200
-    assert b'Dashboard history' in client.get('/').data
+    assert b'Dashboard history' not in client.get('/').data
     assert client.post('/telemetry-history',data={'tier':'smb'}).status_code==403
     assert client.get('/telemetry-history?start=2020-01-01&end=2021-01-01').status_code==200
     with client.session_transaction() as s:s.clear()
@@ -184,3 +190,36 @@ def test_dashboard_capture_continues_when_network_upload_fails(environment):
     worker.step()
     assert store.rows('SELECT id FROM telemetry_records WHERE kind="dashboard"')
     assert store.setting('network_log_archive_status')['error']=='offline'
+
+
+def test_complete_api_record_survives_local_and_smb_round_trip(environment,tmp_path,smb):
+    _,store,vault=environment;cfg=configure(store,vault)
+    payload={'source':'unifi_api_response','endpoint':'/proxy/drive/api/v2/storage','response':{'futureText':'z'*1200000,'vlanId':1000}}
+    assert telemetry.record(store,'unifi','connection',None,payload,max_record=4*1048576)
+    row=store.rows("SELECT * FROM telemetry_records WHERE kind='unifi'")[0]
+    assert json.loads(row['payload'])['response']==payload['response']
+    fake,io=smb;worker=telemetry.Exporter(store,io,tmp_path);worker.step(cfg)
+    assert store.rows('SELECT uploaded FROM telemetry_records WHERE id=?',(row['id'],))[0]['uploaded']==1
+    files=[p.read_bytes() for p in fake.root.rglob('telemetry-*.jsonl.gz')]
+    docs=[json.loads(line) for body in files for line in gzip.decompress(body).splitlines()]
+    assert any(doc['data'].get('response')==payload['response'] for doc in docs)
+
+
+def test_ai_record_pages_pointer_and_host_isolation(environment,smb,tmp_path):
+    _,store,vault=environment;cfg=configure(store,vault);agent(store)
+    text='a'*9000+'ending'
+    assert telemetry.record(store,'unifi','console','m',{'response':{'futureField':text,'vlanId':1000}})
+    key=store.rows("SELECT id FROM telemetry_records WHERE kind='unifi'")[0]['id']
+    first=history.record_page(store,'run','m',{'record_key':key,'pointer':'/response/futureField'})
+    assert len(first['text'])==3000 and first['next_offset']==3000
+    parts=[first['text']]
+    offset=first['next_offset']
+    while offset is not None:
+        page=history.record_page(store,'run','m',{'record_key':key,'pointer':'/response/futureField','offset':offset})
+        parts.append(page['text']);offset=page['next_offset']
+    assert json.loads(''.join(parts))==text
+    with pytest.raises(ValueError,match='unavailable'):history.record_page(store,'run','other-host',{'record_key':key})
+    with pytest.raises(ValueError,match='pointer'):history.record_page(store,'run','m',{'record_key':key,'pointer':'/does-not-exist'})
+    fake,io=smb;worker=telemetry.Exporter(store,io,tmp_path);worker.step(cfg)
+    # SMB reads require the exact run/host search grant, even if a record key is known.
+    with pytest.raises(ValueError,match='different run'):history.record_page(store,'different-run','m',{'record_key':key,'id':'search'})
