@@ -49,7 +49,9 @@ def overview(store,now=None):
         checks={}
         for r in c.execute('SELECT machine_id,health FROM checks WHERE enabled=1'):
             checks.setdefault(r['machine_id'],[]).append(r['health'])
+        retired={r['machine_id'] for r in c.execute("SELECT machine_id FROM proxmox_objects WHERE kind='node' AND present=0 AND machine_id IS NOT NULL")}
         counts={r['machine_id']:r['n'] for r in c.execute("SELECT machine_id,count(*) n FROM incidents WHERE closed IS NULL AND status<>'Resolved' GROUP BY machine_id")}
+    machines=[m for m in machines if m['id'] not in retired or m['id'] in objects or m['id'] in nas or m['id'] in checks or (m['id'] in agents and not agents[m['id']]['revoked'])]
     for m in machines:
         m['agent']=agents.get(m['id']);m['object']=objects.get(m['id'])
         m['sample']=sample(m['agent'],m['object'],now)

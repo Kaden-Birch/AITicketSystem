@@ -162,20 +162,60 @@ def cluster_inventory(store,vault,connection):
     raise last_error or ValueError('No cluster endpoints are available.')
 
 
+def cluster_membership(store,vault,endpoint_id):
+    """Complete membership requires root Sys.Audit and a quorate cluster."""
+    try:
+        endpoint=store.rows('SELECT * FROM proxmox_connections WHERE id=?',(endpoint_id,))[0]
+        rows=Client(endpoint,vault).get('/cluster/status')
+        if not isinstance(rows,list) or not 1<=len(rows)<=10000 or any(not isinstance(r,dict) for r in rows):return None
+        clusters=[r for r in rows if r.get('type')=='cluster']
+        nodes=[r for r in rows if r.get('type')=='node']
+        if len(clusters)!=1 or clusters[0].get('quorate') not in (True,1) or not nodes:return None
+        names=[r.get('name') for r in nodes]
+        if any(not isinstance(n,str) or not n or len(n)>200 for n in names) or len(set(names))!=len(names):return None
+        if clusters[0].get('nodes')!=len(names) or not any(r.get('local') in (True,1) and r.get('online') in (True,1) for r in nodes):return None
+        return set(names)
+    except Exception:return None
+
+
+def reconcile_nodes(c,store,cluster_id,members,now):
+    key='proxmox_node_absence:'+cluster_id
+    old=c.execute('SELECT value FROM settings WHERE key=?',(key,)).fetchone()
+    previous=json.loads(old['value']) if old else {};pending={}
+    if members is not None:
+        for obj in c.execute("SELECT * FROM proxmox_objects WHERE cluster_id=? AND kind='node' AND present=1",(cluster_id,)).fetchall():
+            if obj['node'] in members:continue
+            evidence=previous.get(obj['id'],{'first':now,'count':0})
+            evidence['count']+=1;pending[obj['id']]=evidence
+            if evidence['count']<2 or now-evidence['first']<120:continue
+            machine=obj['machine_id']
+            if machine and (c.execute("SELECT 1 FROM proxmox_api_jobs WHERE machine_id=? AND state IN ('dispatched','unknown')",(machine,)).fetchone() or c.execute("SELECT 1 FROM power_jobs WHERE machine_id=? AND state IN ('dispatched','authorized','verifying','unknown')",(machine,)).fetchone()):continue
+            c.execute('UPDATE proxmox_objects SET present=0 WHERE id=?',(obj['id'],))
+            if obj['check_id']:c.execute('UPDATE checks SET enabled=0,lease_token=NULL,lease_until=NULL WHERE id=?',(obj['check_id'],))
+            if machine:
+                c.execute("UPDATE power_jobs SET state='cancelled' WHERE machine_id=? AND state IN ('awaiting','approved')",(machine,))
+                c.execute('UPDATE machines SET parent_id=NULL WHERE parent_id=?',(machine,))
+            store.audit(c,'proxmox.node_auto_retired',obj['id'],{'machine_id':machine,'basis':'Absent from repeated quorate cluster membership','confirmations':evidence['count'],'first_absent':evidence['first'],'members':sorted(members)},actor='monitor')
+            del pending[obj['id']]
+    c.execute('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,json.dumps(pending)))
+
+
 def discover(store, vault, connection_id, lease_token=None):
     rows = store.rows('SELECT * FROM proxmox_connections WHERE id=?',(connection_id,))
     if not rows:
         raise ValueError('Unknown connection')
     connection = rows[0]
     objects,used_endpoint = cluster_inventory(store,vault,connection)
+    members=cluster_membership(store,vault,used_endpoint)
     now = time.time()
     with store.connect() as c:
         c.execute('BEGIN IMMEDIATE')
         if lease_token and not c.execute('SELECT 1 FROM discovery_schedules WHERE connection_id=? AND lease_token=? AND interval>0',(connection_id,lease_token)).fetchone():
             return 0
-        # A missing object is a visibility warning, never automatic retirement.
+        # General inventory absence alone remains a visibility warning.
         c.execute('UPDATE proxmox_objects SET missing_since=coalesce(missing_since,?) WHERE cluster_id=? AND present=1',(now,connection['cluster_id']))
         for item in objects:
+            if members is not None and item['kind']=='node' and item['node'] not in members:continue
             existing = c.execute('SELECT * FROM proxmox_objects WHERE cluster_id=? AND kind=? AND object_key=? AND present=1',
                                  (connection['cluster_id'],item['kind'],item['key'])).fetchone()
             if existing:
@@ -190,8 +230,7 @@ def discover(store, vault, connection_id, lease_token=None):
             from .metric_history import record
             obj=c.execute('SELECT id FROM proxmox_objects WHERE cluster_id=? AND kind=? AND object_key=? AND present=1',(connection['cluster_id'],item['kind'],item['key'])).fetchone()
             record(c,obj['id'],'proxmox',now,item['metrics'])
-        # Absence in a permission-filtered response is not proof of deletion. An
-        # administrator explicitly retires old objects before reusing their IDs.
+        reconcile_nodes(c,store,connection['cluster_id'],members,now)
         c.execute('UPDATE proxmox_connections SET last_discovery=? WHERE id IN (?,?)',(now,connection_id,used_endpoint))
         refresh_parents(c,store,connection['cluster_id'])
         store.audit(c,'proxmox.discovered',connection_id,{'visible_resources':len(objects)})

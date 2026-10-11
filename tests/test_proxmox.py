@@ -154,8 +154,56 @@ def test_multiple_endpoints_shared_credentials_and_atomic_validation(signed_in):
 def test_discovery_uses_another_cluster_endpoint(environment):
     _,store,vault=environment
     setup(store,vault)
-    with patch.object(Client,'get',side_effect=[OSError('node down'),inventory(),PermissionError('HA denied')]) as call:
+    with patch.object(Client,'get',side_effect=[OSError('node down'),inventory(),PermissionError('HA denied'),PermissionError('membership denied')]) as call:
         assert discover(store,vault,'p1')==len(inventory())
-        assert call.call_count==3
+        assert call.call_count==4
     assert len(store.rows('SELECT * FROM proxmox_objects'))==len(inventory())
     assert all(r['last_discovery'] for r in store.rows('SELECT * FROM proxmox_connections'))
+
+
+def test_automatic_node_retirement_requires_confirmed_membership(environment,monkeypatch):
+    import aiticket.proxmox as p
+    from aiticket.hostview import overview
+    _,store,vault=environment;setup(store,vault)
+    resources=inventory();clock=[1000];members=['a','b'];valid=[True]
+    def get(self,path):
+        if path=='/cluster/status':
+            if not valid[0]:raise ValueError('Denied')
+            return [{'type':'cluster','nodes':len(members),'quorate':1}]+[{'type':'node','name':n,'local':n=='a','online':n=='a'} for n in members]
+        return resources
+    monkeypatch.setattr(Client,'get',get);monkeypatch.setattr(p.time,'time',lambda:clock[0])
+    discover(store,vault,'p1')
+    obj=store.rows("SELECT * FROM proxmox_objects WHERE object_key='node/b'")[0]
+    link(store,obj['id'],None,'online','Retired B')
+    node=store.rows('SELECT * FROM proxmox_objects WHERE id=?',(obj['id'],))[0]
+    # Offline but still a member must remain visible.
+    clock[0]+=180;discover(store,vault,'p1');assert store.rows('SELECT present FROM proxmox_objects WHERE id=?',(obj['id'],))[0]['present']==1
+    members.remove('b');clock[0]+=180;discover(store,vault,'p1')
+    assert store.rows('SELECT present FROM proxmox_objects WHERE id=?',(obj['id'],))[0]['present']==1
+    # Permission failures break the confirmation sequence.
+    valid[0]=False;clock[0]+=180;discover(store,vault,'p1')
+    valid[0]=True;clock[0]+=180;discover(store,vault,'p1')
+    assert store.rows('SELECT present FROM proxmox_objects WHERE id=?',(obj['id'],))[0]['present']==1
+    clock[0]+=180;discover(store,vault,'p1')
+    assert store.rows('SELECT present FROM proxmox_objects WHERE id=?',(obj['id'],))[0]['present']==0
+    assert store.rows('SELECT enabled FROM checks WHERE id=?',(node['check_id'],))[0]['enabled']==0
+    assert all(h['id']!=node['machine_id'] for h in overview(store))
+    assert store.rows('SELECT * FROM machines WHERE id=?',(node['machine_id'],))
+    # Leftover cluster/resources entries must not resurrect a removed node.
+    clock[0]+=180;discover(store,vault,'p1')
+    assert not store.rows("SELECT * FROM proxmox_objects WHERE object_key='node/b' AND present=1")
+    members.append('b');clock[0]+=180;discover(store,vault,'p1')
+    new=store.rows("SELECT * FROM proxmox_objects WHERE object_key='node/b' AND present=1")[0]
+    assert new['generation']==2 and new['machine_id'] is None
+
+
+@pytest.mark.parametrize('rows',[
+    [{'type':'cluster','nodes':1,'quorate':0},{'type':'node','name':'a','local':1,'online':1}],
+    [{'type':'cluster','nodes':2,'quorate':1},{'type':'node','name':'a','local':1,'online':1}],
+    [{'type':'node','name':'a','local':1,'online':1}],
+    [],
+])
+def test_incomplete_membership_cannot_confirm_removal(environment,rows):
+    from aiticket.proxmox import cluster_membership
+    _,store,vault=environment;setup(store,vault)
+    with patch.object(Client,'get',return_value=rows):assert cluster_membership(store,vault,'p1') is None
