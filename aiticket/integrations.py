@@ -85,6 +85,9 @@ def refresh(store,vault,row):
                 for pool in snapshot.get('pools',[]):metric(c,row['id']+':pool:'+str(pool['id']),'storage',now,{'used_percent':pool.get('used_percent')})
                 for app in snapshot.get('apps',[]):metric(c,row['id']+':app:'+app['name'],'application',now,app.get('metrics',{}))
             else:metric(c,row['id'],'plex',now,snapshot.get('metrics',{}))
+    if changed and row['kind']=='truenas':
+        from .backup_health import nas_jobs,save_inventory
+        save_inventory(store,'truenas',row['id'],nas_jobs(snapshot,row['machine_id']),snapshot.get('backup_errors',['Backup task data unavailable']),now,fence=row)
     return snapshot
 
 

@@ -6,6 +6,9 @@ from .security import validate_url
 
 
 def probe(kind, config, vault, store=None):
+    if kind=='backup_health':
+        from .backup_health import probe as backup_probe
+        return backup_probe(store,config)
     if kind in ('access_path','certificate','dns'):
         from .access_paths import probe as access_probe
         return access_probe(kind,config)

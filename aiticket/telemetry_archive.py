@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 MAX_RECORD=1024*1024
-KINDS=('agent','discovery','network','metrics','integration','unifi','proxmox','check','diagnostic','command_result','power_result','change','ticket','audit','dashboard')
+KINDS=('agent','discovery','network','metrics','integration','unifi','proxmox','check','diagnostic','command_result','power_result','change','ticket','audit','dashboard','backup')
 SECRET=re.compile(r'(?i)(password|passwd|secret|token|api.?key|authorization|cookie|credential|private.?key|environment|^env$)')
 
 

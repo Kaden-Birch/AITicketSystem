@@ -58,7 +58,7 @@ def test_optional_disk_vm_permissions_preserve_pool_checks():
     def call(method,*args):
         if method=='auth.login_ex':return {'response_type':'SUCCESS'}
         if method=='system.info':return inventory()['system']
-        if method in ('device.get_info','vm.query'):raise truenas.RPCError(method)
+        if method in ('device.get_info','vm.query','pool.snapshottask.query','replication.query','system.general.config'):raise truenas.RPCError(method)
         return {'pool.query':inventory()['pools'],'pool.dataset.query':inventory()['datasets'],'app.query':[], 'alert.list':[], 'service.query':[]}[method]
     fake.call.side_effect=call;fake.statistics.return_value={}
     with patch('aiticket.truenas.Client',return_value=fake):d=truenas.collect({'username':'monitor'},'fixture')

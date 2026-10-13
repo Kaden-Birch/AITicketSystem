@@ -213,6 +213,17 @@ def create_app(data_dir=None, testing=False):
     from .ticket_updates import readable
     app.jinja_env.filters['readable_update']=readable
 
+    @app.get('/backups')
+    @login_required
+    def backups():
+        from .backup_health import views
+        jobs=views(store)
+        machine=request.args.get('machine','')
+        query=request.args.get('q','').strip().casefold()[:200]
+        jobs=[j for j in jobs if (not machine or j['machine_id']==machine) and (not query or query in (j['name']+' '+j['host']+' '+str(j.get('target') or '')).casefold())]
+        page=max(0,min(10000,request.args.get('offset',0,type=int)));total=len(jobs)
+        return render_template('backups.html',jobs=jobs[page:page+50],total=total,offset=page,machine=machine,query=query,collections=store.rows('SELECT source,connection_id,at,error FROM backup_inventory ORDER BY source'))
+
     @app.get('/attention')
     @login_required
     def attention():
@@ -401,6 +412,8 @@ def create_app(data_dir=None, testing=False):
         data['proxmox_ui']=proxmox_overview(store,data['host'])
         from .host_storage import build as host_storage
         data['host_storage']=host_storage(store,data['host'])
+        from .backup_health import views as backup_views
+        data['backup_jobs']=backup_views(store,machine_id)
         from .access_paths import views as access_views
         data['access_paths']=access_views(store,machine_id)
         from .knowledge import search as knowledge_search
@@ -858,7 +871,7 @@ def create_app(data_dir=None, testing=False):
         machine = existing['machine_id'] if existing else f.get('machine_id')
         if not store.rows('SELECT id FROM machines WHERE id=?', (machine,)):
             raise ValueError('Select an existing machine.')
-        if existing and kind in ('agent','agent_metric','proxmox_linked','truenas','plex'):
+        if existing and kind in ('agent','agent_metric','proxmox_linked','truenas','plex','backup_health'):
             cfg=json.loads(existing['config'])
         elif kind in ('access_path','certificate','dns'):
             from .access_paths import configuration

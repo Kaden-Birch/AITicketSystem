@@ -1,7 +1,7 @@
 """Readable coverage summaries and bounded, paginated read-only troubleshooting facts."""
 import json,time
 
-SOURCES=('metrics','checks','processes','containers','services','proxmox','network','unifi','history','check_history','network_logs','troubleshooting','network_problems')
+SOURCES=('metrics','checks','processes','containers','services','proxmox','network','unifi','history','check_history','network_logs','troubleshooting','network_problems','backups')
 
 
 def summary(c,machine,now=None):
@@ -28,6 +28,9 @@ def summary(c,machine,now=None):
         add('unifi',r['name']+' · UniFi API',at,bool(at and 0<=now-at<=180),str(len(errors))+' readings unavailable.' if errors else 'Device, client, port and network readings as exposed by the console.',unavailable=not snapshot,partial=bool(errors))
     rows=c.execute('SELECT last_seen,present FROM proxmox_objects WHERE machine_id=?',(machine,)).fetchall()
     if rows:add('proxmox','Proxmox inventory',max(r['last_seen'] for r in rows),any(r['present'] and 0<=now-r['last_seen']<=180 for r in rows),'Linked resource status and allocations; guest filesystem free space requires guest telemetry.')
+    for row in c.execute("SELECT at,error,data FROM backup_inventory WHERE EXISTS (SELECT 1 FROM json_each(data) WHERE json_extract(value,'$.machine_id')=?)",(machine,)):
+        jobs=[j for j in json.loads(row['data']) if j.get('machine_id')==machine]
+        add('backups','Backup health',row['at'],bool(row['at'] and 0<=now-row['at']<=900),str(len(jobs))+' backup/snapshot/replication observations. Request evidence source backups for run references. Restore not verified.',partial=bool(row['error']))
     from .topology import context
     network=context(c,machine,now)
     if network:
@@ -78,7 +81,13 @@ def page(c,machine,source,offset=0,limit=20,now=None):
             if size>20000:item={'id':row['id'],'at':row['at'],'name':row['name'],'message':row['message'][:1000],'truncated':True,'note':'Open this network event in the UI for structured fields.'}
             items.append(item);used+=len(json.dumps(item))
         return {'machine_id':machine,'source':source,'offset':offset,'items':items,'total':None,'next_offset':offset+len(items) if len(items)<len(result['items']) else result['next_offset'],'available':result['available'],'history_truncated':result.get('truncated',False),**meta}
-    if source=='network_problems':
+    if source=='backups':
+        data=[]
+        for row in c.execute('SELECT data,error FROM backup_inventory'):
+            for job in json.loads(row['data']):
+                if job.get('machine_id')==machine:data.append({**job,'collection_error':row['error'],'restore_verified':False})
+        meta['note']='Read-only backup observations. Completion is not a restore test. Use archive_search with record_type backup for older, host-scoped evidence.'
+    elif source=='network_problems':
         data=[dict(r)|{'data':json.loads(r['data'])} for r in c.execute("SELECT p.id,p.state,p.event_count,p.first_seen,p.last_seen,p.data,p.incident_id FROM log_problems p LEFT JOIN checks ch ON ch.id=p.check_id WHERE ch.machine_id=? OR EXISTS (SELECT 1 FROM json_each(p.data,'$.hosts') WHERE value=?) ORDER BY p.updated DESC LIMIT 100",(machine,machine))]
         for item in data:item['data'].pop('seen_keys',None)
         meta['note']='Counts are bounded observed facts, not proven causes. Quiet/expired patterns do not verify recovery. Articles and workflows remain optional and require current prerequisites and host permissions.'

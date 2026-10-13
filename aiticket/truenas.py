@@ -3,7 +3,7 @@ import json,ssl,time
 from urllib.parse import urlsplit,urlunsplit
 from .diagnostics import redact
 
-READ_METHODS={'auth.login_ex','system.info','pool.query','pool.dataset.query','alert.list','service.query','app.query','device.get_info','vm.query','core.subscribe'}
+READ_METHODS={'auth.login_ex','system.info','pool.query','pool.dataset.query','alert.list','service.query','app.query','device.get_info','vm.query','core.subscribe','pool.snapshottask.query','replication.query','system.general.config'}
 
 class RPCError(ValueError):
     def __init__(self,method):super().__init__('TrueNAS could not read '+{'auth.login_ex':'the account credentials','system.info':'system information','pool.query':'storage pools','pool.dataset.query':'datasets','app.query':'applications','service.query':'services','alert.list':'alerts','core.subscribe':'live statistics'}.get(method,'this information')+'. Check the account permissions and API version.')
@@ -60,6 +60,7 @@ def value(prop):
 def normalize(raw,events):
     from .hostview import percent
     result={'coverage':{'pool_limit':100,'dataset_limit':300,'application_limit':100,'pool_limit_reached':len(raw.get('pools',[]))>=100,'dataset_limit_reached':len(raw.get('datasets',[]))>=300,'application_limit_reached':len(raw.get('apps',[]))>=100},'version':raw.get('system',{}).get('version'),'system':fields(raw.get('system',{}),('hostname','version','system_product','physical_cores','cores','uptime_seconds','physmem')),'metrics':{},'warnings':raw.get('warnings',[])}
+    result.update({k:raw[k] for k in ('snapshot_tasks','replication_tasks','backup_timezone','backup_errors') if k in raw})
     realtime=events.get('reporting.realtime') or {};memory=realtime.get('memory',{});cpu=realtime.get('cpu',{}).get('cpu',{})
     metrics=result['metrics'];metrics.update({k:v for k,v in {'cpu_percent':cpu.get('usage'),'cpu_cores':result['system'].get('cores'),'memory_total_bytes':memory.get('physical_memory_total',result['system'].get('physmem')),'memory_available_bytes':memory.get('physical_memory_available'),'uptime_seconds':result['system'].get('uptime_seconds')}.items() if type(v) in (int,float)})
     if type(cpu.get('temp')) in (int,float):metrics['cpu_temperature']=cpu['temp']
@@ -132,6 +133,16 @@ def collect(cfg,secret):
                 if not isinstance(data,shape):raise RPCError(method)
                 raw[key]=data
             except (RPCError,TimeoutError):raw['warnings'].append('Could not read '+key+'. Check API permissions, version support and connection response time.')
+        raw['backup_errors']=[]
+        for key,method in [('snapshot_tasks','pool.snapshottask.query'),('replication_tasks','replication.query')]:
+            try:
+                data=client.call(method,[],{'limit':101})
+                if not isinstance(data,list) or any(not isinstance(t,dict) or 'id' not in t for t in data):raise RPCError(method)
+                if len(data)>100:raw['backup_errors'].append(key+': first 100 tasks only')
+                raw[key]=[{k:t[k] for k in ('id','name','dataset','target_dataset','enabled','auto','schedule','state') if k in t} for t in data[:100]]
+            except (RPCError,TimeoutError):raw['backup_errors'].append(key+': unavailable; check read permissions and API version')
+        try:raw['backup_timezone']=client.call('system.general.config').get('timezone')
+        except (RPCError,TimeoutError,AttributeError):raw['backup_errors'].append('Server timezone unavailable; schedule overdue checks require a known timezone')
         events=client.statistics()
         if not events:raw['warnings'].append('Live performance statistics are not available.')
         return normalize(raw,events)

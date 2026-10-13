@@ -28,6 +28,8 @@ def tick(store, vault):
     log_health_tick(store)
     from .proxmox import scheduled_refresh
     refreshed=scheduled_refresh(store,vault)
+    from .backup_health import tick as backup_tick
+    backup_refreshed=backup_tick(store,vault)
     with store.connect() as c:
         c.execute("UPDATE diagnostic_jobs SET state='expired',lease_until=NULL,lease_token=NULL WHERE expires<=? AND state IN ('pending','leased')",(time.time(),))
     job = claim(store, 'checks')
@@ -36,7 +38,7 @@ def tick(store, vault):
             healthy, evidence = probe(job['kind'], {**json.loads(job['config']), '_check_id':job['id']}, vault, store)
         except Exception as exc:
             # Do not put URLs, tokens or raw upstream error bodies in evidence.
-            healthy, evidence = (None if job['kind'] in ('agent_metric','unifi','unifi_device','truenas','plex') else False), {'reason': 'Check could not complete', 'error_type': type(exc).__name__}
+            healthy, evidence = (None if job['kind'] in ('agent_metric','unifi','unifi_device','truenas','plex','backup_health') else False), {'reason': 'Check could not complete', 'error_type': type(exc).__name__}
         observe(store, job['id'], healthy, evidence, lease_token=job['lease_token'])
     from .engine import resolution_tick
     resolution_tick(store)
@@ -45,7 +47,7 @@ def tick(store, vault):
     delivery = claim(store, 'deliveries')
     if delivery:
         deliver(store, vault, delivery)
-    return bool(job or delivery or refreshed or powered)
+    return bool(job or delivery or refreshed or powered or backup_refreshed)
 
 
 def deliver(store, vault, job):
