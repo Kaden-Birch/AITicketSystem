@@ -149,7 +149,7 @@ class Archiver:
         from .telemetry_archive import Exporter
         self.telemetry=Exporter(store,io,self.directory)
         self.next_upload = self.next_cleanup = self.next_storage = self.next_capacity = 0
-        self.failures = 0
+        self.failures = 0;self.halted=False;self.stage='initializing'
         self.configuration = hashlib.sha256(json.dumps(connection(store,vault),sort_keys=True).encode()).hexdigest()
 
     def publish(self, **values):
@@ -161,6 +161,7 @@ class Archiver:
         backlog['oldest_pending']=min(oldest) if oldest else None
         successes=[t for t in (self.state.get('last_success'),self.store.setting('telemetry_archive_success',{}).get('at')) if t]
         if successes:self.state['last_success']=max(successes)
+        self.state['telemetry_last_success']=self.store.setting('telemetry_archive_success',{}).get('at')
         self.state.update(heartbeat=time.time(), **values, **backlog,telemetry=telemetry)
         self.store.save('network_log_archive_status', self.state)
 
@@ -213,7 +214,7 @@ class Archiver:
         # A crash before unlink is safe: retries use the same verified remote filename.
         (self.directory / 'pending.json').unlink(missing_ok=True)
         compressed.unlink(missing_ok=True)
-        self.state.update(last_success=time.time(), uploaded_events=self.state.get('uploaded_events', 0)+len(data['keys']),
+        self.state.update(last_success=time.time(), network_last_success=time.time(), uploaded_events=self.state.get('uploaded_events', 0)+len(data['keys']),
                           uploaded_bytes=self.state.get('uploaded_bytes', 0)+uploaded['bytes'], error=None)
 
     def cleanup(self, cfg):
@@ -288,7 +289,19 @@ class Archiver:
             self.store.save('archive_storage',{**(prior if prior.get('target')==target else {}),'target':target,'error':'SMB archive file usage could not be read. Check connectivity and share permissions.','attempted':time.time()})
             self.next_storage=time.monotonic()+60
 
+    def failure(self,exc):
+        import sqlite3
+        code=getattr(exc,'sqlite_errorcode',None)
+        corrupt=isinstance(exc,sqlite3.DatabaseError) and code is not None and code&255 in (sqlite3.SQLITE_CORRUPT,sqlite3.SQLITE_NOTADB)
+        self.failures+=1
+        delay=min(300,15*2**min(self.failures-1,5))
+        self.halted=corrupt
+        self.next_upload=float('inf') if corrupt else time.monotonic()+delay
+        message=('SQLite database corruption detected during '+self.stage+'. Stop writers and preserve the database and WAL before recovery.') if corrupt else str(exc)[:300] if isinstance(exc,OSError) else 'Archive failed during '+self.stage+' ('+type(exc).__name__+'). Check archive service diagnostics.'
+        self.state.update(error=message,error_type=type(exc).__name__,error_stage=self.stage,sqlite_errorcode=code,error_since=self.state.get('error_since') or time.time(),next_retry=None if corrupt else time.time()+delay)
+
     def step(self):
+        self.stage='capacity history'
         from .capacity_forecasts import backfill,sample_local
         backfill(self.store)
         from .host_storage import backfill as backfill_hosts
@@ -296,6 +309,7 @@ class Archiver:
         if time.monotonic()>=self.next_capacity:
             sample_local(self.store)
             self.next_capacity=time.monotonic()+300
+        self.stage='storage usage'
         self.refresh_storage(connection(self.store,self.vault))
         self.publish()
         if config(self.store)['enabled']:self.telemetry.capture_dashboard()
@@ -312,18 +326,18 @@ class Archiver:
             backlog = self.archive.backlog()
             # Small batches wait up to five minutes after the first successful upload.
             if not (self.state.get('last_success') and not backlog['waiting_local'] and backlog['pending'] < 1000 and backlog['oldest_pending'] and time.time()-backlog['oldest_pending'] < 300):
+                self.stage='SIEM upload'
                 self.upload(cfg)
+            self.stage='telemetry upload'
             self.telemetry.step(cfg,force=False)
             if time.monotonic() >= self.next_cleanup: self.cleanup(cfg)
             self.failures = 0; self.state['error'] = None
             self.state['next_retry'] = None; self.state['error_since'] = None
+            self.state.update(error_type=None,error_stage=None,sqlite_errorcode=None)
             backlog = self.archive.backlog()
             self.next_upload = time.monotonic() + (1 if backlog['pending'] >= 1000 or backlog['waiting_local'] else 5)
         except OSError as exc:
-            self.failures += 1
-            delay = min(300, 15 * 2 ** min(self.failures-1, 5))
-            self.next_upload = time.monotonic() + delay
-            self.state.update(error=str(exc)[:300], error_since=self.state.get('error_since') or time.time(), next_retry=time.time()+delay)
+            self.failure(exc)
         self.publish()
 
     def expire_jobs(self):
@@ -351,14 +365,15 @@ def run(store, vault):
         print('SMB log archiver running. Local collection is independent.', flush=True)
         last_expiry = 0
         while not stopping:
+            if worker.halted:
+                time.sleep(1);continue
             try:
                 worker.step()
                 if time.monotonic()-last_expiry > 300:
                     worker.expire_jobs(); last_expiry = time.monotonic()
-            except Exception:
-                worker.state['error_since']=worker.state.get('error_since') or time.time()
-                worker.state['error'] = 'Archive service could not complete its work. Check the service logs and test the connection.'
+            except Exception as exc:
+                worker.failure(exc)
                 try: worker.publish()
                 except Exception: pass
-                print('Archive worker unavailable; local collection continues.', flush=True)
+                print(json.dumps({'event':'archive_failure','stage':worker.stage,'error_type':type(exc).__name__,'sqlite_errorcode':getattr(exc,'sqlite_errorcode',None),'halted':worker.halted}),flush=True)
             time.sleep(1)

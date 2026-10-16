@@ -1,4 +1,12 @@
+FROM python:3.12-slim AS sqlite-build
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY scripts/build_sqlite.py /build_sqlite.py
+RUN python /build_sqlite.py
+
 FROM python:3.12-slim
+COPY --from=sqlite-build /opt/aiticket-sqlite /opt/aiticket-sqlite
+ENV LD_LIBRARY_PATH=/opt/aiticket-sqlite/lib AITICKET_REQUIRE_PATCHED_SQLITE=1
+RUN python -c "import sqlite3; assert sqlite3.sqlite_version_info >= (3,51,3), sqlite3.sqlite_version; print(sqlite3.sqlite_version)"
 WORKDIR /app
 COPY requirements.txt .
 RUN apt-get update && apt-get install -y --no-install-recommends iputils-ping && rm -rf /var/lib/apt/lists/*

@@ -12,6 +12,7 @@
     <div><small>Waiting in local history</small><strong>{{ archive_status.waiting_local|default(0) }}</strong></div>
     <div><small>SMB retention</small><strong>{% for value,label in periods if value|string==smb.days|string %}{{ label }}{% endfor %}</strong><small>{{ archive_status.uploaded_events|default(0) }} events copied by this installation</small></div>
   </div>
+  <p class="hint">Last verified SIEM upload: {{ archive_status.network_last_success|default(none)|timestamp }} · Last verified telemetry upload: {{ archive_status.telemetry_last_success|default(none)|timestamp }}. A successful upload in one stream does not mean both queues are current.</p>
   {% set telemetry=archive_status.telemetry|default({}) %}<p class="hint">Telemetry: {{ telemetry.records|default(0) }} local records · {{ telemetry.pending|default(0) }} pending · <a href="/telemetry-history">Browse history</a>. Dashboard data is captured every five minutes. Secrets and connection credentials are excluded.</p>{% if telemetry.dropped|default(0) %}<p class="notice" role="alert">{{ telemetry.dropped }} telemetry records could not be queued because the upload buffer was full. History has gaps; restore SMB access or increase the buffer.</p>{% endif %}
   <form method="post" class="smb-storage-form">
     <input type="hidden" name="csrf" value="{{ csrf }}">

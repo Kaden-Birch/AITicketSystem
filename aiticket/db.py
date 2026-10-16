@@ -29,6 +29,8 @@ def uid():
 
 class Store:
     def __init__(self, path):
+        from .sqlite_runtime import require_patched
+        require_patched()
         self.path = str(path)
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as c:
