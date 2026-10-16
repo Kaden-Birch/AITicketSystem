@@ -36,7 +36,8 @@ def register(app,store,vault,login_required):
         for item in items[:200]:
             preview=json.dumps(item['data'],indent=2,ensure_ascii=False)
             item['preview']=preview[:2000]+('\n… Open the record for remaining fields.' if len(preview)>2000 else '')
-        return render_template('telemetry-history.html',values=values,error=error,task=task,items=items[:200],truncated=truncated,kinds=telemetry.KINDS,coverage=telemetry.status(store),**archive_storage.comparison(store,archive.config(store)),hosts=store.rows('SELECT id,name FROM machines ORDER BY name'))
+        from .archive_health import view as archive_health
+        return render_template('telemetry-history.html',collection_health=archive_health(store),values=values,error=error,task=task,items=items[:200],truncated=truncated,kinds=telemetry.KINDS,coverage=telemetry.status(store),**archive_storage.comparison(store,archive.config(store)),hosts=store.rows('SELECT id,name FROM machines ORDER BY name'))
 
     @app.get('/telemetry-history/records/<record_key>')
     @login_required

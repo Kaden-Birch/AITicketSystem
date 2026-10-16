@@ -1,0 +1,28 @@
+<section class="archive-health" data-live-key="archive-stream-health">
+  <div class="row"><h3>Archive transfer health</h3><a href="/network-events/coverage">Alerts & coverage →</a></div>
+  <div class="archive-capacity-grid">
+    {% for stream in collection_health.streams %}
+    <article class="archive-capacity" data-stream="{{ stream.dataset }}">
+      <div class="row"><strong>{{ stream.label }}</strong><span class="badge {{ stream.tone }}">{{ stream.status }}</span></div>
+      <div class="log-stats">
+        <div><small>Pending records</small><strong>{{ stream.pending if stream.pending is not none else 'Not reported' }}</strong>{% if stream.pending is not none %}<small>{{ stream.queued|default(0) }} queued · {{ stream.waiting_local|default(0) }} waiting in local history</small>{% endif %}<small>{{ stream.pending_bytes|storage_size }} in upload buffer · {{ stream.buffer_percent }}% full</small></div>
+        <div><small>Oldest pending record</small><strong>{{ stream.oldest_pending|timestamp }}</strong></div>
+        <div><small>Last verified upload</small><strong>{{ stream.last_success|timestamp }}</strong></div>
+        <div><small>Net backlog change</small><strong>{% if stream.net_per_minute is none %}Measuring{% elif stream.net_per_minute > 0 %}−{{ stream.net_per_minute }} records/min{% elif stream.net_per_minute < 0 %}+{{ -stream.net_per_minute }} records/min{% else %}No net change{% endif %}</strong></div>
+      </div>
+      {% set verification=collection_health.verification.get(stream.dataset,{}) %}
+      <div class="archive-verification"><strong>SMB read-back · {{ verification.get('state','Not checked')|capitalize }}</strong>
+        <p class="hint">{{ verification.get('note','Automatically checks a known uploaded sample after this stream catches up, then daily.') }}</p>
+        {% if verification.checked_at %}<small>Checked {{ verification.checked_at|timestamp }}</small>{% endif %}
+        {% if verification.search_url %}<a href="{{ verification.search_url }}">Open verified sample →</a>{% endif %}
+        {% if verification.checked_at %}<small>Human search: {{ 'verified' if verification.ui_verified else 'unverified' }} · AI evidence adapter: {{ 'verified' if verification.ai_verified else 'unverified' }}</small>{% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  <p class="hint">Streams are independent. Quiet sources are not failures. Queue figures reflect the last archive-service snapshot; a stale snapshot cannot establish current health. Net change includes incoming records.</p>
+  {% if collection_health.error %}<p class="notice" role="alert">{{ collection_health.error }}</p>{% endif %}
+  {% if not collection_health.alerts.get('enabled') %}<p class="hint">Automatic collection-health tickets are disabled. <a href="/network-events/coverage#log-health-editor">Choose the application host and enable alerts</a> to use its maintenance, notification and remediation policies.</p>{% endif %}
+  {% if collection_health.enabled %}<form method="post" action="/network-events/archive/verify"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="return_to" value="{{ request.path }}"><button>Verify SMB read-back now</button></form>{% endif %}
+  <p class="hint">Verification reads at most one batch per stream through the SMB search path, validates its reference and tests the bounded host-scoped AI evidence adapter. It uses no model tokens. Passing proves sample readability, not complete historical coverage or recovery of previously dropped records. Samples remain subject to search-cache expiry.</p>
+</section>

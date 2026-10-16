@@ -8,6 +8,8 @@ Included: a compact fleet dashboard, searchable slide-out navigation, host works
 
 Ticket investigations include [evidence coverage, related tickets and maintenance-aware AI controls](docs/investigation-evidence.md). Related failures retain independent recovery and exact-target permissions.
 
+[Archive transfer health](docs/archive-health.md) tracks SIEM and telemetry independently, raises policy-aware collection incidents, and verifies SMB samples through human search and the bounded AI evidence adapter.
+
 ## Local development
 
 ```sh

@@ -1,3 +1,4 @@
+{% include 'archive-health.html' %}
 {% include 'archive-storage-usage.html' %}
 <section id="smb-storage-editor" {% if smb_error %}data-live-preserve{% endif %}>
   <div class="row"><div><p class="eyebrow">SECOND STORAGE TIER</p><h3>SMB evidence archive</h3></div><span class="badge {{ 'healthy' if smb.enabled and archive_status.available and not archive_status.error else 'unknown' }}">{{ 'Paused' if not smb.enabled else 'Service unavailable' if not archive_status.available else 'Retrying' if archive_status.error else 'Running' }}</span></div>
@@ -7,7 +8,7 @@
   {% if smb.enabled and archive_status.error %}<p class="notice" role="status">{{ archive_status.error }}{% if archive_status.next_retry %} Next retry {{ archive_status.next_retry|timestamp }}.{% endif %}</p>{% endif %}
   {% if archive_status.gaps|default(0) %}<p class="notice" role="alert">{{ archive_status.gaps }} events lost their pending archive copy after local limits were reached. The SMB archive may have gaps. Increase the upload buffer or restore the connection.</p>{% endif %}
   <div class="log-stats">
-    <div><small>Last verified upload</small><strong>{{ archive_status.last_success|default(none)|timestamp }}</strong></div>
+    <div><small>Latest upload · either stream</small><strong>{{ archive_status.last_success|default(none)|timestamp }}</strong></div>
     <div><small>Pending copies</small><strong>{{ archive_status.pending|default(0) }} records</strong><small>{{ archive_status.pending_bytes|default(0)|storage_size }} pending · {{ smb.buffer_mb }} MB buffer per stream</small></div>
     <div><small>Waiting in local history</small><strong>{{ archive_status.waiting_local|default(0) }}</strong></div>
     <div><small>SMB retention</small><strong>{% for value,label in periods if value|string==smb.days|string %}{{ label }}{% endfor %}</strong><small>{{ archive_status.uploaded_events|default(0) }} events copied by this installation</small></div>

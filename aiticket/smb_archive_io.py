@@ -132,9 +132,12 @@ def execute(request):
         for entry in smbclient.scandir(root):
             if re.fullmatch(r'\d{4}-\d{2}-\d{2}', entry.name) and entry.is_dir(follow_symlinks=False):
                 day = datetime.strptime(entry.name, '%Y-%m-%d').replace(tzinfo=timezone.utc).timestamp()
+                if request.get('receipt_at') is not None:
+                    receipt_day=int(request['receipt_at'])//86400*86400
+                    if day!=receipt_day:continue
                 if request.get('cutoff') and day > request['cutoff']: continue
-                if request.get('start') is not None and day+86400 < request['start']-31*86400: continue
-                if request.get('end') is not None and day > request['end']+31*86400: continue
+                if request.get('receipt_at') is None and request.get('start') is not None and day+86400 < request['start']-31*86400: continue
+                if request.get('receipt_at') is None and request.get('end') is not None and day > request['end']+31*86400: continue
                 directories.append(entry.name)
                 if len(directories)>10000: raise ValueError('Too many archive day partitions.')
         for day in sorted(directories, reverse=not bool(request.get('cutoff'))):
@@ -172,6 +175,7 @@ def execute(request):
                 if dataset=='telemetry':
                     from .telemetry_archive import validate_document
                     if not validate_document(event):raise ValueError('Invalid telemetry archive record.')
+                    if params.get('record_key') and event['record_key']!=params['record_key']:continue
                     if event['record_key'] in seen:continue
                     seen.add(event['record_key'])
                     if not params['start']<=event['at']<=params['end']:continue
@@ -185,6 +189,7 @@ def execute(request):
                     continue
                 if not isinstance(event, dict) or not isinstance(event.get('event_key'), str) or len(event['event_key']) > 100:
                     raise ValueError('Invalid archive event identity.')
+                if params.get('record_key') and event['event_key']!=params['record_key']:continue
                 if event['event_key'] in seen: continue
                 seen.add(event['event_key'])
                 if not all(isinstance(event.get(key), (int, float)) and math.isfinite(event[key]) for key in ('at','received')):

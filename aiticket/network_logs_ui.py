@@ -10,6 +10,7 @@ def register(app, store, vault, login_required):
     from .telemetry_archive_ui import register as register_telemetry
     register_telemetry(app,store,vault,login_required)
     from . import archive_storage
+    from .archive_health import view as archive_health
     app.jinja_env.filters['storage_size']=archive_storage.human
     @app.context_processor
     def log_helpers():
@@ -80,12 +81,23 @@ def register(app, store, vault, login_required):
     def network_log_coverage():
         from . import log_coverage as coverage
         cfg=store.setting('network_log_health',{});error=None
-        values={'health_machine':cfg.get('machine'),'failure_minutes':cfg.get('delay',900)//60,'health_enabled':'yes' if cfg.get('enabled') else '', 'correlation':'yes' if store.setting('network_log_correlation',False) else ''}
+        values={'health_machine':cfg.get('machine'),'failure_minutes':cfg.get('delay',900)//60,'buffer_percent':cfg.get('buffer_percent',90),'health_enabled':'yes' if cfg.get('enabled') else '', 'correlation':'yes' if store.setting('network_log_correlation',False) else ''}
         if request.method=='POST':
             values=dict(request.form)
             try:coverage.save(store,values);flash('Collection health and correlation settings saved.');return redirect('/network-events/coverage')
             except (ValueError,TypeError) as exc:error=str(exc)
         return render_template('network-log-coverage.html',coverage=coverage.view(store),values=values,error=error,hosts=store.rows('SELECT id,name FROM machines ORDER BY name'))
+
+    @app.post('/network-events/archive/verify')
+    @login_required
+    def verify_archive_history():
+        from .archive_verification import schedule
+        try:
+            schedule(store,vault,manual=True)
+            flash('Bounded SMB read-back verification queued. Results update automatically; uploads remain independent.')
+        except ValueError as exc:flash(str(exc))
+        destination=request.form.get('return_to')
+        return redirect(destination if destination in ('/settings/network-logs','/network-events/coverage','/telemetry-history') else '/settings/network-logs')
 
     @app.route('/settings/network-logs', methods=['GET', 'POST'])
     @login_required
@@ -139,7 +151,7 @@ def register(app, store, vault, login_required):
         return render_template('network-log-settings.html', values=values, error=error, retention=retention,
                                sources=store.rows('SELECT * FROM log_sources ORDER BY name'),
                                connections=store.rows('SELECT id,name FROM unifi_connections WHERE deleted IS NULL ORDER BY name'), collector=logs.status(store),
-                               smb=smb, smb_error=smb_error, periods=archive.PERIODS, archive_status=archive.archive_status(store),
+                               collection_health=archive_health(store),smb=smb, smb_error=smb_error, periods=archive.PERIODS, archive_status=archive.archive_status(store),
                                **archive_storage.comparison(store,archive.config(store)),
                                smb_test=archive.job(store, request.args['test']) if request.args.get('test') else None,
                                smb_password_saved=bool(store.setting('network_log_smb_secret')))

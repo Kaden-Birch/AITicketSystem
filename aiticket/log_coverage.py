@@ -27,8 +27,9 @@ def view(store,now=None):
             item['count']+=1;item['last_at']=max(item['last_at'],e['at']);item['roles'].add(a['role'])
     hosts=[{'id':k,**v,'roles':sorted(v['roles'])} for k,v in matched.items()]
     hosts.sort(key=lambda h:h['count'],reverse=True)
+    from .archive_health import view as archive_health
     settings=store.setting('network_log_health',{})
-    return {'collector':collector,'archive':transfer,'available':available,'capped':capped,'events':len(events),'hosts':hosts[:100],
+    return {'collector':collector,'archive':transfer,'archive_health':archive_health(store,now,transfer),'available':available,'capped':capped,'events':len(events),'hosts':hosts[:100],
             'matched_hosts':len(hosts),'without_events':len(names)-len(hosts),'unassigned':len(unassigned),'wholly_unassigned':wholly_unassigned,'unassigned_samples':unassigned[:10],
             'types':types,'formats':formats,'sources':[s|{'count':source_counts.get(s['id'],0),'last_at':collector.get('sources',{}).get(s['id'],{}).get('at')} for s in sources],
             'smb_enabled':archive.config(store)['enabled'],'settings':settings,
@@ -40,12 +41,15 @@ def save(store,values):
     try:delay=int(values.get('failure_minutes',15))*60
     except (TypeError,ValueError):raise ValueError('Enter a whole-number failure duration.')
     if not 120<=delay<=86400:raise ValueError('Persistent failures must last 2–1,440 minutes.')
+    try:buffer_percent=int(values.get('buffer_percent',90))
+    except (TypeError,ValueError):raise ValueError('Enter a whole-number buffer warning percentage.')
+    if not 50<=buffer_percent<=99:raise ValueError('Choose a buffer warning threshold of 50–99%.')
     enabled=values.get('health_enabled')=='yes'
     if enabled and not machine:raise ValueError('Select the application server host for collection-health tickets.')
     with store.connect() as c:
         if machine and not c.execute('SELECT 1 FROM machines WHERE id=?',(machine,)).fetchone():raise ValueError('Choose an existing application server host.')
         c.execute("UPDATE checks SET enabled=0 WHERE kind='log_health'")
-    store.save_many({'network_log_health':{'enabled':enabled,'machine':machine,'delay':delay,'configured_at':time.time()},
+    store.save_many({'network_log_health':{'enabled':enabled,'machine':machine,'delay':delay,'buffer_percent':buffer_percent,'configured_at':time.time()},
                      'network_log_correlation':values.get('correlation')=='yes'},actor='administrator')
 
 
@@ -66,12 +70,11 @@ def tick(store,now=None,force=False):
     if increasing and not error_since:error_since=now
     storage_failed=bool(error_since and now-error_since>=cfg['delay'])
     store.save('network_log_storage_health',{'errors':errors,'heartbeat':heartbeat,'error_since':error_since})
-    smb=archive.config(store)['enabled'];backlog=transfer.get('pending',0)+transfer.get('waiting_local',0)
-    upload_origin=transfer.get('error_since') or transfer.get('heartbeat') or cfg['configured_at']
-    smb_failed=smb and (not transfer.get('available') and now-upload_origin>=cfg['delay'] or bool(backlog and transfer.get('error') and now-upload_origin>=cfg['delay']))
+    smb=archive.config(store)['enabled']
+    smb_failed,archive_evidence=archive_condition(store,cfg,transfer,now)
     issues=[('collector',collector_failed if enabled_sources else None,'Log receiver contact is stale. Check docker compose ps/logs log-receiver, port 5514 binding and writable local storage.',{'heartbeat':heartbeat}),
             ('storage',storage_failed if heartbeat and now-heartbeat<=30 else None,'The collector repeatedly failed to store events. Check local disk capacity and log volume permissions.',{'storage_errors':errors}),
-            ('archive',smb_failed if smb else None,'Persistent SMB archiving failure. Local collection continues. Check log-archiver, SMB connectivity/space/permissions, then use Save and test connection.',{'pending':transfer.get('pending',0),'waiting_local':transfer.get('waiting_local',0),'error':transfer.get('error'),'error_since':transfer.get('error_since')})]
+            ('archive',smb_failed if smb else None,archive_evidence['reason'],archive_evidence)]
     for kind,failed,reason,evidence in issues:
         identifier='log-health-'+machine+'-'+kind
         if (kind=='archive' and not smb) or (kind=='collector' and not enabled_sources):
@@ -80,5 +83,36 @@ def tick(store,now=None,force=False):
         with store.connect() as c:
             c.execute("INSERT INTO checks(id,machine_id,name,kind,config,interval,fail_after,recover_after,severity) VALUES(?,?,?,'log_health','{}',30,1,2,'high') ON CONFLICT(id) DO UPDATE SET enabled=1",(identifier,machine,'Log collection · '+kind))
         healthy=None if failed is None else not failed
-        if kind=='archive' and healthy and transfer.get('error'):healthy=None # A failed upload is never reported recovered merely because the backlog shrank.
+        if kind=='archive' and healthy and (transfer.get('error') or not transfer.get('available')):healthy=None # A failed upload is never reported recovered merely because the backlog shrank.
         observe(store,identifier,healthy,{'reason':reason if failed else 'Fresh collection-service evidence; a quiet source is not unhealthy.',**evidence},now)
+
+
+def archive_condition(store,cfg,transfer,now):
+    from .archive_health import view as health_view
+    health=health_view(store,now,transfer)
+    previous=store.setting('archive_health_conditions',{})
+    conditions={};reasons=[]
+    origin=transfer.get('error_since') or transfer.get('heartbeat') or cfg['configured_at']
+    if not transfer.get('available') and now-origin>=cfg['delay']:
+        conditions['service']=origin;reasons.append('Archive service contact is stale. Check docker compose ps/logs log-archiver.')
+    if transfer.get('error') and now-origin>=cfg['delay']:
+        conditions['upload_error']=origin;reasons.append('Persistent archive error. Check SMB connectivity, capacity and permissions; test the connection.')
+    if health['corrupt']:
+        conditions['corruption']=now;reasons.append('Database corruption detected. Stop writers, preserve database/WAL files and recover from a verified copy; do not delete the queue.')
+    for stream in health['streams']:
+        if stream['stalled']:
+            conditions['stalled_'+stream['dataset']]=stream.get('last_progress',now)
+            reasons.append(stream['label']+' uploads are stalled with pending records; success in another stream does not establish recovery.')
+        if stream['fresh'] and stream['buffer_percent']>=cfg.get('buffer_percent',90):
+            key='buffer_'+stream['dataset'];since=previous.get(key,now);conditions[key]=since
+            if now-since>=cfg['delay']:reasons.append(stream['label']+' upload buffer is nearly full. Restore transfer throughput or increase the buffer before history is lost.')
+        verification=health['verification'].get(stream['dataset'],{})
+        if verification.get('state')=='failed':
+            key='verification_'+stream['dataset'];since=previous.get(key,verification.get('checked_at',now));conditions[key]=since
+            if now-since>=cfg['delay']:reasons.append(stream['label']+' SMB read-back verification failed. Inspect the verification result and retained archive files.')
+    store.save('archive_health_conditions',conditions)
+    evidence={'reason':' '.join(reasons) if reasons else 'Fresh archive-service evidence; no persistent stream failures.',
+              'pending':transfer.get('pending',0),'error':transfer.get('error'),'error_since':transfer.get('error_since'),
+              'streams':[{k:s.get(k) for k in ('dataset','status','pending','pending_bytes','buffer_percent','oldest_pending','last_success','net_per_minute')} for s in health['streams']],
+              'conditions':conditions,'heartbeat':transfer.get('heartbeat'),'verification':health['verification']}
+    return bool(reasons),evidence

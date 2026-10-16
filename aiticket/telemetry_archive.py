@@ -116,11 +116,14 @@ def record(store,kind,entity,machine,payload,at=None,key=None,max_record=MAX_REC
         return True
 
 
-def status(store):
+def status(store,include_kinds=True):
     with store.connect() as c:
         row=dict(c.execute('SELECT * FROM telemetry_archive_meta WHERE id=1').fetchone())
-        row.update(dict(c.execute('SELECT count(*) records,sum(uploaded<>1) pending,min(CASE WHEN uploaded<>1 THEN received END) oldest FROM telemetry_records').fetchone()))
-        row['kinds']=[dict(r) for r in c.execute('SELECT kind,count(*) count FROM telemetry_records GROUP BY kind ORDER BY kind')]
+        groups={r['uploaded']:dict(r) for r in c.execute('SELECT uploaded,count(*) n,min(received) oldest FROM telemetry_records GROUP BY uploaded')}
+        queued=groups.get(0,{});waiting=groups.get(-1,{})
+        oldest=[r['oldest'] for r in (queued,waiting) if r.get('oldest') is not None]
+        row.update(records=sum(r['n'] for r in groups.values()),pending=queued.get('n',0)+waiting.get('n',0),queued=queued.get('n',0),waiting_local=waiting.get('n',0),oldest=min(oldest) if oldest else None)
+        if include_kinds:row['kinds']=[dict(r) for r in c.execute('SELECT kind,count(*) count FROM telemetry_records GROUP BY kind ORDER BY kind')]
     return row
 
 
@@ -221,6 +224,9 @@ class Exporter:
             self.store.save('telemetry_archive_batch',{})
             path.unlink(missing_ok=True)
             self.store.save('telemetry_archive_success',{'at':time.time(),'records':len(selected),'bytes':result['bytes']})
+            from .archive_health import receipt
+            sample=next((document(r) for r,l in selected if r['machine_id']),document(selected[0][0]))
+            receipt(self.store,'telemetry',cfg,len(selected),name,{k:sample.get(k) for k in ('record_key','machine_id','at','received','kind')})
         # Local uploaded copies follow the chosen local retention/budget, independently of SMB.
         retention=self.store.setting('network_log_retention',{'days':7,'megabytes':200,'rows':100000})
         with self.store.connect() as c:

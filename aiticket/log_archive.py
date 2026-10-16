@@ -152,9 +152,16 @@ class Archiver:
         self.failures = 0;self.halted=False;self.stage='initializing'
         self.configuration = hashlib.sha256(json.dumps(connection(store,vault),sort_keys=True).encode()).hexdigest()
 
-    def publish(self, **values):
+    def publish(self, force=False, **values):
+        now=time.monotonic()
+        if not force and not values and now-getattr(self,'last_publish',float('-inf'))<5:
+            self.state['heartbeat']=time.time()
+            self.store.save('network_log_archive_status',self.state)
+            return
         from .telemetry_archive import status
-        telemetry=status(self.store);backlog=self.archive.backlog()
+        telemetry=status(self.store,include_kinds=False);backlog=self.archive.backlog()
+        from .archive_health import snapshot
+        self.state['streams']=snapshot(self.store,config(self.store),dict(backlog),telemetry,self.state.get('streams'))
         backlog['pending']+=(telemetry['pending'] or 0)
         backlog['pending_bytes']+=telemetry['pending_bytes']
         oldest=[t for t in (backlog.get('oldest_pending'),telemetry['oldest']) if t]
@@ -164,6 +171,7 @@ class Archiver:
         self.state['telemetry_last_success']=self.store.setting('telemetry_archive_success',{}).get('at')
         self.state.update(heartbeat=time.time(), **values, **backlog,telemetry=telemetry)
         self.store.save('network_log_archive_status', self.state)
+        self.last_publish=now
 
     def pending_batch(self):
         manifest = self.directory / 'pending.json'; compressed = self.directory / 'pending.jsonl.gz'
@@ -211,9 +219,19 @@ class Archiver:
             c.execute('BEGIN IMMEDIATE')
             c.executemany('UPDATE events SET archived=1 WHERE event_key=?', [(k,) for k in data['keys']])
             c.executemany('DELETE FROM smb_outbox WHERE event_key=?', [(k,) for k in data['keys']])
+        # The outbox can outlive local events; take the sample from the actual batch.
+        batch=[json.loads(line) for line in gzip.decompress(compressed.read_bytes()).splitlines()]
+        with self.store.connect() as c:
+            bound={(r['source_id'],r['mac']) for r in c.execute('SELECT source_id,mac FROM log_host_bindings')}
+            chosen=next((e for e in batch if json.loads(e['associations']) or (e['source_id'],e.get('client_mac')) in bound),batch[0])
+            event=logs.decorate(c,[chosen])[0]
+        sample={'event_key':event['event_key'],'at':event['at'],'received':event['received'],
+                'machine_id':next((a['machine_id'] for a in event['associations']),None)}
         # A crash before unlink is safe: retries use the same verified remote filename.
         (self.directory / 'pending.json').unlink(missing_ok=True)
         compressed.unlink(missing_ok=True)
+        from .archive_health import receipt
+        receipt(self.store,'network',cfg,len(data['keys']),data['name'],sample)
         self.state.update(last_success=time.time(), network_last_success=time.time(), uploaded_events=self.state.get('uploaded_events', 0)+len(data['keys']),
                           uploaded_bytes=self.state.get('uploaded_bytes', 0)+uploaded['bytes'], error=None)
 
@@ -248,8 +266,11 @@ class Archiver:
                         if not ai_job or params['machine'] not in machines(c,ai_job['incident_id']):raise OSError('Archive search authorization expired or its target was removed.')
                 if params.get('machine'):
                     params['bindings'] = self.store.rows('SELECT source_id,mac,machine_id FROM log_host_bindings')
-                catalog = self.io(cfg, 'catalog', **({'dataset':'telemetry'} if params.get('dataset')=='telemetry' else {}), start=params['start'], end=params['end'])
+                catalog_options={'receipt_at':metadata(params['verification']['file'])['received']} if params.get('verification') else {}
+                catalog = self.io(cfg, 'catalog', **catalog_options, **({'dataset':'telemetry'} if params.get('dataset')=='telemetry' else {}), start=params['start'], end=params['end'])
                 files = select_files(catalog['files'], params)
+                if params.get('verification'):files=[f for f in files if f['name']==params['verification']['file']]
+                if params.get('verification') and catalog.get('truncated') and not files:raise OSError('Verification catalog was incomplete; sample could not be located within the search limit.')
                 path = results_path(self.store, row['id']); path.parent.mkdir(exist_ok=True, mode=0o700)
                 maximum=min(100,max(1,int(params.get('max_files',100))))
                 result = self.io(cfg, 'search', timeout=30 if params.get('ai_job') else 60, names=[f['name'] for f in files[:maximum]], params=params, file=str(path), **({'dataset':'telemetry'} if params.get('dataset')=='telemetry' else {}))
@@ -259,11 +280,17 @@ class Archiver:
                 result['truncated'] = result.get('truncated', False) or len(files) > maximum or catalog.get('truncated', False)
             self.finish(row['id'], 'complete', result=result)
         except Exception as exc:
+            import sqlite3
+            code=getattr(exc,'sqlite_errorcode',None)
+            if isinstance(exc,sqlite3.DatabaseError) and code is not None and code&255 in (sqlite3.SQLITE_CORRUPT,sqlite3.SQLITE_NOTADB):raise
             if row['kind']=='search':
                 results_path(self.store,row['id']).unlink(missing_ok=True)
             # io already sanitizes errors; other exceptions are not exposed.
             message = str(exc) if isinstance(exc, OSError) else 'Archive request failed. Check the connection and try again.'
             self.finish(row['id'], 'failed', error=message[:300])
+        if json.loads(row['params']).get('verification'):
+            from .archive_verification import completed
+            completed(self.store,row['id'])
         self.expire_jobs()
         return True
 
@@ -298,7 +325,7 @@ class Archiver:
         self.halted=corrupt
         self.next_upload=float('inf') if corrupt else time.monotonic()+delay
         message=('SQLite database corruption detected during '+self.stage+'. Stop writers and preserve the database and WAL before recovery.') if corrupt else str(exc)[:300] if isinstance(exc,OSError) else 'Archive failed during '+self.stage+' ('+type(exc).__name__+'). Check archive service diagnostics.'
-        self.state.update(error=message,error_type=type(exc).__name__,error_stage=self.stage,sqlite_errorcode=code,error_since=self.state.get('error_since') or time.time(),next_retry=None if corrupt else time.time()+delay)
+        self.state.update(halted=corrupt,error=message,error_type=type(exc).__name__,error_stage=self.stage,sqlite_errorcode=code,error_since=self.state.get('error_since') or time.time(),next_retry=None if corrupt else time.time()+delay)
 
     def step(self):
         self.stage='capacity history'
@@ -313,7 +340,12 @@ class Archiver:
         self.refresh_storage(connection(self.store,self.vault))
         self.publish()
         if config(self.store)['enabled']:self.telemetry.capture_dashboard()
+        self.stage='archive request'
         if self.process_job(): self.publish(); return
+        if config(self.store)['enabled'] and time.monotonic()>=getattr(self,'next_verification',0):
+            from .archive_verification import schedule
+            schedule(self.store,self.vault)
+            self.next_verification=time.monotonic()+60
         cfg = connection(self.store, self.vault)
         token = hashlib.sha256(json.dumps(cfg, sort_keys=True).encode()).hexdigest()
         if self.configuration != token:
@@ -330,10 +362,12 @@ class Archiver:
                 self.upload(cfg)
             self.stage='telemetry upload'
             self.telemetry.step(cfg,force=False)
-            if time.monotonic() >= self.next_cleanup: self.cleanup(cfg)
+            if time.monotonic() >= self.next_cleanup:
+                self.stage='SMB retention'
+                self.cleanup(cfg)
             self.failures = 0; self.state['error'] = None
             self.state['next_retry'] = None; self.state['error_since'] = None
-            self.state.update(error_type=None,error_stage=None,sqlite_errorcode=None)
+            self.state.update(halted=False,error_type=None,error_stage=None,sqlite_errorcode=None)
             backlog = self.archive.backlog()
             self.next_upload = time.monotonic() + (1 if backlog['pending'] >= 1000 or backlog['waiting_local'] else 5)
         except OSError as exc:
@@ -373,7 +407,9 @@ def run(store, vault):
                     worker.expire_jobs(); last_expiry = time.monotonic()
             except Exception as exc:
                 worker.failure(exc)
-                try: worker.publish()
-                except Exception: pass
+                try: worker.publish(force=True)
+                except Exception:
+                    try:store.save('network_log_archive_status',worker.state)
+                    except Exception:pass
                 print(json.dumps({'event':'archive_failure','stage':worker.stage,'error_type':type(exc).__name__,'sqlite_errorcode':getattr(exc,'sqlite_errorcode',None),'halted':worker.halted}),flush=True)
             time.sleep(1)

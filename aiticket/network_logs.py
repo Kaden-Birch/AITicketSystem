@@ -228,7 +228,7 @@ class Archive:
     def backlog(self):
         with self.connect() as c:
             row = c.execute('SELECT count(*),coalesce(sum(size),0),min(received) FROM smb_outbox').fetchone()
-            return {'pending': row[0], 'pending_bytes': row[1], 'oldest_pending': row[2],
+            return {'pending': row[0], 'pending_bytes': row[1], 'oldest_pending': min((t for t in (row[2],c.execute('SELECT min(received) FROM events WHERE archived=0').fetchone()[0]) if t is not None),default=None),
                     'waiting_local': c.execute('SELECT count(*) FROM events WHERE archived=0 AND NOT EXISTS (SELECT 1 FROM smb_outbox q WHERE q.event_key=events.event_key)').fetchone()[0],
                     'gaps': int((c.execute("SELECT value FROM archive_meta WHERE key='gaps'").fetchone() or ['0'])[0])}
 
