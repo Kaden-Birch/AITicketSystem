@@ -4,14 +4,17 @@
 reads of the working source. The protected original remains outside this tool.
 """
 import argparse
+from contextlib import contextmanager
 import hashlib
 import json
 import math
+import os
 import re
 from pathlib import Path
 import shutil
 import sqlite3
 import subprocess
+import tempfile
 
 
 def quote(name):return '"'+name.replace('"','""')+'"'
@@ -110,6 +113,21 @@ def construct(source,output,salvage):
     finally:src.close();saved.close();dst.close()
 
 
+@contextmanager
+def temporary_workspace(parent):
+    # Recovery and index construction can spill gigabytes; the app /tmp is 32 MB.
+    # This offline process owns its environment and has no concurrent DB users.
+    previous={key:os.environ.get(key) for key in ('SQLITE_TMPDIR','TMPDIR')}
+    with tempfile.TemporaryDirectory(prefix='.sqlite-recovery-',dir=parent) as temporary:
+        try:
+            for key in previous:os.environ[key]=temporary
+            yield Path(temporary)
+        finally:
+            for key,value in previous.items():
+                if value is None:os.environ.pop(key,None)
+                else:os.environ[key]=value
+
+
 def recover(source,output,shell):
     source=Path(source).resolve();output=Path(output).resolve()
     if source==Path('/data/app.db') or output==Path('/data/app.db') or '/original/' in source.as_posix() or '/original/' in output.as_posix():raise ValueError('Use a disposable working copy, never the live or protected original database')
@@ -124,14 +142,16 @@ def recover(source,output,shell):
     if salvage.exists():raise ValueError('Salvage file already exists; choose a new candidate name')
     log=output.with_name(output.name+'.recovery-errors.txt')
     print('Recovering into a separate salvage file; the live and protected databases are untouched.',flush=True)
-    with log.open('xb') as errors:
-        producer=subprocess.Popen([shell,'-readonly',str(source),'.recover --ignore-freelist'],stdout=subprocess.PIPE,stderr=errors)
-        consumer=subprocess.Popen([shell,'-bail',str(salvage)],stdin=producer.stdout,stdout=errors,stderr=errors)
-        producer.stdout.close()
-        imported=consumer.wait();recovered=producer.wait()
-    if recovered or imported:raise ValueError('SQLite salvage reported errors. Private diagnostic file: '+str(log))
-    print('Building candidate; copying and verifying non-telemetry tables.',flush=True)
-    report=construct(source,output,salvage)
+    with temporary_workspace(output.parent) as temporary:
+        print('SQLite temporary workspace: '+str(temporary),flush=True)
+        with log.open('xb') as errors:
+            producer=subprocess.Popen([shell,'-readonly',str(source),'.recover --ignore-freelist'],stdout=subprocess.PIPE,stderr=errors)
+            consumer=subprocess.Popen([shell,'-bail',str(salvage)],stdin=producer.stdout,stdout=errors,stderr=errors)
+            producer.stdout.close()
+            imported=consumer.wait();recovered=producer.wait()
+        if recovered or imported:raise ValueError('SQLite salvage reported errors. Private diagnostic file: '+str(log))
+        print('Building candidate; copying and verifying non-telemetry tables.',flush=True)
+        report=construct(source,output,salvage)
     output.with_name(output.name+'.report.json').write_text(json.dumps(report,indent=2))
     print(json.dumps({k:v for k,v in report.items() if k!='protected_tables'},indent=2),flush=True)
     print('Non-telemetry table copies verified:',len(report['protected_tables']),flush=True)

@@ -99,3 +99,21 @@ def test_archive_corruption_halts_retry_and_error_details_are_safe(environment):
     assert worker.halted and worker.state['next_retry'] is None
     assert 'corruption' in worker.state['error'] and 'private' not in worker.state['error']
     assert worker.state['error_stage']=='telemetry upload'
+
+
+def test_temporary_workspace_uses_candidate_volume_and_restores_environment(tmp_path,monkeypatch):
+    import os
+    import subprocess
+    import sys
+    monkeypatch.setenv('SQLITE_TMPDIR','/previous-sqlite')
+    monkeypatch.delenv('TMPDIR',raising=False)
+    with pytest.raises(RuntimeError,match='simulated failure'):
+        with recovery.temporary_workspace(tmp_path) as temporary:
+            assert temporary.parent==tmp_path and temporary.is_dir()
+            assert temporary.stat().st_mode&0o777==0o700
+            assert os.environ['SQLITE_TMPDIR']==os.environ['TMPDIR']==str(temporary)
+            child=subprocess.check_output([sys.executable,'-c',"import os;print(os.environ['SQLITE_TMPDIR']);print(os.environ['TMPDIR'])"],text=True)
+            assert child.splitlines()==[str(temporary)]*2
+            raise RuntimeError('simulated failure')
+    assert not temporary.exists()
+    assert os.environ['SQLITE_TMPDIR']=='/previous-sqlite' and 'TMPDIR' not in os.environ

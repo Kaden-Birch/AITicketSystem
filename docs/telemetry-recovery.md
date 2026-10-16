@@ -22,7 +22,11 @@ The Python runtime is checked at build and startup. It includes a recovery shell
    ```
 
 The recovery tool requires enough free space, refuses live/protected source paths
-and existing candidates, and creates its files with private permissions. SQLite's
+and existing candidates, and creates its files with private permissions. Recovery and index-building temporary
+files use a private directory alongside the candidate on the data volume, rather
+than the application container’s 32 MB `/tmp`. The directory is removed on normal
+completion or error; diagnostic and salvage files remain. Choose a new candidate
+filename after a failed attempt. SQLite's
 `.recover --ignore-freelist` writes a separate salvage file. Original configuration,
 hosts, credentials, tickets, workflows and other non-telemetry tables are copied
 from normal reads of the working source, **not** from salvaged SQL. Their rowids,
